@@ -1,0 +1,42 @@
+// Logging through the context. log() formats a message and hands it to
+// context.logger, which prints "warning: message" to stderr unless the
+// code calling it chose another, so a library reports problems the way
+// its caller wants instead of printing them itself.
+//
+//   log(.Warning, "`%` isn't a number", value);
+//
+//   let lines: [..]string;
+//   context.logger = capture_logger(&lines);   this block's logs go to lines
+//   context.logger = silent_logger();          ... or nowhere
+//
+// Setting context.logger at a block's top level gives the block its own
+// context, as with context.allocator. A logger is a procedure and a data
+// pointer (Logger, in the prelude); the message it gets is only valid
+// during the call.
+
+import "std/array";
+import "std/fmt";
+import "std/str";
+
+pub fn log(level: LogLevel, fmt: string, args: ..Any) #format {
+    let b = make_builder();
+    defer builder_free(&b);
+    format_into(&b, fmt, args);
+    context.logger.procedure(context.logger.data, level, builder_string(&b));
+}
+
+// keeps a copy of each message, made with context.allocator, in `lines`
+pub fn capture_logger(lines: *[..]string) -> Logger {
+    return Logger.{ .procedure = capture, .data = lines };
+}
+
+fn capture(data: *void, level: LogLevel, message: string) {
+    array_add(data as *[..]string, copy_string(message));
+}
+
+// drops every message
+pub fn silent_logger() -> Logger {
+    return Logger.{ .procedure = drop };
+}
+
+fn drop(data: *void, level: LogLevel, message: string) {}

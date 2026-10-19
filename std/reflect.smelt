@@ -1,0 +1,147 @@
+// Equality and hashing for values of any type, written for each type at
+// compile time from its type information.
+//
+//   values_equal(a, b)    field by field, element by element
+//   hash_value(v)         a u64 that's equal for equal values
+//
+// Both look inside structs, arrays, slices and tagged enums, so a struct
+// with a string field compares its text. Pointers compare and hash as
+// addresses: they aren't followed. Floats compare with ==, so NaN isn't
+// equal to itself, and 0.0 and -0.0 hash the same. Unions can't be
+// compared, since which field holds the value isn't known: using one is a
+// compile error.
+//
+// How it works: each is a generic function whose body is made by #insert
+// #run, from type_info(T), once for every type it's used with. For
+// struct Point { x: i32; y: i32; } values_equal's body is:
+//
+//   return a.x == b.x && a.y == b.y;
+
+import "std/fmt";
+import "std/os";
+import "std/str";
+
+pub fn values_equal(a: $T, b: T) -> bool {
+    #insert #run equal_code(type_info(T));
+}
+
+pub fn hash_value(v: $T) -> u64 {
+    #insert #run hash_code(type_info(T));
+}
+
+// FNV-1a over bytes, and a way to combine two hashes into one
+pub fn hash_memory(memory: *void, size: isize) -> u64 {
+    let h: u64 = 14695981039346656037;
+    for (b in (memory as *u8)[0..size]) {
+        h ^= b;
+        h *= 1099511628211;
+    }
+    return h;
+}
+
+pub fn combine_hashes(h: u64, more: u64) -> u64 {
+    return h ^ (more + 0x9e3779b97f4a7c15 + (h << 6) + (h >> 2));
+}
+
+// ---- the code they're made of
+
+// compared with ==, hashed by their bytes
+fn is_simple(t: *TypeInfo) -> bool {
+    switch (t.kind) {
+    case .Bool, .Int, .Enum, .Rawptr, .Pointer, .Function: return true;
+    case .Float: return false; // 0.0 and -0.0: equal, different bytes
+    default: return false;
+    }
+}
+
+fn no_unions(t: *TypeInfo, what: string) {
+    if (t.kind == .Union)
+        panic(format("% can't work with the union `%`: which of its fields holds the value isn't known", what, t.name));
+}
+
+fn equal_code(t: *TypeInfo) -> string {
+    no_unions(t, "values_equal");
+    let b = make_builder();
+    switch (t.kind) {
+    case .Void, .Bool, .Int, .Float, .Rawptr, .Pointer, .Function, .Enum,
+         .String: // a string's == compares its text
+        builder_append(&b, "return a == b;");
+    case .Union:
+    case .Struct:
+        builder_append(&b, "return true");
+        for (f in t.fields) {
+            no_unions(f.info, "values_equal");
+            if (is_simple(f.info) || f.info.kind == .Float || f.info.kind == .String)
+                builder_print(&b, " && a.% == b.%", f.name, f.name);
+            else
+                builder_print(&b, " && values_equal(a.%, b.%)", f.name, f.name);
+        }
+        builder_append(&b, ";");
+    case .Array, .Slice, .Growable:
+        if (t.kind == .Slice && t.elem == type_info(u8)) {
+            builder_append(&b, "return (a as string) == (b as string);");
+            return builder_string(&b);
+        }
+        if (t.kind != .Array)
+            builder_append(&b, "if (a.len != b.len) return false;\n");
+        builder_append(&b, "for (i in 0..a.len) if (!values_equal(a[i], b[i])) return false;\n");
+        builder_append(&b, "return true;");
+    case .TaggedEnum:
+        // the same variant, holding equal values
+        builder_append(&b, "if (a.tag != b.tag) return false;\nswitch (a) {\n");
+        for (v in t.variants) {
+            if (v.payload == null) {
+                builder_print(&b, "case .%: return true;\n", v.name);
+                continue;
+            }
+            no_unions(v.payload, "values_equal");
+            builder_print(&b, "case .%(x): switch (b) { case .%(y): return values_equal(x, y); default: return false; }\n",
+                          v.name, v.name);
+        }
+        builder_append(&b, "}");
+    }
+    return builder_string(&b);
+}
+
+fn hash_code(t: *TypeInfo) -> string {
+    no_unions(t, "hash_value");
+    let b = make_builder();
+    switch (t.kind) {
+    case .Void:
+        builder_append(&b, "return 0;");
+    case .Bool, .Int, .Enum, .Rawptr, .Pointer, .Function:
+        builder_append(&b, "return hash_memory(&v, sizeof(T));");
+    case .Float:
+        builder_append(&b, "if (v == 0) return 0;\nreturn hash_memory(&v, sizeof(T));");
+    case .String:
+        builder_append(&b, "return hash_memory(v.ptr, v.len);");
+    case .Union:
+    case .Struct:
+        builder_append(&b, "let h: u64 = 0;\n");
+        for (f in t.fields) {
+            no_unions(f.info, "hash_value");
+            builder_print(&b, "h = combine_hashes(h, hash_value(v.%));\n", f.name);
+        }
+        builder_append(&b, "return h;");
+    case .Array, .Slice, .Growable:
+        if (t.kind == .Slice && t.elem == type_info(u8)) {
+            builder_append(&b, "return hash_memory(v.ptr, v.len);");
+            return builder_string(&b);
+        }
+        builder_append(&b, "let h = v.len as u64;\n");
+        builder_append(&b, "for (item in v) h = combine_hashes(h, hash_value(item));\n");
+        builder_append(&b, "return h;");
+    case .TaggedEnum:
+        builder_append(&b, "let tag = hash_value(v.tag);\nswitch (v) {\n");
+        for (variant in t.variants) {
+            if (variant.payload == null) {
+                builder_print(&b, "case .%: return tag;\n", variant.name);
+                continue;
+            }
+            no_unions(variant.payload, "hash_value");
+            builder_print(&b, "case .%(x): return combine_hashes(tag, hash_value(x));\n", variant.name);
+        }
+        builder_append(&b, "}");
+    }
+    return builder_string(&b);
+}

@@ -1,5 +1,5 @@
 // smelt: the Smelt compiler, written in Smelt. See print_usage() for what
-// it does; ../the-compiler/docs/reference.md describes the language.
+// it does; docs/reference.md describes the language.
 
 import "std/array";
 import "std/build";

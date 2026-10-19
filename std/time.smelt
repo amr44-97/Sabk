@@ -1,0 +1,39 @@
+// Clocks, and waiting, on POSIX systems (Linux, macOS).
+//
+//   let start = now_ns();             a monotonic clock in nanoseconds,
+//   work();                           for measuring: it never goes back
+//   let ms = (now_ns() - start) as f64 / 1e6;
+//   unix_time_ns()                    the wall clock: nanoseconds since
+//                                     1970-01-01 UTC
+//   sleep_ms(250)                     waits at least that long
+
+// C's struct timespec, on 64-bit systems
+struct Timespec {
+    seconds: i64;
+    nanoseconds: i64;
+}
+
+extern fn clock_gettime(clock: i32, time: *Timespec) -> i32;
+extern fn nanosleep(wanted: *Timespec, left: *Timespec) -> i32;
+
+pub fn now_ns() -> i64 {
+    #if (OS == .MacOS)
+        return read_clock(6); // CLOCK_MONOTONIC
+    else
+        return read_clock(1);
+}
+
+pub fn unix_time_ns() -> i64 { return read_clock(0); } // CLOCK_REALTIME
+
+pub fn sleep_ms(ms: i64) {
+    let wanted = Timespec.{ .seconds = ms / 1000, .nanoseconds = ms % 1000 * 1000000 };
+    let left: Timespec;
+    while (nanosleep(&wanted, &left) != 0) // a signal woke it early
+        wanted = left;
+}
+
+fn read_clock(clock: i32) -> i64 {
+    let t: Timespec;
+    clock_gettime(clock, &t);
+    return t.seconds * 1000000000 + t.nanoseconds;
+}

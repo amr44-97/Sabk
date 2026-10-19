@@ -1,0 +1,257 @@
+// Hash maps from any key type to any value type, and hashing.
+//
+//   let ages: Map(string, i32);         ready to use: grows with
+//                                       context.allocator
+//   map_put(&ages, "ada", 36);          adds, or replaces the value
+//   let age = map_find(&ages, "ada");   *i32, or null when it's missing
+//   if (age != null) *age += 1;
+//   let age, found = map_get(&ages, "bob");   a copy, and whether it's there
+//   map_get(&ages, "bob") or_else 0     the value, or a fallback
+//   map_has(m, key), map_remove(m, key), map_clear(m), map_free(m)
+//   for (e in ages.entries) { e.key; e.value; }   in insertion order
+//
+//   const KEYWORDS = #run static_map(.[Pair.{ "if", Token.If }, ...]);
+//   static_map_get(KEYWORDS, word) or_else Token.Name
+//                                       a map made while compiling, baked
+//                                       into the program; read-only
+//
+// Keys are hashed and compared by value, with hash_key and keys_equal
+// (std/reflect's hash_value and values_equal): strings by their text,
+// structs field by field, so any key type works. To hash or compare keys
+// another way, pass your own: make_map(K, V, context.allocator, my_hash,
+// my_equal). make_map also picks the allocator; a zero Map, from
+// `let m: Map(K, V);`, takes context.allocator and those defaults when
+// its first key goes in.
+//
+// Removing a key moves the last entry into its place, so that one entry
+// changes position. As with a growable array, adding can move the entries,
+// so a pointer from map_find is only valid until the next map_put.
+
+import "std/array";
+import "std/mem";
+import "std/os";
+import "std/reflect";
+import "std/str";
+
+// ---- hashing
+
+// FNV-1a: simple, and good enough for hash tables
+pub fn hash_bytes(memory: *void, size: isize) -> u64 { return hash_memory(memory, size); }
+
+pub fn hash_string(s: string) -> u64 { return hash_bytes(s.ptr, s.len); }
+
+pub fn hash_key(key: $T) -> u64 { return hash_value(key); }
+
+pub fn keys_equal(a: $T, b: T) -> bool { return values_equal(a, b); }
+
+// ---- maps
+
+pub struct MapEntry($K, $V) {
+    key: K;
+    value: V;
+    hash: u64;
+}
+
+pub struct Map($K, $V) {
+    entries: [..]MapEntry(K, V); // in insertion order; entries.len is the count
+    slots: []u32;                // the index: entry index + 1, or 0 when empty
+    hash: fn(K) -> u64;
+    equal: fn(K, K) -> bool;
+    allocator: Allocator;
+}
+
+pub fn make_map($K: Type, $V: Type, a: Allocator = context.allocator,
+                hash: fn(K) -> u64 = hash_key,
+                equal: fn(K, K) -> bool = keys_equal) -> Map(K, V) {
+    let m = Map(K, V).{ .hash = hash, .equal = equal, .allocator = a };
+    m.entries.allocator = a;
+    return m;
+}
+
+pub fn map_put(m: *Map($K, $V), key: K, value: V) {
+    if (m.hash == null) { // a zero Map: std/reflect's hash and equality
+        m.hash = hash_key;
+        m.equal = keys_equal;
+    }
+    if (m.allocator.procedure == null) {
+        m.allocator = context.allocator;
+        m.entries.allocator = m.allocator;
+    }
+    // the index stays at most 3/4 full, so probes stay short
+    if ((m.entries.len + 1) * 4 > m.slots.len * 3)
+        rebuild_index(m, m.slots.len * 2);
+    let h = m.hash(key);
+    let found = false;
+    let slot = find_slot(m, key, h, &found);
+    if (found) {
+        m.entries[m.slots[slot] - 1].value = value;
+        return;
+    }
+    array_add(&m.entries, MapEntry(K, V).{ .key = key, .value = value, .hash = h });
+    m.slots[slot] = m.entries.len as u32;
+}
+
+pub fn map_find(m: *Map($K, $V), key: K) -> *V {
+    if (m.entries.len == 0)
+        return null;
+    let found = false;
+    let slot = find_slot(m, key, m.hash(key), &found);
+    if (!found)
+        return null;
+    return &m.entries[m.slots[slot] - 1].value;
+}
+
+pub fn map_has(m: *Map($K, $V), key: K) -> bool { return map_find(m, key) != null; }
+
+// a copy of the value, and true; or, when the key is missing, a V as
+// `let v: V;` starts and false
+pub fn map_get(m: *Map($K, $V), key: K) -> (V, bool) {
+    let value = map_find(m, key);
+    if (value == null) {
+        let missing: V;
+        return missing, false;
+    }
+    return value.*, true;
+}
+
+// false if the key wasn't there
+pub fn map_remove(m: *Map($K, $V), key: K) -> bool {
+    if (m.entries.len == 0)
+        return false;
+    let found = false;
+    let hole = find_slot(m, key, m.hash(key), &found);
+    if (!found)
+        return false;
+    let index = (m.slots[hole] - 1) as isize;
+
+    // backward-shift deletion: pull later entries of the same probe run back
+    // into the hole, so no lookup ever stops early at it
+    let mask = m.slots.len - 1;
+    let j = hole;
+    while (true) {
+        j = (j + 1) & mask;
+        let slot = m.slots[j];
+        if (slot == 0)
+            break;
+        let home = (m.entries[slot - 1].hash as isize) & mask;
+        if (((j - home) & mask) >= ((j - hole) & mask)) {
+            m.slots[hole] = slot;
+            hole = j;
+        }
+    }
+    m.slots[hole] = 0;
+
+    // the last entry fills the removed one's place
+    let last = m.entries.len - 1;
+    if (index != last) {
+        m.entries[index] = m.entries[last];
+        let k = (m.entries[index].hash as isize) & mask;
+        while (m.slots[k] != (last + 1) as u32)
+            k = (k + 1) & mask;
+        m.slots[k] = (index + 1) as u32;
+    }
+    m.entries.len = last;
+    return true;
+}
+
+// removes every entry, keeping the memory for reuse
+pub fn map_clear(m: *Map($K, $V)) {
+    m.entries.len = 0;
+    if (m.slots.len > 0)
+        zero_memory(m.slots.ptr, m.slots.len * sizeof(u32));
+}
+
+pub fn map_free(m: *Map($K, $V)) {
+    array_free(&m.entries);
+    free(m.slots.ptr, m.allocator);
+    m.slots = null;
+}
+
+// ---- maps made while compiling
+
+// A map that's made once and only read after that. It's two slices, with
+// no allocator or function pointers, so `#run` can put it in the program
+// as data, and a constant or a global can hold it:
+//
+//   const KEYWORDS = #run static_map(.[
+//       Pair.{ "if", Token.If },
+//       Pair.{ "else", Token.Else },
+//   ]);
+//   let kind = static_map_get(KEYWORDS, word) or_else Token.Name;
+//
+// Keys use hash_key and keys_equal. When a key appears twice, the later
+// value wins.
+pub struct StaticMap($K, $V) {
+    entries: []MapEntry(K, V); // in the order of the pairs, less repeats
+    slots: []u32;              // as in Map
+}
+
+pub struct Pair($K, $V) { key: K; value: V; }
+
+// the map of `pairs`, in context.allocator (the compiler's memory, under
+// #run)
+pub fn static_map(pairs: []Pair($K, $V)) -> StaticMap(K, V) {
+    let m: Map(K, V);
+    for (p in pairs)
+        map_put(&m, p.key, p.value);
+    return StaticMap(K, V).{ .entries = m.entries, .slots = m.slots };
+}
+
+// a copy of the value, and true; or a zero V and false
+pub fn static_map_get(m: StaticMap($K, $V), key: K) -> (V, bool) {
+    if (m.entries.len > 0) {
+        let found = false;
+        let slot = find_in(m.entries, m.slots, key, hash_key(key), keys_equal, &found);
+        if (found)
+            return m.entries[m.slots[slot] - 1].value, true;
+    }
+    let missing: V;
+    return missing, false;
+}
+
+pub fn static_map_has(m: StaticMap($K, $V), key: K) -> bool {
+    let _, found = static_map_get(m, key);
+    return found;
+}
+
+// ---- inside
+
+// the slot holding `key`, or the empty slot where it would go
+fn find_slot(m: *Map($K, $V), key: K, h: u64, found: *bool) -> isize {
+    return find_in(m.entries, m.slots, key, h, m.equal, found);
+}
+
+fn find_in(entries: []MapEntry($K, $V), slots: []u32, key: K, h: u64,
+           equal: fn(K, K) -> bool, found: *bool) -> isize {
+    let mask = slots.len - 1;
+    let i = (h as isize) & mask;
+    while (true) {
+        let slot = slots[i];
+        if (slot == 0) {
+            found.* = false;
+            return i;
+        }
+        let entry = &entries[slot - 1];
+        if (entry.hash == h && equal(entry.key, key)) {
+            found.* = true;
+            return i;
+        }
+        i = (i + 1) & mask;
+    }
+}
+
+// a new, empty index of `size` slots (a power of two), filled from the
+// entries
+fn rebuild_index(m: *Map($K, $V), size: isize) {
+    if (size < 8)
+        size = 8;
+    free(m.slots.ptr, m.allocator);
+    m.slots = new([]u32, size, m.allocator);
+    let mask = size - 1;
+    for (i in 0..m.entries.len) {
+        let j = (m.entries[i].hash as isize) & mask;
+        while (m.slots[j] != 0)
+            j = (j + 1) & mask;
+        m.slots[j] = (i + 1) as u32;
+    }
+}

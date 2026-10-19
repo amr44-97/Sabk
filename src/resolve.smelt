@@ -1,6 +1,6 @@
 // The resolver: loads the root file and everything it imports, then links
 // every name in the program to its declaration (Node.decl). See "Name
-// resolution" in ../the-compiler/docs/reference.md for the rules.
+// resolution" in docs/reference.md for the rules.
 //
 //   let r = make_resolver(std_dir);
 //   let ok = resolve_program(&r, "main.smelt");

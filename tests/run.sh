@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Golden-file tests. Each tests/<suite>/<name>.smelt is run through
-# build/smelt and its output is compared with <name>.expected:
+# ./smelt and its output is compared with <name>.expected:
 #
 #   lexer/   smelt --tokens file   stdout, must exit 0
 #   parser/  smelt --ast file      stdout, must exit 0
@@ -30,7 +30,7 @@ for arg in "$@"; do
   esac
 done
 
-make -s build/smelt || exit 1
+make -s smelt || exit 1
 
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
@@ -43,16 +43,16 @@ for src in tests/*/*.smelt; do
   [[ "$suite" == unit ]] && continue   # `make unit`: checked by their own scripts
   expected="${src%.smelt}.expected"
   case "$suite" in
-  lexer)  actual=$(build/smelt --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  parser) actual=$(build/smelt --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  resolve) actual=$(build/smelt --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  types)  actual=$(build/smelt --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  warnings) actual=$(build/smelt --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  errors) actual=$(build/smelt --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
+  lexer)  actual=$(./smelt --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  parser) actual=$(./smelt --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  resolve) actual=$(./smelt --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  types)  actual=$(./smelt --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  warnings) actual=$(./smelt --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  errors) actual=$(./smelt --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
   run)    # a `// args: a b c` line gives the program its arguments (quoted
           # as in a shell)
           eval "args=($(grep -m1 '^// args:' "$src" | sed 's|^// args: *||'))"
-          actual=$(build/smelt --run --std std "$src" -- "${args[@]}" 2>&1); code=$?
+          actual=$(./smelt --run --std std "$src" -- "${args[@]}" 2>&1); code=$?
           actual+=$'\n'"[exit $code]"; ok=1 ;;
   *) echo "unknown suite: $suite"; exit 1 ;;
   esac

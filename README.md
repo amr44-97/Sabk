@@ -1,26 +1,183 @@
-# Smelt, in Smelt
+# Smelt
 
-The Smelt compiler rewritten in Smelt, to replace the C++ one in
-`../the-compiler`, which builds it until it can build itself.
-
-It's a redesign as well as a port: the inside (tokens, the syntax tree,
-the dumps) may change, while what users see stays the same: programs'
-output, error messages, and the command line. `#run` keeps the bytecode VM.
-
-It's complete: it compiles Smelt programs as the C++ compiler does, with
-the same command line, and it compiles itself. `std` is a link to
-`../the-compiler/std` for now.
+Smelt is a small systems programming language in the spirit of C, with ideas
+from Jai, Odin and Zig. It compiles to C.
 
 ```
-make            build build/smelt with ../the-compiler/smelt (SMELT=...)
-make test       the golden tests in tests/
-make compare    --tokens, --ast, --resolve and --types on every .smelt
-                file in ../the-compiler, against the C++ compiler's
-make bootstrap  the compiler builds itself, twice: stage 2 and stage 3
-                must write the same C
+import "std/fmt";
+import "std/io";
+import "std/mem";
+import "std/str";
+
+struct List($T) {
+    items: []T;
+    count: isize;
+}
+
+fn push(list: *List($T), item: T) {
+    if (list.count == list.items.len) {
+        let bigger = new([]T, list.items.len * 2 + 4);
+        copy_memory(bigger.ptr, list.items.ptr, list.count * sizeof(T));
+        list.items = bigger;
+    }
+    list.items[list.count] = item;
+    list.count++;
+}
+
+// a macro: the block after the call runs with a different allocator
+fn with_arena(body: Code) #expand {
+    let arena = arena_init();
+    defer arena_destroy(&arena);
+    with_allocator(arena_allocator(&arena)) {
+        #insert body;
+    }
+}
+
+fn main() {
+    with_arena() {
+        let squares: List(i64);              // memory comes from the arena
+        for (i in 0..10) push(&squares, i * i);
+
+        let b = make_builder();
+        for (n in squares.items[..squares.count]) {
+            builder_print(&b, "% ", n);      // std/fmt: any values, formatted
+        }
+        println(builder_string(&b));
+    }                                         // the arena is freed here
+}
 ```
 
-## Layout
+```
+$ ./smelt --run example.smelt
+0 1 4 9 16 25 36 49 64 81
+```
+
+## What it has
+
+- **C's model:** structs, pointers, manual memory and no hidden control flow.
+  It also keeps C's syntax, except that declarations start with a keyword
+  and put the type after the name (`let x: i32`, `fn f(a: i32) -> i32`).
+- **File modules**, as in Zig. A plain `import "std/io";` brings in the
+  module's names, as Jai does, and `io.println` stays available.
+- **An implicit context**, as in Jai and Odin: every function receives the
+  current allocator, and a block can switch it for everything it calls.
+  There are arenas, a temp allocator, and an allocator interface you can
+  write your own allocators against.
+- **Macros**, as in Jai: `#expand` functions with `Code` parameters,
+  `#insert`, and backticks to reach into the caller. Expansion is hygienic.
+- **Generics**, as in Jai: `$T` type parameters on functions and structs.
+  Each set of types gets one instance, and `--stats` shows what that costs.
+  A compile-time `#if` lets generic code do something different for some
+  types (`#if (T == string)`).
+- **Safety where it's cheap:**
+  - returning (or storing away) memory that's gone when the function
+    returns, like `&local` or a slice literal, is a compile error
+  - array and slice bounds checks
+  - integer overflow that wraps instead of undefined behaviour, and
+    division by zero that panics with the location
+  - a defined, left-to-right evaluation order
+  - conditions must be `bool`
+  - only lossless implicit conversions
+- **Compile-time execution**, as in Jai: `const TABLE = #run make_table();`
+  runs ordinary code while compiling (in a bytecode interpreter that can
+  also call C) and puts the result in the program. `#insert #run gen();`
+  compiles the source text that code returns, and a top-level
+  `#run configure();` is a build script: it links libraries, adds C files
+  and sets the output, in Smelt.
+- **Tagged enums**, like Rust's: `enum Expr { Number(i64), Binary(op: Op,
+  lhs: *Expr, rhs: *Expr), Nil }`, taken apart with `switch` (`case
+  .Binary{op, lhs, rhs}:`) or `if (e is .Number(n))`. A `switch` on an enum
+  must handle every variant, and `Option($T)`/`Result($T, $E)` are ordinary
+  generic enums.
+- **Several results**, as in Odin and Go: `fn divide(a: i64, b: i64) ->
+  (i64, i64)`, `let q, r = divide(a, b);`, `a, b = b, a;`. Functions that
+  can fail return their value and whether it worked, a `bool` or an error
+  enum (`let text, err = read_file(path);`), and `or_return` and `or_else`
+  pass the failure on or replace it: `let n = parse_int(s) or_return;`,
+  `get_env("HOME") or_else "/"`. Every error enum converts to the built-in
+  `Error`, so `fn main() -> Error` can pass on any failure, and prints it
+  as `error: IoError.NotFound`.
+- **Patterns**: ranges in cases (`case 'a'..='z':`), patterns inside
+  patterns that follow pointers (`case .Negate(.Number(n)):`), guards
+  (`case .Number(n) if (n > 0):`), and an exhaustiveness check that shows
+  a value no case handles. `switch`, `if` and labeled blocks give values
+  (`let w = parse_int(s) or_else w: { log(...); break w = 1; };`), and
+  labeled switches run state machines (`continue state = .Next;`).
+- **Compile-time reflection:** `#run` code reads `type_info(T)` and writes
+  code that `#insert` compiles, even once per generic instance. std/reflect
+  uses it for `values_equal` and `hash_value` on any type, so maps take
+  struct keys as they are.
+- **Printing any value:** `println("% at %", name, point)` formats structs,
+  enums, slices and tagged enums from runtime type information
+  (`type_info(T)`, `Any`), which programs can use too. Options go in braces:
+  `%{>8.2}`, `%{08x}`, and format strings are checked against their values
+  while compiling.
+- **Strings as views**, as in Jai: `string` is text laid out like `[]u8`,
+  with `==` by content and `switch` on strings; memory comes from
+  allocators, and `tformat` makes throwaway text in the temp allocator.
+- **Literals typed by their context:** `let p: Point = .{ .x = 1 };`,
+  `draw(.Red)`, `case .Spades:`.
+- **Growable arrays built in**, as in Jai: `[..]T` indexes, slices and
+  loops like a slice and passes as one; std/array grows it
+  (`array_add(&xs, x)`), and nothing allocates without a call.
+- **`defer`**, slicing (`s[a..b]`), array and slice literals (`.[1, 2]`), untyped
+  constants, and C interop through
+  `extern fn`.
+
+The full language reference is [docs/reference.md](docs/reference.md).
+It starts with a section for C programmers, and covers
+[strings, bytes and builders](docs/reference.md#strings-bytes-and-builders),
+[handling errors](docs/reference.md#handling-errors) and
+[memory, with the traps the compiler doesn't catch](docs/reference.md#memory-and-ownership).
+
+## Building
+
+The compiler is written in Smelt and builds itself. The first build starts
+from `bootstrap/smelt.c`, the C it writes for itself (for Linux x86-64),
+so all it needs is a C compiler with GNU C's extensions (`cc` by default,
+or set `$CC`) and libffi. It's developed on Linux.
+
+```
+make            builds ./smelt: build/stage0 from the seed, which builds it
+make test       runs the test suite
+make bootstrap  ./smelt builds itself twice; both must write the same C
+make seed       refreshes bootstrap/smelt.c (after changing the compiler)
+make clean      removes build/ and ./smelt
+```
+
+## Using it
+
+```
+./smelt main.smelt            build an executable named `main`
+./smelt main.smelt -o app     ... named `app`
+./smelt --run main.smelt      build and run it
+./smelt --run main.smelt -- a b   ... with arguments
+./smelt --release main.smelt  build optimized
+./smelt --emit-c main.smelt   print the generated C
+./smelt --check main.smelt    only check for errors
+./smelt --stats ...           also print phase times and generic instances
+```
+
+The standard library lives in [`std/`](std): `io`, `fmt` (formatting any
+value), `mem`, `str`, `os`, `array` (growing `[..]T`), `map` (a generic
+hash map), `logging`, `reflect` (equality and hashing for any type),
+`checked` (arithmetic that reports overflow), `build` (for build scripts),
+`sorting`, `path`, `fs`, `process` and `time`. Each file starts with a
+summary of what it offers.
+
+## Project layout
+
+```
+src/                  the compiler, in Smelt (the table below)
+std/                  the standard library, in Smelt
+bootstrap/smelt.c     the compiler's own C: the seed of its first build
+tests/                golden-file tests: lexer, parser, resolve, types,
+                      errors, warnings, and run (programs that are compiled
+                      and run); tests/run.sh runs them
+docs/reference.md     the language reference
+Smelt-*.md            design notes: decisions, the review, the memory
+                      traps, and the plan for the language's next steps
+```
 
 | File | What's in it |
 |---|---|
@@ -48,7 +205,14 @@ make bootstrap  the compiler builds itself, twice: stage 2 and stage 3
 | `src/codegen.smelt` | the checked program as C |
 | `src/runtime_start.c`, `src/runtime_new.c` | the runtime's C, pieces of every program's C (baked in by `#run`) |
 
-## Differences from the C++ compiler
+## History
+
+The first compiler was written in C++ (`../the-compiler`, archived now).
+This one is a port of it, and a redesign inside: what users see (programs'
+output, error messages, the command line) stayed the same, and
+`tests/compare.sh` still diffs the dumps and messages against the C++
+compiler. Where the two differ inside:
+
 
 - Tokens are views of the file's text with a line and column, and hold no
   values: `integer_value` and `float_value` read them when they're needed.
@@ -71,12 +235,21 @@ make bootstrap  the compiler builds itself, twice: stage 2 and stage 3
 - The VM's failures aren't exceptions: the first one is kept in the `Vm`,
   and every step returns false up to `vm_evaluate`, which reports it.
   Lowering stops emitting once it has failed.
-- `make compare` matches the C++ compiler on every file, in all four
-  modes, and tests/ holds every C++ test suite (run, errors, warnings
-  too), which pass.
 - `--emit-c` writes the same C as the C++ compiler, but for float
   constants: the C++ one printed them from `long double` with 21 digits,
   this one prints the 17 that read back as the same `f64`.
 - Float constants are `f64`, not `long double`: `1e400` reads as `inf`
   (the C++ lexer kept `1e+400`). A literal out of `f64`'s range should be
   an error, once there's a parser to report it.
+
+## Status
+
+Smelt is young and experimental. It works end to end, and the test suite
+compiles and runs real programs, but the language and standard library will
+still change (Smelt-language-plan.md says how). Debuggers work in Smelt
+terms: the C maps back to Smelt files and lines, so gdb breakpoints,
+backtraces and stepping show Smelt source.
+
+## License
+
+[MIT](LICENSE)

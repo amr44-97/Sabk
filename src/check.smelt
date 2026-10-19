@@ -1,7 +1,7 @@
 // The type checker: gives every expression and declaration a type
 // (Node.ty), computes compile-time constants (Node.cval) and struct
 // layouts, and reports type errors. It runs after the resolver; see "Type
-// checking" in ../the-compiler/docs/reference.md for the rules.
+// checking" in docs/reference.md for the rules.
 //
 //   let c = make_checker(&r);
 //   let ok = check_program(&c);

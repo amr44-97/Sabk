@@ -1,6 +1,6 @@
 // Memory that escapes a function (errors), and the memory traps a
 // function's own code shows (warnings); see "Memory traps" in
-// ../the-compiler/docs/reference.md and Smelt-memory-traps.md there.
+// docs/reference.md and Smelt-memory-traps.md.
 
 import "std/array";
 import "std/fmt";

@@ -1,5 +1,5 @@
 // The parser: tokens to a syntax tree, by recursive descent, for the
-// grammar in ../the-compiler/docs/reference.md.
+// grammar in docs/reference.md.
 //
 //   let root, errors = parse_file(&src, tokens);
 //

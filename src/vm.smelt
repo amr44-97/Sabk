@@ -3,7 +3,7 @@
 // native memory laid out exactly like the generated C, so pointers, slices
 // and allocators behave the same at compile time as at run time; C
 // functions are called through libffi (vm_ffi.c). See "Compile-time
-// execution" in ../the-compiler/docs/reference.md.
+// execution" in docs/reference.md.
 //
 // A failure (a runtime error, or code that can't run at compile time) is
 // kept in the Vm (`error`), and every step returns false up to evaluate(),

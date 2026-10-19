@@ -1,0 +1,56 @@
+// Build scripts: top-level `#run` code that sets how the program is built.
+//
+//   import "std/build";
+//   #run configure();
+//
+//   fn configure() {
+//       set_output("bin/game");         the executable's path
+//       link_library("m");              -lm
+//       add_c_file("vendor/stb.c");     compiled and linked along
+//       add_c_flags("-march=native");   passed to the C compiler as written
+//       set_bounds_checks(.Off);        no index or slice checks at all
+//       if (!is_release())
+//           println("a debug build");
+//   }
+//
+// A top-level `#run` runs once the whole program has checked without
+// errors, in order: the modules as they're loaded, and in each, top to
+// bottom. A library module can have one too, to link what it needs.
+//
+// Relative paths are relative to the directory of the program's main file.
+// Options on the command line (-o, --release) win over a script's.
+//
+// These functions are the compiler's: they only exist while compiling, so
+// using one from the program itself is a compile error.
+
+pub fn set_output(path: string) { smelt_build_set_output(path.ptr, path.len); }
+
+pub fn set_release(on: bool) { smelt_build_set_release(on); }
+
+pub fn is_release() -> bool { return smelt_build_is_release(); }
+
+// Index and slice checks in the program (#run code keeps its own): as
+// written, where a `#no_bounds_check` function has none; none anywhere;
+// or everywhere, `#no_bounds_check` too, to find a bug it hides. Division
+// by zero is checked either way.
+pub enum BoundsChecks { On, Off, Always }
+
+pub fn set_bounds_checks(mode: BoundsChecks) {
+    smelt_build_set_bounds_checks(mode as i32);
+}
+
+pub fn add_c_flags(flags: string) { smelt_build_add_c_flags(flags.ptr, flags.len); }
+
+pub fn link_library(name: string) { smelt_build_link_library(name.ptr, name.len); }
+
+pub fn add_c_file(path: string) { smelt_build_add_c_file(path.ptr, path.len); }
+
+// ---- inside: the compiler provides these
+
+extern fn smelt_build_set_output(path: *u8, len: isize);
+extern fn smelt_build_set_release(on: bool);
+extern fn smelt_build_is_release() -> bool;
+extern fn smelt_build_set_bounds_checks(mode: i32);
+extern fn smelt_build_add_c_flags(flags: *u8, len: isize);
+extern fn smelt_build_link_library(name: *u8, len: isize);
+extern fn smelt_build_add_c_file(path: *u8, len: isize);
