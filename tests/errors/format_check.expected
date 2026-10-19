@@ -13,25 +13,25 @@
 [error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:18:13]
     18 |     println(ROW, 1);                      // a constant format too
        |             ^
-[error]: `%{zz}` isn't a format: `z` isn't a kind; the kinds are x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:19:18]
+[error]: `%{zz}` isn't a format: `z` isn't a kind; the kinds are s q (text), w (an error or enum), x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:19:18]
     19 |     println("x = %{zz}", 1);              // not a spec
        |                  ^
 [error]: `%{.}` isn't a format: a `.` needs the precision's digits after it at [tests/errors/format_check.smelt:20:18]
     20 |     println("x = %{.}", 1);
        |                  ^
-[error]: `%{5.2q}` isn't a format: `q` isn't a kind; the kinds are x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:21:18]
-    21 |     println("x = %{5.2q}", 1);
+[error]: `%{5.2k}` isn't a format: `k` isn't a kind; the kinds are s q (text), w (an error or enum), x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:21:18]
+    21 |     println("x = %{5.2k}", 1);
        |                  ^
-[error]: `%{x}` formats an integer, but its value is `string` at [tests/errors/format_check.smelt:22:14]
+[error]: `%{x}` prints an integer, but `"text"` is a `string`; for text write `%s` at [tests/errors/format_check.smelt:22:14]
     22 |     println("%{x} %{e}", "text", true);   // kinds that don't fit
        |              ^
-[error]: `%{e}` formats a number, but its value is `bool` at [tests/errors/format_check.smelt:22:19]
+[error]: `%{e}` prints a number, but `true` is a `bool` at [tests/errors/format_check.smelt:22:19]
     22 |     println("%{x} %{e}", "text", true);   // kinds that don't fit
        |                   ^
 [error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:23:20]
     23 |     log("info", "% %", 1);                // through a wrapper
        |                    ^
-[error]: `%{x}` formats an integer, but its value is `f64` at [tests/errors/format_check.smelt:24:21]
+[error]: `%{x}` prints an integer, but `2.5` is an `f64` at [tests/errors/format_check.smelt:24:21]
     24 |     let s = format("%{x}", 2.5);
        |                     ^
 [error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:26:23]

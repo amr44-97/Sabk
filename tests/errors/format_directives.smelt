@@ -1,0 +1,21 @@
+// C's printf habits, letters meant as text, and directives that don't
+// suit their values: each is shown where it is, with the call fixed
+import "std/io";
+import "std/fmt";
+
+fn main() {
+    let count: i64 = 3;
+    let width = 2.5;
+    let name = "ada";
+    println("%d items", count);
+    println("%5.2f wide", width);
+    println("%-10s|", name);
+    println("%08x", count);
+    println("%lld and %zu", count, count);
+    println("%E", width);
+    println("%px from the left", count);
+    println("the %s of it", count);
+    println("%x", width);
+    println("%w", count);
+    println("%e", name);
+}

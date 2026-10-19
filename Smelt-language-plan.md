@@ -11,7 +11,7 @@ switch to them at the bootstrap.
 
 ## Checklist
 
-- [ ] **Formatting:** letter directives (`%s %q %w %x %X %b %o %e %f %c`), `%{}` before a letter, errors that teach (section 1)
+- [x] **Formatting:** letter directives (`%s %q %w %x %X %b %o %e %f %c`), `%{}` before a letter, errors that teach (section 1)
 - [ ] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2)
 - [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3)
 - [ ] **Metaprogramming, layer 2:** `#code` values and syntax trees in std/compiler (section 3)

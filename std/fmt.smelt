@@ -15,7 +15,17 @@
 // argument left shows as %(missing); arguments left over are added at the
 // end as %(extra: ...).
 //
-// Options go in braces, %{spec}:
+// A letter after `%` says how to show the value:
+//
+//   %s    text: a string, []u8, [N]u8, [..]u8, or a C string (*u8, up to
+//         its 0); bytes otherwise print as numbers
+//   %q    text in quotes, escaped: "a\n"
+//   %w    an error or enum value with its enum: IoError.NotFound
+//   %x %X an integer in hex, HEX;  %b %o  in binary, octal
+//   %e %f a float in scientific, fixed notation
+//   %c    a u8 as the character it is
+//
+// Options go in braces, %{spec}, with one of those letters at the end:
 //
 //   [align][+][0][width][.precision][kind]
 //     align       <  >  ^      left, right, centered in the width (numbers
@@ -25,17 +35,20 @@
 //     width       at least this many characters
 //     .precision  floats: digits after the point; strings: at most this
 //                 many characters
-//     kind        x X b o      an integer in hex, HEX, binary or octal
-//                 e f          a float in scientific or fixed notation
-//                 c            a u8 as the character it is
+//     kind        a letter from the list above
 //
 //   format("%{8}|%{<8}|%{^8}", 42, "ab", "mid")  "      42|ab      |  mid   "
-//   format("%{08.3} %{x} %{+} %{c}", 3.14159, 255, 7, 'A')
+//   format("%{08.3} %x %{+} %c", 3.14159, 255, 7, 'A')
 //                                                "0003.142 ff +7 A"
+//
+// `%{}` is a value with no options, for one followed by a letter:
+// format("%{}px", 12) is "12px".
 //
 // Precision and kind reach the numbers inside other values too:
 // format("%{.1}", Point.{ .x = 1, .y = 2.25 }) is "{x = 1.0, y = 2.2}".
-// A spec that doesn't parse shows as %(bad format {spec}).
+// A spec that doesn't parse shows as %(bad format {spec}), and a letter
+// that isn't one of the above as %(bad format p). The compiler checks the
+// formats it can see, so those only happen with formats made at run time.
 //
 // How values look:
 //   integers; bools; floats in the shortest form that reads back the same
@@ -100,6 +113,27 @@ pub fn format_into(b: *Builder, fmt: string, args: []Any) {
             start = i;
             continue;
         }
+        // %x: a letter that says how to show it
+        if (i + 1 < fmt.len && is_letter(fmt[i + 1])) {
+            let spec: FormatSpec;
+            let letter = fmt[i + 1];
+            if (is_kind(letter)) {
+                spec.kind = letter;
+                if (next < args.len)
+                    append_formatted(b, args[next], spec);
+                else
+                    builder_append(b, "%(missing)");
+            } else {
+                builder_append(b, "%(bad format ");
+                builder_append_char(b, letter);
+                builder_append_char(b, ')');
+            }
+            if (next < args.len)
+                next++;
+            i += 2;
+            start = i;
+            continue;
+        }
         // %{spec}: its options; a `%{` that's never closed is just text
         let spec: FormatSpec;
         let end = i + 1;
@@ -159,7 +193,7 @@ pub struct FormatSpec {
     zero: bool;
     width: isize;
     precision: i32 = -1;    // -1: none
-    kind: u8;               // 'x', 'X', 'b', 'o', 'e', 'f', 'c', or 0
+    kind: u8;               // 's', 'q', 'w', 'x', 'X', 'b', 'o', 'e', 'f', 'c', or 0
 }
 
 // "<+08.2x" and the like; false if it isn't one. The compiler checks
@@ -194,14 +228,25 @@ pub fn parse_format_spec(text: string, spec: *FormatSpec) -> bool {
         }
     }
     if (i < text.len) {
-        let k = text[i];
-        if (k != 'x' && k != 'X' && k != 'b' && k != 'o' && k != 'e' && k != 'f' && k != 'c')
+        if (!is_kind(text[i]))
             return false;
-        spec.kind = k;
+        spec.kind = text[i];
         i++;
     }
     return i == text.len;
 }
+
+// the letters that say how to show a value: %s, %{8x}
+pub fn is_format_kind(c: u8) -> bool { return is_kind(c); }
+
+fn is_kind(c: u8) -> bool {
+    switch (c) {
+    case 's', 'q', 'w', 'x', 'X', 'b', 'o', 'e', 'f', 'c': return true;
+    default: return false;
+    }
+}
+
+fn is_letter(c: u8) -> bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 // one value, padded to the spec's width
 pub fn append_formatted(b: *Builder, value: Any, spec: FormatSpec) {
@@ -261,6 +306,21 @@ fn put(b: *Builder, p: *void, t: *TypeInfo, nested: bool, spec: *FormatSpec) {
         return;
     }
     let bytes = p as *u8;
+    if (spec.kind == 's' || spec.kind == 'q') { // text, in quotes for %q
+        let text, is_text = as_text(p, t);
+        if (is_text) {
+            put_string(b, text, nested || spec.kind == 'q', spec);
+            return;
+        }
+    }
+    if (spec.kind == 'w' && (t.kind == .Enum || t.kind == .TaggedEnum) && t != type_info(Error)) {
+        builder_append(b, t.name); // with its enum: Color.Red
+        builder_append_char(b, '.');
+        let plain = spec.*;
+        plain.kind = 0;
+        put(b, p, t, nested, &plain);
+        return;
+    }
     switch (t.kind) {
     case .Void:
         builder_append(b, "void");
@@ -329,6 +389,34 @@ fn put(b: *Builder, p: *void, t: *TypeInfo, nested: bool, spec: *FormatSpec) {
         builder_append(b, "(tag ");
         append_decimal(b, tag);
         builder_append_char(b, ')');
+    }
+}
+
+// the text a value holds, for %s and %q: a string, bytes ([]u8, [N]u8,
+// [..]u8), or a C string (*u8, up to its 0)
+fn as_text(p: *void, t: *TypeInfo) -> (string, bool) {
+    let byte = type_info(u8);
+    switch (t.kind) {
+    case .String:
+        return (p as *string).*, true;
+    case .Slice, .Growable:
+        if (t.elem != byte)
+            return "", false;
+        let s = (p as *RawSlice).*;
+        return s.ptr[0..s.len] as string, true;
+    case .Array:
+        if (t.elem != byte)
+            return "", false;
+        return (p as *u8)[0..t.count] as string, true;
+    case .Pointer:
+        if (t.elem != byte)
+            return "", false;
+        let c = (p as **u8).*;
+        if (c == null)
+            return "null", true;
+        return from_cstring(c), true;
+    default:
+        return "", false;
     }
 }
 

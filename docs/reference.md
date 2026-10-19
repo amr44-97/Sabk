@@ -2491,13 +2491,40 @@ values the text is printed as it is, so `print(s)` is safe for any `s`. A
 `%` without a value left shows as `%(missing)`, and values left over are
 shown at the end as `%(extra: ...)`.
 
-**Options** go in braces after the `%`:
+**Directives.** A letter after the `%` says how to show the value:
+
+| Directive | Prints |
+|---|---|
+| `%` | any value, the way it prints by default |
+| `%s` | text: `string`, `[]u8`, `[N]u8`, `[..]u8`, or a C string (`*u8`, up to its 0) |
+| `%q` | text in quotes, escaped: `"a\n"` (handy for making code) |
+| `%w` | an error or enum value with its enum: `IoError.NotFound`, `Color.Red` |
+| `%x %X` | an integer in hex: `ff`, `FF` |
+| `%b %o` | an integer in binary, octal |
+| `%e %f` | a float in scientific, fixed notation |
+| `%c` | a `u8` as its character |
+| `%{...}` | options, below: `%{8}` width, `%{<8}` left, `%{.2}` precision, `%{08x}` zeros and hex |
+| `%{}` | a value with a letter right after it: `%{}px` |
+| `%%` | a percent sign |
+
+```
+let bytes = "hi" as []u8;
+println("% %s %q", bytes, bytes, "a\n");   // [104, 105] hi "a\n"
+println("%x %c %w %{}px", 255, 'A', Color.Red, 12);  // ff A Color.Red 12px
+```
+
+A `[]u8` still prints as numbers by default; `%s` is the explicit "as
+text" where it's printed, as `as string` is elsewhere.
+
+**Options** go in braces after the `%`, with a directive's letter as the
+kind:
 
 ```
 %{[align][+][0][width][.precision][kind]}
 
 println("%{8}|%{<8}|%{^8}", 42, "ab", "mid");   //       42|ab      |  mid
-println("%{08.3} %{x} %{+} %{c}", 3.14159, 255, 7, 'A');  // 0003.142 ff +7 A
+println("%{08.3} %x %{+} %c %{<6s}|", 3.14159, 255, 7, 'A', "ab");
+                                       // 0003.142 ff +7 A ab    |
 ```
 
 - **align:** `<` left, `>` right, `^` centered in the width. Numbers go
@@ -2507,14 +2534,16 @@ println("%{08.3} %{x} %{+} %{c}", 3.14159, 255, 7, 'A');  // 0003.142 ff +7 A
 - **width:** at least this many characters (UTF-8 characters, not bytes).
 - **.precision:** for floats, digits after the point (`%{.2}` is `3.14`);
   for strings, at most this many characters.
-- **kind:** `x` `X` `b` `o` print an integer in hex, upper-case hex, binary
-  or octal (a negative one as `-ff`); `e` and `f` a float in scientific or
-  fixed notation (6 digits unless a precision says otherwise; integers
-  convert); `c` a `u8` as the character it is.
+- **kind:** a directive's letter. `x` `X` `b` `o` print an integer in
+  hex, upper-case hex, binary or octal (a negative one as `-ff`); `e` and
+  `f` a float in scientific or fixed notation (6 digits unless a precision
+  says otherwise; integers convert); `c` a `u8` as the character it is;
+  `s` and `q` text, `w` an error or enum value with its enum.
 
 Width applies to the whole value; precision and kind also reach the numbers
 inside it, so `%{.1}` on a `Point` prints `{x = 1.0, y = 2.2}`. A spec that
-doesn't parse prints as `%(bad format {spec})`, and still uses up its value.
+doesn't parse prints as `%(bad format {spec})`, and a letter that isn't a
+directive as `%(bad format p)`; either still uses up its value.
 std/fmt's `FormatSpec`, `parse_format_spec` and `append_formatted` do the
 same from code.
 
@@ -2535,14 +2564,23 @@ same from code.
 
 **Checked while compiling.** When the format is a literal or a constant
 and the values are written out at the call, the compiler checks them
-together: as many values as `%`s, every `%{spec}` valid, and each kind
-suiting its value (`%{x}` on a string is an error). Errors point at the
-`%` in the string:
+together: as many values as `%`s, every directive a directive, every
+`%{spec}` valid, and each kind suiting its value (`%x` on a string is an
+error). Errors point at the `%` in the string, and a directive that isn't
+one comes with the call written right:
 
 ```
 println("% and %", 1);       // error: this `%` has no value
-println("%{x}", "text");     // error: `%{x}` formats an integer, but its value is `string`
+println("%x", "text");       // error: `%x` prints an integer, but `"text"` is a `string`; for text write `%s`
+println("%d items", count);  // error: `%d` isn't a directive: Smelt's `%` prints a number as it is
+                             //   note: write: println("% items", count)
+                             //   note: the directives: ...
+println("%5.2f", width);     // error: ... Smelt's options go in braces: `%{5.2f}`
+println("%px", left);        // error: `%p` isn't a directive; for a value followed by `px`, write `%{}px`
 ```
+
+C's spellings are translated: `%d`, `%u`, `%lld`, `%zu` are `%`; `%5.2f` is
+`%{5.2f}`, `%-10s` is `%{<10s}`, `%08x` is `%{08x}`, `%E` is `%e`.
 
 A call with no values isn't checked, since it prints its text as is
 (`println("100%")`), and neither are formats only known at run time or

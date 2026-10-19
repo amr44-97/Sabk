@@ -1985,7 +1985,7 @@ fn resolve_type_args(r: *Resolver, n: *Node, d: *Node) {
 
 // "1 type", "2 types"
 fn count_of(k: isize, what: string) -> string {
-    return if (k == 1) tformat("% %", k, what) else tformat("% %s", k, what);
+    return if (k == 1) tformat("% %", k, what) else tformat("% %{}s", k, what);
 }
 
 /* ----------------------------------------------------------------- macros */

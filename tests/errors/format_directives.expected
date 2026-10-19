@@ -1,0 +1,75 @@
+[error]: `%d` isn't a directive: Smelt's `%` prints a number as it is at [tests/errors/format_directives.smelt:10:14]
+    10 |     println("%d items", count);
+       |              ^
+[note]: write: println("% items", count) at [tests/errors/format_directives.smelt:10:14]
+    10 |     println("%d items", count);
+       |              ^
+[note]: the directives: `%` any value, `%s` text, `%q` quoted text, `%w` an error or enum value with its enum, `%x %X` hex, `%b %o` binary, octal, `%e %f` scientific, fixed, `%c` a character, `%{...}` options (`%{8}`, `%{<8}`, `%{.2}`, `%{08x}`), `%{}` a value before a letter, `%%` a percent sign at [tests/errors/format_directives.smelt:10:14]
+    10 |     println("%d items", count);
+       |              ^
+[error]: `%5.2f` isn't a directive: Smelt's options go in braces: `%{5.2f}` at [tests/errors/format_directives.smelt:11:14]
+    11 |     println("%5.2f wide", width);
+       |              ^
+[note]: write: println("%{5.2f} wide", width) at [tests/errors/format_directives.smelt:11:14]
+    11 |     println("%5.2f wide", width);
+       |              ^
+[note]: the directives: `%` any value, `%s` text, `%q` quoted text, `%w` an error or enum value with its enum, `%x %X` hex, `%b %o` binary, octal, `%e %f` scientific, fixed, `%c` a character, `%{...}` options (`%{8}`, `%{<8}`, `%{.2}`, `%{08x}`), `%{}` a value before a letter, `%%` a percent sign at [tests/errors/format_directives.smelt:11:14]
+    11 |     println("%5.2f wide", width);
+       |              ^
+[error]: `%-10s` isn't a directive: Smelt's options go in braces: `%{<10s}` at [tests/errors/format_directives.smelt:12:14]
+    12 |     println("%-10s|", name);
+       |              ^
+[note]: write: println("%{<10s}|", name) at [tests/errors/format_directives.smelt:12:14]
+    12 |     println("%-10s|", name);
+       |              ^
+[note]: the directives: `%` any value, `%s` text, `%q` quoted text, `%w` an error or enum value with its enum, `%x %X` hex, `%b %o` binary, octal, `%e %f` scientific, fixed, `%c` a character, `%{...}` options (`%{8}`, `%{<8}`, `%{.2}`, `%{08x}`), `%{}` a value before a letter, `%%` a percent sign at [tests/errors/format_directives.smelt:12:14]
+    12 |     println("%-10s|", name);
+       |              ^
+[error]: `%08x` isn't a directive: Smelt's options go in braces: `%{08x}` at [tests/errors/format_directives.smelt:13:14]
+    13 |     println("%08x", count);
+       |              ^
+[note]: write: println("%{08x}", count) at [tests/errors/format_directives.smelt:13:14]
+    13 |     println("%08x", count);
+       |              ^
+[note]: the directives: `%` any value, `%s` text, `%q` quoted text, `%w` an error or enum value with its enum, `%x %X` hex, `%b %o` binary, octal, `%e %f` scientific, fixed, `%c` a character, `%{...}` options (`%{8}`, `%{<8}`, `%{.2}`, `%{08x}`), `%{}` a value before a letter, `%%` a percent sign at [tests/errors/format_directives.smelt:13:14]
+    13 |     println("%08x", count);
+       |              ^
+[error]: `%lld` isn't a directive: Smelt's `%` prints a number as it is at [tests/errors/format_directives.smelt:14:14]
+    14 |     println("%lld and %zu", count, count);
+       |              ^
+[error]: `%zu` isn't a directive: Smelt's `%` prints a number as it is at [tests/errors/format_directives.smelt:14:23]
+    14 |     println("%lld and %zu", count, count);
+       |                       ^
+[note]: write: println("% and %", count, count) at [tests/errors/format_directives.smelt:14:23]
+    14 |     println("%lld and %zu", count, count);
+       |                       ^
+[note]: the directives: `%` any value, `%s` text, `%q` quoted text, `%w` an error or enum value with its enum, `%x %X` hex, `%b %o` binary, octal, `%e %f` scientific, fixed, `%c` a character, `%{...}` options (`%{8}`, `%{<8}`, `%{.2}`, `%{08x}`), `%{}` a value before a letter, `%%` a percent sign at [tests/errors/format_directives.smelt:14:23]
+    14 |     println("%lld and %zu", count, count);
+       |                       ^
+[error]: `%E` isn't a directive: Smelt's is `%e` at [tests/errors/format_directives.smelt:15:14]
+    15 |     println("%E", width);
+       |              ^
+[note]: write: println("%e", width) at [tests/errors/format_directives.smelt:15:14]
+    15 |     println("%E", width);
+       |              ^
+[note]: the directives: `%` any value, `%s` text, `%q` quoted text, `%w` an error or enum value with its enum, `%x %X` hex, `%b %o` binary, octal, `%e %f` scientific, fixed, `%c` a character, `%{...}` options (`%{8}`, `%{<8}`, `%{.2}`, `%{08x}`), `%{}` a value before a letter, `%%` a percent sign at [tests/errors/format_directives.smelt:15:14]
+    15 |     println("%E", width);
+       |              ^
+[error]: `%p` isn't a directive; for a value followed by `px`, write `%{}px` at [tests/errors/format_directives.smelt:16:14]
+    16 |     println("%px from the left", count);
+       |              ^
+[note]: write: println("%{}px from the left", count) at [tests/errors/format_directives.smelt:16:14]
+    16 |     println("%px from the left", count);
+       |              ^
+[error]: `%s` prints text, but `count` is an `i64`; for a number write `%`, or `%x` for hex at [tests/errors/format_directives.smelt:17:18]
+    17 |     println("the %s of it", count);
+       |                  ^
+[error]: `%x` prints an integer, but `width` is an `f64` at [tests/errors/format_directives.smelt:18:14]
+    18 |     println("%x", width);
+       |              ^
+[error]: `%w` prints an error or an enum value with its enum, but `count` is an `i64`; write `%` at [tests/errors/format_directives.smelt:19:14]
+    19 |     println("%w", count);
+       |              ^
+[error]: `%e` prints a number, but `name` is a `string` at [tests/errors/format_directives.smelt:20:14]
+    20 |     println("%e", name);
+       |              ^

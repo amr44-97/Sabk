@@ -36,7 +36,8 @@ bootstrap: smelt
 
 # the seed: the C this compiler writes for itself
 seed: smelt
-	./smelt --emit-c --std std src/main.smelt > bootstrap/smelt.c
+	./smelt --emit-c --std std src/main.smelt > build/seed.c
+	mv build/seed.c bootstrap/smelt.c
 
 clean:
 	rm -rf build smelt

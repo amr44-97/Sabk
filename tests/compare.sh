@@ -14,9 +14,12 @@ if [[ ! -x "$old" ]]; then
   echo "no C++ compiler at $old (set OLD=...)"
   exit 1
 fi
-# where this compiler means to differ (see README.md): a macro's labels
-# get its color, so they don't clash with its caller's
-known=" tests/resolve/macro_labels.smelt "
+# where this compiler means to differ: a macro's labels get its color, so
+# they don't clash with its caller's (README.md), and the files that use
+# what the language gained since the port (Smelt-language-plan.md)
+known=" tests/resolve/macro_labels.smelt
+  tests/errors/format_check.smelt tests/errors/format_directives.smelt
+  tests/errors/log_format.smelt tests/run/format_directives.smelt "
 
 modes=("$@")
 ((${#modes[@]})) || modes=(--tokens --ast --resolve --types)
@@ -24,7 +27,7 @@ same=0
 differ=0
 for mode in "${modes[@]}"; do
   for src in $(find tests std -name '*.smelt' | sort); do
-    [[ "$known" == *" $src "* ]] && continue
+    [[ " $(echo $known) " == *" $src "* ]] && continue
     extra=()
     [[ "$mode" == --resolve || "$mode" == --types ]] && extra=(--std std)
     want=$("$old" "$mode" "${extra[@]}" "$src" 2>&1); want_code=$?

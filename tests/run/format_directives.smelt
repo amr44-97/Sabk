@@ -1,0 +1,25 @@
+// the letter directives: %s %q %w %x %X %b %o %e %f %c, in braces too
+import "std/io";
+import "std/fmt";
+import "std/str";
+import "std/array";
+
+enum Color { Red, Green }
+enum E { Nil, Number(i64) }
+
+fn main() {
+    let bytes: []u8 = "bytes" as []u8;
+    let arr: [3]u8 = .['a', 'b', 'c'];
+    let grow: [..]u8;
+    append_string(&grow, "grown");
+    let c_text = to_cstring("c text");
+    println("%s|%s|%s|%s|%s", "text", bytes, arr, grow, c_text);
+    println("%q|%q", "a\n\"b\"", bytes);
+    println("%w %w %w", Color.Green, E.Number(3), E.Nil);
+    println("%x %X %b %o %c %e %f", 255, 255, 5, 8, 'A', 1234.5, 1.5);
+    println("%{>8s}|%{<6q}|%{08x}|%{}px", "hi", "q", 255, 12);
+    println("% (default bytes)", bytes);
+    println("100%% done, %{}th", 4);
+    // a value then text, not C's spellings: % to, % -o, % a
+    println("% to % -o % a value", 1, 2, 3);
+}

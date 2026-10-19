@@ -283,12 +283,12 @@ fn check_result_count(c: *Checker, v: *Node, ret: *Type, name: string) -> bool {
 fn nth(i: isize) -> string {
     let n = i + 1;
     if (i % 100 >= 10 && i % 100 <= 12)
-        return tformat("%th", n);
+        return tformat("%{}th", n);
     return switch (i % 10) {
-    case 0: tformat("%st", n);
-    case 1: tformat("%nd", n);
-    case 2: tformat("%rd", n);
-    default: tformat("%th", n);
+    case 0: tformat("%{}st", n);
+    case 1: tformat("%{}nd", n);
+    case 2: tformat("%{}rd", n);
+    default: tformat("%{}th", n);
     };
 }
 

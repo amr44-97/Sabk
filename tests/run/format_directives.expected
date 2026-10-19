@@ -1,0 +1,9 @@
+text|bytes|abc|grown|c text
+"a\n\"b\""|"bytes"
+Color.Green E.Number(3) E.Nil
+ff FF 101 10 A 1.234500e+03 1.500000
+      hi|"q"   |000000ff|12px
+[98, 121, 116, 101, 115] (default bytes)
+100% done, 4th
+1 to 2 -o 3 a value
+[exit 0]
