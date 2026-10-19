@@ -1,13 +1,19 @@
+error: can't read /no/such/file: no such file or directory
 to stderr
 print and printf stay in order
 -3 18446744073709551615 2.5 false
 line one
 line two
 18 bytes
+error: can't read /no/such/file: no such file or directory
 read a missing file: NotFound
+error: can't read /tmp: is a directory
 read a directory: IsDirectory
+error: can't read /dev/null/x: not a directory
 read through a file: NotDirectory
+error: can't write /no/such/dir/f: no such file or directory
 write in a missing directory: NotFound
+error: can't delete /tmp/the-compiler-std-io-test.txt: no such file or directory
 delete a missing file: NotFound
 message: no such file or directory
 while compiling: NotFound

@@ -870,6 +870,16 @@ go: `capture_logger(&lines)` keeps copies in a `[..]string`, and
 `.Info`, `.Warning` or `.Error`. The message is only valid during the
 call.
 
+**`context.log_level`** is the lowest level `log` passes on: `.Debug`
+(all of them) by default. Below it, a message isn't even formatted.
+
+```
+{
+    context.log_level = .Warning;   // this block: warnings and errors only
+    log(.Info, "% items", n);       // skipped
+}
+```
+
 **`context.panic_handler`** is what std/os's `panic` and `assert` call,
 with what failed (`"panic"` or `"assertion failed"`), the message and the
 location. By default it prints `file:line:col: panic: message` and
@@ -1886,12 +1896,38 @@ worked. That last value is
 | `parse_int`, `parse_uint`, `parse_float`, `parse_bool` (std/str) | `ParseError`: `.None`, `.Empty`, `.Invalid`, `.OutOfRange` |
 | `get_env` (std/os), `map_get`, `static_map_get` (std/map), `cut` (std/str) | `bool` |
 
+**std logs why it failed**, as Jai's modules do: a std function that
+fails calls `log(.Error, ...)` with the details, and returns the failure
+for its caller to act on. One failure, one message: passing it on with
+`or_return` doesn't log it again.
+
+```
+let text, err = read_file("app.cfg");
+// stderr: error: can't read app.cfg: no such file or directory
+```
+
+The functions that log: `read_file`, `write_file`, `append_file`,
+`delete_file` (std/io), `make_dir`, `remove_dir`, `make_temp_dir`,
+`current_dir` (std/fs), `path_absolute`, `path_real` (std/path),
+`run_command` and `run_shell` (std/process). Your own I/O code can do
+the same with `log_io_error(err, "read", path)`, which logs and gives
+`err` back. A caller that expects a failure quiets it for a block:
+
+```
+let config: Config;
+let err: ConfigError;
+{
+    context.logger = silent_logger();   // a missing file is normal here
+    config, err = load_config("app.cfg");
+}
+```
+
 **Checking by hand** is a comparison:
 
 ```
 let text, err = read_file(path);
 if (err != .None) {
-    println("can't read %: %", path, io_error_message(err));   // `%` alone prints NotFound
+    println("using the defaults (%)", err);   // `%` alone prints NotFound
     return;
 }
 defer free(text.ptr);
@@ -3456,7 +3492,7 @@ it offers.
 | `std/fs` | directories: `is_dir`, `make_dir`, `remove_dir`, `make_temp_dir(prefix)` (in `$TMPDIR` or `/tmp`), `current_dir`, failing with an `IoError` (files are std/io's). POSIX |
 | `std/process` | `run_command(args)` (no shell; the program is looked up in `$PATH`) and `run_shell(command)` (`/bin/sh -c`), which wait for it and give an `Exit` (`code`, and `signal` when one ended it) and a `ProcessError` (`NotFound`, `CantStart`); `shell_quote`. POSIX |
 | `std/time` | `now_ns()` (a monotonic clock, for measuring), `unix_time_ns()` (the wall clock), `sleep_ms(ms)`. POSIX |
-| `std/logging` | `log(level, fmt, args)` through `context.logger`; `capture_logger(&lines)`, `silent_logger()` |
+| `std/logging` | `log(level, fmt, args)` through `context.logger`, skipping levels below `context.log_level`; `capture_logger(&lines)`, `silent_logger()` |
 | `std/array` | for growable arrays, `[..]T`: `array_of(items)` (an allocated copy), `array_add`, `array_add_new` (a pointer to a new last element, to fill in place), `array_append`, `array_pop`, `array_insert`, `array_remove`, `array_remove_unordered`, `array_find(xs, item)` (its index or -1, on any `[]T`) and `array_remove_value` (the first equal one), comparing as std/reflect's `values_equal`, `array_reserve`, `array_clear`, `array_free` |
 | `std/map` | `Map($K, $V)`, a hash map whose `entries`, a growable array, holds its entries in insertion order, for keys of any type; a zero one is ready to use; `make_map` (to pick the allocator or the hashing), `map_put`, `map_find` (a pointer, or null), `map_get` (a copy, and whether it's there), `map_has`, `map_remove`, `map_clear`, `map_free`; `StaticMap($K, $V)`, a read-only map that `#run` can bake into the program, made by `static_map(pairs)` from `Pair`s and read with `static_map_get` and `static_map_has`; `hash_bytes`, `hash_string`, `hash_key`, `keys_equal` |
 | `std/build` | for build scripts (top-level `#run`): `set_output`, `set_release`, `is_release`, `set_bounds_checks`, `add_c_flags`, `link_library`, `add_c_file` |

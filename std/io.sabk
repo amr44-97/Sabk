@@ -9,7 +9,8 @@
 //   printf(format, ...)            C's printf
 //
 //   let data, err = read_file("notes.txt");   allocated; free(data.ptr)
-//   if (err != .None) println("can't read it: %", io_error_message(err));
+//   if (err != .None) return;                  read_file logged why:
+//                                              "error: can't read notes.txt: ..."
 //   let text = read_file(path) or_return;      in a function that returns
 //                                              an IoError last
 //   write_file("out.txt", data)                an IoError, .None when it
@@ -17,11 +18,18 @@
 //   delete_file(path), file_exists(path)
 //   last_io_error()                            errno as an IoError, after a
 //                                              C call failed
+//   log_io_error(err, "read", path)            logs "can't read path: why"
+//                                              (std/logging), gives err back
+//
+// A function here that fails logs why, at the Error level, and returns
+// the failure for the caller to act on. A caller that expects a failure
+// quiets it for a block: `context.logger = silent_logger();`.
 //
 // stdout goes through C's buffered stdio, so print and printf output stay
 // in order.
 
 import "std/fmt";
+import "std/logging";
 import "std/mem";
 import "std/str";
 
@@ -34,6 +42,7 @@ extern fn ferror(file: *void) -> i32;
 extern fn remove(path: *u8) -> i32;
 extern fn access(path: *u8, mode: i32) -> i32;
 extern fn sabk_errno() -> i32; // the runtime's
+extern fn strerror(errno: i32) -> *u8;
 
 // ---- printing
 
@@ -100,6 +109,15 @@ pub fn io_error_message(e: IoError) -> string {
 
 // what errno says about the C call that just failed (POSIX numbers, which
 // Linux and macOS share)
+// a failure, logged with what was being done: log_io_error(err, "read",
+// "app.cfg") logs "can't read app.cfg: no such file or directory"
+pub fn log_io_error(err: IoError, doing: string, path: string) -> IoError {
+    // Other covers many errno values: C's own words say which
+    let why = if (err == .Other) from_cstring(strerror(sabk_errno())) else io_error_message(err);
+    log(.Error, "can't % %: %", doing, path, why);
+    return err;
+}
+
 pub fn last_io_error() -> IoError {
     return switch (sabk_errno()) {
     case 2:     .NotFound;         // ENOENT
@@ -118,7 +136,7 @@ pub fn read_file(path: string, a: Allocator = context.allocator) -> (string, IoE
     defer free(c_path);
     let file = fopen(c_path, "rb");
     if (file == null)
-        return .[], last_io_error();
+        return .[], log_io_error(last_io_error(), "read", path);
     defer fclose(file);
 
     // in growing chunks, so files whose size isn't known up front (pipes,
@@ -130,7 +148,7 @@ pub fn read_file(path: string, a: Allocator = context.allocator) -> (string, IoE
             let bigger = resize(data.ptr, data.len, data.len * 2, 16, a) as *u8;
             if (bigger == null) {
                 free(data.ptr, a);
-                return .[], .NoSpace;
+                return .[], log_io_error(.NoSpace, "read", path);
             }
             data = bigger[0..data.len * 2];
         }
@@ -139,7 +157,7 @@ pub fn read_file(path: string, a: Allocator = context.allocator) -> (string, IoE
         len += got;
         if (got < room) {
             if (ferror(file) != 0) { // reading a directory ends up here
-                let err = last_io_error();
+                let err = log_io_error(last_io_error(), "read", path);
                 free(data.ptr, a);
                 return .[], err;
             }
@@ -164,22 +182,22 @@ fn put_file(path: string, data: string, mode: *u8) -> IoError = .None {
     defer free(c_path);
     let file = fopen(c_path, mode);
     if (file == null)
-        return last_io_error();
+        return log_io_error(last_io_error(), "write", path);
     let size = data.len as usize;
     if (fwrite(data.ptr, 1, size, file) != size) {
-        let err = last_io_error();
+        let err = log_io_error(last_io_error(), "write", path);
         fclose(file);
         return err;
     }
     if (fclose(file) != 0) // what was buffered is written now, and can fail
-        return last_io_error();
+        return log_io_error(last_io_error(), "write", path);
 }
 
 pub fn delete_file(path: string) -> IoError = .None {
     let c_path = to_cstring(path);
     defer free(c_path);
     if (remove(c_path) != 0)
-        return last_io_error();
+        return log_io_error(last_io_error(), "delete", path);
 }
 
 // is there a file (or directory) at `path`?

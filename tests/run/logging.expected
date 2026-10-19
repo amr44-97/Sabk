@@ -1,5 +1,7 @@
 warning: `90x` isn't a number
 captured 2 lines: ["`abc` isn't a number", "2 items"]
+warning: `w1` isn't a number
+debug: the level is back: Debug
 error: back to stderr
-caught: 1 + 1 == 3 (assertion failed) at line :32:12
+caught: 1 + 1 == 3 (assertion failed) at line :39:12
 [exit 134]

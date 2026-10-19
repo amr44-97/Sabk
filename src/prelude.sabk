@@ -19,6 +19,7 @@ pub struct Context {
     allocator: Allocator;        // the heap, unless a block changes it
     temp_allocator: Allocator;   // an arena: free it all with FreeAll
     logger: Logger;              // where std/log's log() goes: stderr
+    log_level: LogLevel;         // log() skips what's below it: Debug, all of it
     panic_handler: PanicHandler; // what std's panic and assert call
 }
 
@@ -97,6 +98,7 @@ fn default_context() -> Context {
         .allocator = Allocator.{ .procedure = heap_proc },
         .temp_allocator = Allocator.{ .procedure = temp_proc },
         .logger = Logger.{ .procedure = stderr_logger },
+        .log_level = .Debug,
         .panic_handler = PanicHandler.{ .procedure = print_and_abort },
     };
 }

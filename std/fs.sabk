@@ -38,14 +38,14 @@ pub fn make_dir(path: string) -> IoError = .None {
     let c_path = to_cstring(path);
     defer free(c_path);
     if (mkdir(c_path, 0x1ff) != 0) // 0777
-        return last_io_error();
+        return log_io_error(last_io_error(), "make the directory", path);
 }
 
 pub fn remove_dir(path: string) -> IoError = .None {
     let c_path = to_cstring(path);
     defer free(c_path);
     if (rmdir(c_path) != 0)
-        return last_io_error();
+        return log_io_error(last_io_error(), "remove the directory", path);
 }
 
 // a new, empty directory only this user can use, named `prefix` and six
@@ -60,7 +60,7 @@ pub fn make_temp_dir(prefix: string = "sabk", a: Allocator = context.allocator) 
     append_string(&template, "-XXXXXX");
     array_add(&template, 0); // C's end of string
     if (mkdtemp(template.ptr) == null) {
-        let err = last_io_error();
+        let err = log_io_error(last_io_error(), "make the directory", template[..template.len - 1] as string);
         array_free(&template);
         return "", err;
     }
@@ -76,7 +76,7 @@ pub fn current_dir(a: Allocator = context.allocator) -> (string, IoError = .None
         let err = last_io_error();
         free(buffer.ptr, a);
         if (sabk_errno() != 34) // ERANGE: too small
-            return "", err;
+            return "", log_io_error(err, "find", "the current directory");
         size *= 2;
     }
 }

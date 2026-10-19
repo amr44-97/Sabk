@@ -20,7 +20,8 @@ switch to them at the bootstrap.
 - [x] **Tagged enums:** `!is`, checked variant access `x.Variant`, narrowing (section 4)
 - [x] **Error enums:** `enum IoError: Error { ... }`; plain enums go back to being plain (section 5)
 - [x] **Result defaults and taking results:** `-> (i64, ParseError = .None)`, results taken from the left, a call's first value in an expression (section 5)
-- [ ] **Failures, the rest:** the reason logged by std, `context.log_level`, `or_return .Replacement` (section 5)
+- [x] **Logged failures:** std's I/O, path and process functions log why; `context.log_level` (section 5)
+- [ ] **Failures, the rest:** whether std/str's parse functions log (open), `or_return .Replacement` (section 5)
 - [ ] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
 - [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
@@ -453,6 +454,29 @@ parse_int(s);                         // a statement: all dropped
 
 9. **The bootstrap**: std couldn't use `= .None` until the seed knew
    it, so the feature landed first, then the seed, then std.
+
+### Edge cases met building logged failures (built Oct 20, 2026; to review)
+
+1. **The bootstrap**, again: std is compiled with the seed's built-in
+   prelude, so `context.log_level` went into the prelude and the seed
+   first, and std used it after.
+2. **The compiler silences std's logs** (`context.logger =
+   silent_logger();` at the top of its `main`): it reports its own
+   failures in its own words, and some of std's are normal for it
+   (`path_real` on a path that isn't there yet).
+3. **`IoError.Other` covers every errno without its own variant**, and its
+   text, "input/output error", was wrong for most of them (`rmdir` on a
+   full directory). The log uses C's `strerror` for it instead:
+   `can't remove the directory x: Directory not empty`.
+4. **A log line can hold something that changes every run** (a temp
+   dir's random name): the test captures the lines
+   (`capture_logger`) and prints them with the name taken out.
+5. **`log` skips a message below `context.log_level` before formatting
+   it**, so a skipped `.Debug` costs a comparison.
+6. **Open: the parse functions don't log.** `parse_int("oops")` returns
+   `.Invalid` and prints nothing, so `total += parse_int(s)` adds 0
+   silently. Logging them would print on every `parse_int(arg) or_else
+   8080` that falls back on purpose. To be decided.
 
 ### Handling one
 

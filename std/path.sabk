@@ -118,7 +118,7 @@ pub fn path_absolute(p: string, alloc: Allocator = context.allocator) -> (string
         return path_normalize(p, alloc);
     let buffer: [PATH_MAX]u8 = ---;
     if (getcwd(buffer.ptr, buffer.len as usize) == null)
-        return "", last_io_error();
+        return "", log_io_error(last_io_error(), "find", "the current directory");
     let joined = path_join(from_cstring(buffer.ptr), p);
     defer free(joined.ptr);
     return path_normalize(joined, alloc);
@@ -131,7 +131,7 @@ pub fn path_real(p: string, alloc: Allocator = context.allocator) -> (string, Io
     defer free(c_path);
     let buffer: [PATH_MAX]u8 = ---;
     if (realpath(c_path, buffer.ptr) == null)
-        return "", last_io_error();
+        return "", log_io_error(last_io_error(), "find the real path of", p);
     return copy_string(from_cstring(buffer.ptr), alloc);
 }
 

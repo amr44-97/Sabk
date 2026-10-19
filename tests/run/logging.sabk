@@ -27,6 +27,13 @@ fn main() {
         context.logger = silent_logger();
         parse_port("nothing printed");
     }
+    {
+        context.log_level = .Warning;            // this block: Warning and Error
+        log(.Debug, "skipped");
+        log(.Info, "skipped too");
+        parse_port("w1");                        // a Warning: printed
+    }
+    log(.Debug, "the level is back: %", context.log_level);
     log(.Error, "back to stderr");
     context.panic_handler = PanicHandler.{ .procedure = report };
     assert(1 + 1 == 3);

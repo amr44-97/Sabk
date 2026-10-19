@@ -3,12 +3,16 @@ None true AlreadyExists
 None false true
 true None
 None None
+logged: can't make the directory <dir>/inner: already exists
+logged: can't remove the directory <dir>/inner: Directory not empty
 false true
 None true
 code 0 signal 0 None
 code 3 signal 0 None
 code 137 signal 9 None
+error: can't run no-such-program-here: no such program
 code 0 signal 0 NotFound
+error: can't run nothing (no arguments): no such program
 code 0 signal 0 NotFound
 'it'\''s $HOME' 0 None
 7

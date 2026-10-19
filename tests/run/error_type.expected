@@ -2,6 +2,7 @@
 {port = 80} ParseError.Invalid: not a number
 {port = 80} ConfigError.BadLine: a line without =
 {port = 80} ConfigError.UnknownKey: something else
+error: can't read /no/such/file: no such file or directory
   check_file's defer
 IoError.NotFound no such file
   check_file's defer

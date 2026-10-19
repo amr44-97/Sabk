@@ -8,6 +8,7 @@
 //   let lines: [..]string;
 //   context.logger = capture_logger(&lines);   this block's logs go to lines
 //   context.logger = silent_logger();          ... or nowhere
+//   context.log_level = .Warning;              this block skips Debug and Info
 //
 // Setting context.logger at a block's top level gives the block its own
 // context, as with context.allocator. A logger is a procedure and a data
@@ -19,6 +20,8 @@ import "std/fmt";
 import "std/str";
 
 pub fn log(level: LogLevel, fmt: string, args: ..Any) #format {
+    if ((level as u8) < (context.log_level as u8))
+        return; // below the context's level: not even formatted
     let b = make_builder();
     defer builder_free(&b);
     format_into(&b, fmt, args);

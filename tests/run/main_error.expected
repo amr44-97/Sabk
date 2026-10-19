@@ -1,4 +1,5 @@
 parsed 42
+error: can't read /no/such/file: no such file or directory
 main's defer ran
 error: IoError.NotFound
 [exit 1]

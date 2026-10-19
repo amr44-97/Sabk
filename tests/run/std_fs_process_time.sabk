@@ -7,6 +7,7 @@ import "std/time";
 import "std/mem";
 import "std/str";
 import "std/fmt";
+import "std/logging";
 
 fn ran(args: []string) -> string {
     let exit, err = run_command(args);
@@ -23,11 +24,19 @@ fn main() {
     let dir, err = make_temp_dir("sabk-test");
     println("% % %", err, is_dir(dir), starts_with(path_base(dir), "sabk-test-"));
     let inner = path_join(dir, "inner");
-    println("% % %", make_dir(inner), is_dir(inner), make_dir(inner));
-    let file = path_join(inner, "f.txt");
-    println("% % %", write_file(file, "hi"), is_dir(file), file_exists(file));
-    println("% %", remove_dir(inner) != .None, delete_file(file));   // not empty, then emptied
-    println("% %", remove_dir(inner), remove_dir(dir));
+    let logged: [..]string;
+    {
+        context.logger = capture_logger(&logged);   // the failures' logs name the random dir
+        println("% % %", make_dir(inner), is_dir(inner), make_dir(inner));
+        let file = path_join(inner, "f.txt");
+        println("% % %", write_file(file, "hi"), is_dir(file), file_exists(file));
+        println("% %", remove_dir(inner) != .None, delete_file(file));   // not empty, then emptied
+        println("% %", remove_dir(inner), remove_dir(dir));
+    }
+    for (line in logged) {
+        let at = index_of(line, dir);
+        println("logged: %<dir>%", line[..at], line[at + dir.len..]);
+    }
     println("% %", is_dir(dir), is_dir("/"));
 
     let cwd, cerr = current_dir();

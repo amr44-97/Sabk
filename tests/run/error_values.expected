@@ -6,11 +6,13 @@ load /tmp/the-compiler-error-values-number.conf:
 load /tmp/the-compiler-error-values-key.conf:
   failed: UnknownKey
 load /no/such/config:
+error: can't read /no/such/config: no such file or directory
   can't read /no/such/config: no such file or directory
   failed: CantRead
 workers from the environment: 2
 port or a default: 80
 copy: None
+error: can't read /no/such/config: no such file or directory
 copy a missing file: NotFound
 the copy has 48 bytes (None)
 average: 5 true

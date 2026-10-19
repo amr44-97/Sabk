@@ -20,6 +20,7 @@ x/../../y -> ../y
 true false
 None true true
 / None
+error: can't find the real path of /no/such/file: no such file or directory
 NotFound
 fmt
 [exit 0]

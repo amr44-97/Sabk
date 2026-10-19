@@ -6,6 +6,7 @@ import "std/build";
 import "std/fmt";
 import "std/fs";
 import "std/io";
+import "std/logging";
 import "std/os";
 import "std/path";
 import "std/process";
@@ -211,6 +212,8 @@ fn print_usage(exe: string) -> i32 {
 }
 
 fn main() -> i32 {
+    // std logs its failures; the compiler reports its own, in its words
+    context.logger = silent_logger();
     let argv = args();
     let exe = argv[0];
     let mode = Mode.Build;
