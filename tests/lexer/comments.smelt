@@ -1,0 +1,9 @@
+// whole line
+a // trailing
+/* block */ b /**/ c
+/* multi
+   line * with / stray chars
+   // and a line comment inside */ d
+e /* a */ /* b */ f
+// last line without newline
+g // no trailing newline

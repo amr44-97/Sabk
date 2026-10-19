@@ -1,0 +1,3 @@
+[error]: names declared together get their types from the values; to give them types, declare them one at a time at [tests/errors/parse_let_values_type.smelt:3:13]
+     3 |     let a, b: i32 = 1, 2;
+       |             ^

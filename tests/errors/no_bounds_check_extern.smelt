@@ -1,0 +1,3 @@
+// C's code isn't checked to begin with
+extern fn memset(memory: *void, value: i32, size: usize) -> *void #no_bounds_check;
+fn main() {}

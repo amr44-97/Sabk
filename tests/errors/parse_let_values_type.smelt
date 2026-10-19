@@ -1,0 +1,4 @@
+// names declared together take their types from the values
+fn main() {
+    let a, b: i32 = 1, 2;
+}

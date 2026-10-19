@@ -1,0 +1,20 @@
+ROOT `#`
+  STATIC_IF
+    lhs: EQ_EQ `==`
+      lhs: IDENTIFIER `OS`
+      rhs: ENUM_SHORTHAND `.Windows`
+    rhs: BLOCK
+      FUN_DECL `Sleep` [extern]
+        FUN_PARAM `ms`
+          type: TYPE_NAME `u32`
+    extra: STATIC_IF
+      lhs: EQ_EQ `==`
+        lhs: IDENTIFIER `OS`
+        rhs: ENUM_SHORTHAND `.Linux`
+      rhs: BLOCK
+        STRUCT `Stat` [pub]
+          STRUCT_FIELD `size`
+            type: TYPE_NAME `i64`
+      extra: BLOCK
+        CONST_DECL `OTHER`
+          lhs: BOOL_LITERAL `true`

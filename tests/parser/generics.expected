@@ -1,0 +1,60 @@
+ROOT
+  STRUCT `Pair` [generic]
+    STRUCT_FIELD `first`
+      type: TYPE_NAME `A`
+    STRUCT_FIELD `second`
+      type: TYPE_NAME `B`
+    type_param: TYPE_PARAM `A`
+    type_param: TYPE_PARAM `B`
+  FUN_DECL `max`
+    type: TYPE_NAME `T`
+    rhs: BLOCK
+      RETURN
+        lhs: IDENTIFIER `a`
+    FUN_PARAM `a`
+      type: TYPE_PARAM `T`
+    FUN_PARAM `b`
+      type: TYPE_NAME `T`
+  FUN_DECL `make`
+    type: TYPE_NAME `List`
+      TYPE_NAME `T`
+    rhs: BLOCK
+    FUN_PARAM `T` [type param]
+      type: TYPE_PARAM `T`
+    FUN_PARAM `n`
+      type: TYPE_NAME `usize`
+      lhs: NUMBER_LITERAL `4`
+  FUN_DECL `f`
+    rhs: BLOCK
+      VAR_DECL `p`
+        lhs: STRUCT_INIT
+          type: CALL `(`
+            lhs: IDENTIFIER `Pair`
+            IDENTIFIER `i32`
+            IDENTIFIER `u8`
+          FIELD_INIT `first`
+            rhs: NUMBER_LITERAL `1`
+      VAR_DECL `l`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `make`
+          TYPE_EXPR `[`
+            lhs: TYPE_SLICE `[`
+              lhs: TYPE_NAME `u8`
+      VAR_DECL `m`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `make`
+          STAR `*`
+            lhs: CALL `(`
+              lhs: IDENTIFIER `List`
+              IDENTIFIER `i32`
+      VAR_DECL `k`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `make`
+          TYPE_EXPR
+            lhs: TYPE_FN
+              type: TYPE_NAME `bool`
+              TYPE_NAME `i32`
+      VAR_DECL `x`
+        type: TYPE_MEMBER `Box`
+          lhs: TYPE_NAME `mem`
+          TYPE_NAME `f32`

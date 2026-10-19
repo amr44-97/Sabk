@@ -1,0 +1,4 @@
+   1:1   identifier             `a`
+   2:1   identifier             `b`
+   3:4   identifier             `c`
+   4:1   eof                    ``

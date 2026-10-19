@@ -1,0 +1,20 @@
+// several results: types, return, let, assignment, or_return, or_else
+fn divide(a: i64, b: i64) -> (i64, i64) {
+    return a / b, a % b;
+}
+
+fn apply(f: fn(i64) -> (i64, bool), x: i64) -> (i64) {
+    let y = f(x) or_return;
+    return y;
+}
+
+fn main() {
+    let q, r = divide(7, 2);
+    let _, rest = divide(7, 2);
+    q, r = r, q;
+    q, _ = divide(1, 1);
+    let v = f() or_else g() or_else 0;
+    let w = f() or_else a || b;
+    let n = f() or_return + 1;
+    f() or_return;
+}

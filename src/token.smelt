@@ -1,0 +1,194 @@
+// Tokens: the pieces the lexer cuts a file into. A token's text is a view
+// of the file's text, so the file has to outlive its tokens.
+
+import "std/map";
+
+pub enum TokenKind: u8 {
+    Eof,
+    Identifier,
+    Number,          // 42, 0x1F
+    Float,           // 3.14, 1e10, 2.5E-3
+    String,          // "text", with its quotes; may span lines
+    Char,            // 'a', with its quotes
+
+    LParen, RParen, LBrace, RBrace, LBracket, RBracket,
+    Period,          // .
+    Ellipsis2,       // ..
+    Ellipsis3,       // ...
+    Colon, ColonEq, ColonColon,
+    Equal, EqualEq,
+    Semicolon, Comma,
+    Bang, BangEq,
+    Question, Dollar, At, Hash, Backtick,
+    Plus, PlusPlus, PlusEq,
+    Minus, MinusMinus, MinusEq,
+    TripleDash,      // ---: a local left uninitialized
+    Arrow,           // ->
+    Star, StarEq,
+    Slash, SlashEq,
+    Percent, PercentEq,
+    Pipe, PipeEq, PipePipe,
+    Amp, AmpEq, AmpAmp,
+    Caret, CaretEq,
+    Tilde, TildeEq,
+    Less, LessEq, Shl, ShlEq,
+    Greater, GreaterEq, Shr, ShrEq,
+
+    // keywords
+    Fn, Return, Let, Const, Type, Struct, Enum, Union, Import, Pub, Extern,
+    As, If, Else, For, In, While, Do, Switch, Case, Default, Break,
+    Continue, Defer, Sizeof, Is, TypeInfo, New, Context, OrElse, OrReturn,
+    True, False, Null,
+}
+
+pub struct Token {
+    text: string;   // a view of the file: `fn`, `"a string"`, `` at the end
+    kind: TokenKind;
+    line: i32;      // where it starts, from 1; a string over several lines
+    column: i32;    // is where its opening quote is
+}
+
+const KEYWORDS = #run static_map(.[
+    Pair.{ "fn", TokenKind.Fn },
+    Pair.{ "return", TokenKind.Return },
+    Pair.{ "let", TokenKind.Let },
+    Pair.{ "const", TokenKind.Const },
+    Pair.{ "type", TokenKind.Type },
+    Pair.{ "struct", TokenKind.Struct },
+    Pair.{ "enum", TokenKind.Enum },
+    Pair.{ "union", TokenKind.Union },
+    Pair.{ "import", TokenKind.Import },
+    Pair.{ "pub", TokenKind.Pub },
+    Pair.{ "extern", TokenKind.Extern },
+    Pair.{ "as", TokenKind.As },
+    Pair.{ "if", TokenKind.If },
+    Pair.{ "else", TokenKind.Else },
+    Pair.{ "for", TokenKind.For },
+    Pair.{ "in", TokenKind.In },
+    Pair.{ "while", TokenKind.While },
+    Pair.{ "do", TokenKind.Do },
+    Pair.{ "switch", TokenKind.Switch },
+    Pair.{ "case", TokenKind.Case },
+    Pair.{ "default", TokenKind.Default },
+    Pair.{ "break", TokenKind.Break },
+    Pair.{ "continue", TokenKind.Continue },
+    Pair.{ "defer", TokenKind.Defer },
+    Pair.{ "sizeof", TokenKind.Sizeof },
+    Pair.{ "is", TokenKind.Is },
+    Pair.{ "type_info", TokenKind.TypeInfo },
+    Pair.{ "new", TokenKind.New },
+    Pair.{ "context", TokenKind.Context },
+    Pair.{ "or_else", TokenKind.OrElse },
+    Pair.{ "or_return", TokenKind.OrReturn },
+    Pair.{ "true", TokenKind.True },
+    Pair.{ "false", TokenKind.False },
+    Pair.{ "null", TokenKind.Null },
+]);
+
+// the keyword `word` is, or Identifier
+pub fn keyword_kind(word: string) -> TokenKind {
+    return static_map_get(KEYWORDS, word) or_else .Identifier;
+}
+
+pub fn is_keyword(word: string) -> bool { return static_map_has(KEYWORDS, word); }
+
+// as --tokens prints it
+pub fn token_name(kind: TokenKind) -> string {
+    return switch (kind) {
+    case .Eof:         "eof";
+    case .Identifier:  "identifier";
+    case .Number:      "number_literal";
+    case .Float:       "float_literal";
+    case .String:      "string_literal";
+    case .Char:        "char_literal";
+    case .LParen:      "l_paren";
+    case .RParen:      "r_paren";
+    case .LBrace:      "l_brace";
+    case .RBrace:      "r_brace";
+    case .LBracket:    "l_bracket";
+    case .RBracket:    "r_bracket";
+    case .Period:      "period";
+    case .Ellipsis2:   "ellipsis2";
+    case .Ellipsis3:   "ellipsis3";
+    case .Colon:       "colon";
+    case .ColonEq:     "colon_equal";
+    case .ColonColon:  "colon_colon";
+    case .Equal:       "equal";
+    case .EqualEq:     "equal_equal";
+    case .Semicolon:   "semicolon";
+    case .Comma:       "comma";
+    case .Bang:        "bang";
+    case .BangEq:      "bang_equal";
+    case .Question:    "question_mark";
+    case .Dollar:      "dollar_sign";
+    case .At:          "at_sign";
+    case .Hash:        "hash";
+    case .Backtick:    "backtick";
+    case .Plus:        "plus";
+    case .PlusPlus:    "plus_plus";
+    case .PlusEq:      "plus_equal";
+    case .Minus:       "minus";
+    case .MinusMinus:  "minus_minus";
+    case .MinusEq:     "minus_equal";
+    case .TripleDash:  "triple_dash";
+    case .Arrow:       "arrow";
+    case .Star:        "asterisk";
+    case .StarEq:      "asterisk_equal";
+    case .Slash:       "slash";
+    case .SlashEq:     "slash_equal";
+    case .Percent:     "percent";
+    case .PercentEq:   "percent_equal";
+    case .Pipe:        "pipe";
+    case .PipeEq:      "pipe_equal";
+    case .PipePipe:    "pipe_pipe";
+    case .Amp:         "ampersand";
+    case .AmpEq:       "ampersand_equal";
+    case .AmpAmp:      "ampersand_ampersand";
+    case .Caret:       "caret";
+    case .CaretEq:     "caret_equal";
+    case .Tilde:       "tilde";
+    case .TildeEq:     "tilde_equal";
+    case .Less:        "less_than";
+    case .LessEq:      "less_equal";
+    case .Shl:         "shift_left";
+    case .ShlEq:       "shift_left_equal";
+    case .Greater:     "greater_than";
+    case .GreaterEq:   "greater_equal";
+    case .Shr:         "shift_right";
+    case .ShrEq:       "shift_right_equal";
+    case .Fn:          "keyword_fn";
+    case .Return:      "keyword_return";
+    case .Let:         "keyword_let";
+    case .Const:       "keyword_const";
+    case .Type:        "keyword_type";
+    case .Struct:      "keyword_struct";
+    case .Enum:        "keyword_enum";
+    case .Union:       "keyword_union";
+    case .Import:      "keyword_import";
+    case .Pub:         "keyword_pub";
+    case .Extern:      "keyword_extern";
+    case .As:          "keyword_as";
+    case .If:          "keyword_if";
+    case .Else:        "keyword_else";
+    case .For:         "keyword_for";
+    case .In:          "keyword_in";
+    case .While:       "keyword_while";
+    case .Do:          "keyword_do";
+    case .Switch:      "keyword_switch";
+    case .Case:        "keyword_case";
+    case .Default:     "keyword_default";
+    case .Break:       "keyword_break";
+    case .Continue:    "keyword_continue";
+    case .Defer:       "keyword_defer";
+    case .Sizeof:      "keyword_sizeof";
+    case .Is:          "keyword_is";
+    case .TypeInfo:    "keyword_type_info";
+    case .New:         "keyword_new";
+    case .Context:     "keyword_context";
+    case .OrElse:      "keyword_or_else";
+    case .OrReturn:    "keyword_or_return";
+    case .True:        "keyword_true";
+    case .False:       "keyword_false";
+    case .Null:        "keyword_null";
+    };
+}

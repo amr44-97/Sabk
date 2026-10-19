@@ -1,0 +1,38 @@
+import "std/io";
+import "std/mem";
+import "vendor/my-lib" as lib;
+
+pub struct Vec2 {
+    x: f32;
+    y: f32;
+}
+
+enum Color: u8 { Red, Green, Blue = 10 }
+
+type Callback = fn(i32) -> bool;
+
+const MAX: i32 = 64;
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+pub fn main() -> i32 {
+    let arena = mem.arena_init(4096);
+    defer mem.arena_free(&arena);
+    context.allocator = mem.arena_allocator(&arena);
+
+    let v = new(Vec2);                    // allocated with context.allocator
+    v.x = 1.5;
+
+    let nums = i32.[1, 2, 3, 4];
+    let total: i64 = 0;
+    for (i in 0..4) {
+        total += nums[i] as i64;
+    }
+
+    if (total > 5 && v.x != 0.0) {
+        io.print("big\n");
+    } else {
+        io.print("small\n");
+    }
+    return 0;
+}

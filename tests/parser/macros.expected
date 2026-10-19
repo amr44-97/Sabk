@@ -1,0 +1,49 @@
+ROOT
+  MACRO_DECL `plain`
+    rhs: BLOCK
+      VAR_DECL `it` [caller]
+        lhs: IDENTIFIER `a`
+      DEFER [caller]
+        lhs: EXPR_STMT `finish`
+          lhs: CALL `(`
+            lhs: IDENTIFIER `finish`
+      INSERT `body`
+      VAR_DECL `t`
+        lhs: TEXT_OF `body`
+      VAR_DECL `where`
+        lhs: LOCATION_OF `body`
+      ASSIGN `+=`
+        lhs: IDENTIFIER `counter` [caller]
+        rhs: INSERT `body`
+      RETURN [caller]
+        lhs: NUMBER_LITERAL `1`
+    FUN_PARAM `a`
+      type: TYPE_NAME `i32`
+    FUN_PARAM `body`
+      type: TYPE_NAME `Code`
+  MACRO_DECL `value` [pub]
+    type: TYPE_NAME `i32`
+    rhs: BLOCK
+      RETURN
+        lhs: IDENTIFIER `x`
+    FUN_PARAM `x`
+      type: TYPE_NAME `i32`
+  FUN_DECL `f`
+    rhs: BLOCK
+      EXPR_STMT `plain`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `plain`
+          NUMBER_LITERAL `1`
+          BLOCK
+            EXPR_STMT `work`
+              lhs: CALL `(`
+                lhs: IDENTIFIER `work`
+      EXPR_STMT `plain`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `plain`
+          NUMBER_LITERAL `2`
+          NUMBER_LITERAL `3`
+      VAR_DECL `v`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `value`
+          NUMBER_LITERAL `4`

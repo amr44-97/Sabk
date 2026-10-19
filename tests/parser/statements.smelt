@@ -1,0 +1,40 @@
+fn f() {
+    let a: i32;
+    let b = 1;
+    let c: i64 = 2;
+    const K = 3;
+
+    a = 1; a += 1; a -= 1; a *= 2; a /= 2; a %= 2;
+    a &= 1; a |= 1; a ^= 1; a <<= 1; a >>= 1;
+    a++; a--;
+    g();
+
+    if (a) b();
+    if (a) { b(); } else { c(); }
+    if (a) b(); else if (c) d(); else e();
+
+    while (a) a--;
+    do { a -= 1; } while (a > 0);
+
+    for (i in 0..10) continue;
+    for (x in items) { use(x); }
+    for (let i = 0; i < 10; i++) {}
+    for (i = 0; i < n; i += 2) {}
+    for (;;) break;
+
+    switch (c) {
+    case 1, 2:
+        g();
+        h();
+    case Color.Red:
+    default:
+        break;
+    }
+    switch (c) {}
+
+    defer free(p);
+    defer { a = 0; }
+    { { } }
+    return;
+}
+fn g() -> i32 { return 1 + 2; }

@@ -1,0 +1,7 @@
+#if (OS == .Windows) {
+    extern fn Sleep(ms: u32);
+} else #if (OS == .Linux) {
+    pub struct Stat { size: i64; }
+} else {
+    const OTHER = true;
+}

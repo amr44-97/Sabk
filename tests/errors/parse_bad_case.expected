@@ -1,0 +1,3 @@
+[error]: expected `case` or `default`, found `foo` at [tests/errors/parse_bad_case.smelt:1:23]
+     1 | fn f() { switch (x) { foo: } }
+       |                       ^

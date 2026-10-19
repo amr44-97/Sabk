@@ -1,0 +1,10 @@
+ROOT
+  FUN_DECL `f`
+    rhs: BLOCK
+      VAR_DECL `buf` [uninit]
+        type: TYPE_ARRAY `[`
+          lhs: TYPE_NAME `u8`
+          rhs: NUMBER_LITERAL `4`
+      VAR_DECL `x`
+        type: TYPE_NAME `i32`
+        lhs: NUMBER_LITERAL `1`

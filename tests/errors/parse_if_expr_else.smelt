@@ -1,0 +1,2 @@
+// an if that gives a value needs both values
+fn f(x: bool) -> i64 { return if (x) 1; }

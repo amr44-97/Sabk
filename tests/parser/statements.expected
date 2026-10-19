@@ -1,0 +1,169 @@
+ROOT
+  FUN_DECL `f`
+    rhs: BLOCK
+      VAR_DECL `a`
+        type: TYPE_NAME `i32`
+      VAR_DECL `b`
+        lhs: NUMBER_LITERAL `1`
+      VAR_DECL `c`
+        type: TYPE_NAME `i64`
+        lhs: NUMBER_LITERAL `2`
+      CONST_DECL `K`
+        lhs: NUMBER_LITERAL `3`
+      ASSIGN `=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      ASSIGN `+=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      ASSIGN `-=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      ASSIGN `*=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `2`
+      ASSIGN `/=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `2`
+      ASSIGN `%=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `2`
+      ASSIGN `&=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      ASSIGN `|=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      ASSIGN `^=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      ASSIGN `<<=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      ASSIGN `>>=`
+        lhs: IDENTIFIER `a`
+        rhs: NUMBER_LITERAL `1`
+      INC `++`
+        lhs: IDENTIFIER `a`
+      DEC `--`
+        lhs: IDENTIFIER `a`
+      EXPR_STMT `g`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `g`
+      IF
+        lhs: IDENTIFIER `a`
+        rhs: EXPR_STMT `b`
+          lhs: CALL `(`
+            lhs: IDENTIFIER `b`
+      IF
+        lhs: IDENTIFIER `a`
+        rhs: BLOCK
+          EXPR_STMT `b`
+            lhs: CALL `(`
+              lhs: IDENTIFIER `b`
+        extra: BLOCK
+          EXPR_STMT `c`
+            lhs: CALL `(`
+              lhs: IDENTIFIER `c`
+      IF
+        lhs: IDENTIFIER `a`
+        rhs: EXPR_STMT `b`
+          lhs: CALL `(`
+            lhs: IDENTIFIER `b`
+        extra: IF
+          lhs: IDENTIFIER `c`
+          rhs: EXPR_STMT `d`
+            lhs: CALL `(`
+              lhs: IDENTIFIER `d`
+          extra: EXPR_STMT `e`
+            lhs: CALL `(`
+              lhs: IDENTIFIER `e`
+      WHILE
+        lhs: IDENTIFIER `a`
+        rhs: DEC `--`
+          lhs: IDENTIFIER `a`
+      DO_WHILE
+        lhs: GT `>`
+          lhs: IDENTIFIER `a`
+          rhs: NUMBER_LITERAL `0`
+        rhs: BLOCK
+          ASSIGN `-=`
+            lhs: IDENTIFIER `a`
+            rhs: NUMBER_LITERAL `1`
+      FOR_IN `i`
+        lhs: NUMBER_LITERAL `0`
+        rhs: CONTINUE
+        extra: NUMBER_LITERAL `10`
+      FOR_IN `x`
+        lhs: IDENTIFIER `items`
+        rhs: BLOCK
+          EXPR_STMT `use`
+            lhs: CALL `(`
+              lhs: IDENTIFIER `use`
+              IDENTIFIER `x`
+      FOR
+        rhs: BLOCK
+        VAR_DECL `i`
+          lhs: NUMBER_LITERAL `0`
+        LT `<`
+          lhs: IDENTIFIER `i`
+          rhs: NUMBER_LITERAL `10`
+        INC `++`
+          lhs: IDENTIFIER `i`
+      FOR
+        rhs: BLOCK
+        ASSIGN `=`
+          lhs: IDENTIFIER `i`
+          rhs: NUMBER_LITERAL `0`
+        LT `<`
+          lhs: IDENTIFIER `i`
+          rhs: IDENTIFIER `n`
+        ASSIGN `+=`
+          lhs: IDENTIFIER `i`
+          rhs: NUMBER_LITERAL `2`
+      FOR
+        rhs: BREAK
+        (none)
+        (none)
+        (none)
+      SWITCH
+        lhs: IDENTIFIER `c`
+        CASE
+          rhs: BLOCK
+            EXPR_STMT `g`
+              lhs: CALL `(`
+                lhs: IDENTIFIER `g`
+            EXPR_STMT `h`
+              lhs: CALL `(`
+                lhs: IDENTIFIER `h`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+        CASE
+          rhs: BLOCK
+          MEMBER `Red`
+            lhs: IDENTIFIER `Color`
+        DEFAULT_CASE
+          rhs: BLOCK
+            BREAK
+      SWITCH
+        lhs: IDENTIFIER `c`
+      DEFER
+        lhs: EXPR_STMT `free`
+          lhs: CALL `(`
+            lhs: IDENTIFIER `free`
+            IDENTIFIER `p`
+      DEFER
+        lhs: BLOCK
+          ASSIGN `=`
+            lhs: IDENTIFIER `a`
+            rhs: NUMBER_LITERAL `0`
+      BLOCK
+        BLOCK
+      RETURN
+  FUN_DECL `g`
+    type: TYPE_NAME `i32`
+    rhs: BLOCK
+      RETURN
+        lhs: ADD `+`
+          lhs: NUMBER_LITERAL `1`
+          rhs: NUMBER_LITERAL `2`

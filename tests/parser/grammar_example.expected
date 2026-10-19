@@ -1,0 +1,102 @@
+ROOT
+  IMPORT `"std/io"`
+  IMPORT `"std/mem"`
+  IMPORT `"vendor/my-lib"`
+    rhs: IDENTIFIER `lib`
+  STRUCT `Vec2` [pub]
+    STRUCT_FIELD `x`
+      type: TYPE_NAME `f32`
+    STRUCT_FIELD `y`
+      type: TYPE_NAME `f32`
+  ENUM `Color`
+    type: TYPE_NAME `u8`
+    ENUM_VARIANT `Red`
+    ENUM_VARIANT `Green`
+    ENUM_VARIANT `Blue`
+      lhs: NUMBER_LITERAL `10`
+  TYPE_ALIAS `Callback`
+    type: TYPE_FN
+      type: TYPE_NAME `bool`
+      TYPE_NAME `i32`
+  CONST_DECL `MAX`
+    type: TYPE_NAME `i32`
+    lhs: NUMBER_LITERAL `64`
+  FUN_DECL `printf` [extern] [variadic]
+    type: TYPE_NAME `i32`
+    FUN_PARAM `fmt`
+      type: TYPE_PTR `*`
+        lhs: TYPE_NAME `u8`
+  FUN_DECL `main` [pub]
+    type: TYPE_NAME `i32`
+    rhs: BLOCK
+      VAR_DECL `arena`
+        lhs: CALL `(`
+          lhs: MEMBER `arena_init`
+            lhs: IDENTIFIER `mem`
+          NUMBER_LITERAL `4096`
+      DEFER
+        lhs: EXPR_STMT `mem`
+          lhs: CALL `(`
+            lhs: MEMBER `arena_free`
+              lhs: IDENTIFIER `mem`
+            ADDRESS_OF `&`
+              lhs: IDENTIFIER `arena`
+      ASSIGN `=`
+        lhs: MEMBER `allocator`
+          lhs: CONTEXT
+        rhs: CALL `(`
+          lhs: MEMBER `arena_allocator`
+            lhs: IDENTIFIER `mem`
+          ADDRESS_OF `&`
+            lhs: IDENTIFIER `arena`
+      VAR_DECL `v`
+        lhs: NEW
+          extra: IDENTIFIER `Vec2`
+      ASSIGN `=`
+        lhs: MEMBER `x`
+          lhs: IDENTIFIER `v`
+        rhs: FLOAT_LITERAL `1.5`
+      VAR_DECL `nums`
+        lhs: ARRAY_LITERAL `.`
+          type: IDENTIFIER `i32`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+          NUMBER_LITERAL `3`
+          NUMBER_LITERAL `4`
+      VAR_DECL `total`
+        type: TYPE_NAME `i64`
+        lhs: NUMBER_LITERAL `0`
+      FOR_IN `i`
+        lhs: NUMBER_LITERAL `0`
+        rhs: BLOCK
+          ASSIGN `+=`
+            lhs: IDENTIFIER `total`
+            rhs: CAST
+              type: TYPE_NAME `i64`
+              lhs: INDEX `[`
+                lhs: IDENTIFIER `nums`
+                rhs: IDENTIFIER `i`
+        extra: NUMBER_LITERAL `4`
+      IF
+        lhs: BOOL_AND `&&`
+          lhs: GT `>`
+            lhs: IDENTIFIER `total`
+            rhs: NUMBER_LITERAL `5`
+          rhs: NOT_EQ `!=`
+            lhs: MEMBER `x`
+              lhs: IDENTIFIER `v`
+            rhs: FLOAT_LITERAL `0.0`
+        rhs: BLOCK
+          EXPR_STMT `io`
+            lhs: CALL `(`
+              lhs: MEMBER `print`
+                lhs: IDENTIFIER `io`
+              STRING_LITERAL `"big\n"`
+        extra: BLOCK
+          EXPR_STMT `io`
+            lhs: CALL `(`
+              lhs: MEMBER `print`
+                lhs: IDENTIFIER `io`
+              STRING_LITERAL `"small\n"`
+      RETURN
+        lhs: NUMBER_LITERAL `0`

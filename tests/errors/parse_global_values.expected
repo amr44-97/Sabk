@@ -1,0 +1,3 @@
+[error]: a global variable is declared one at a time: `let a = ...;` at [tests/errors/parse_global_values.smelt:2:8]
+     2 | let a, b = 1, 2;
+       |        ^

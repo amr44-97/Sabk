@@ -1,0 +1,27 @@
+fn f() {
+    let a = g(1, 2, 3,);
+    let b = g();
+    let c = h()(1)[2].x;
+    let d = mem.arena.alloc(16);
+    let e = Vec2.{ .x = 1, .y = 2 };
+    let f = Vec2.{1, 2};
+    let g = Vec2.{};
+    let h = mem.Pair.{ .a = Vec2.{ .x = 0 }, };
+    let i = i32.[1, 2, 3];
+    let j = [2]u8.[u8.[1, 2], u8.[3, 4]];
+    let k = sizeof(*[4]u8);
+    let l = sizeof(mem.Allocator);
+    let m = new(Vec2);
+    let n = new(*i32, context.temp_allocator);
+    let o = context.allocator;
+    let p = 'c';
+    let q = "str";
+    let r = 1.5e3;
+    let s = 0xFF;
+    let t = true;
+    let u = false;
+    let v = null;
+    let w = ~x;
+    let x = f as fn(i32) -> bool;
+    context.allocator = arena;
+}

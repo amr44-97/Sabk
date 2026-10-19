@@ -1,0 +1,3 @@
+[error]: expected a module path after `import`, found `std` at [tests/errors/parse_import_no_string.smelt:1:8]
+     1 | import std.io;
+       |        ^

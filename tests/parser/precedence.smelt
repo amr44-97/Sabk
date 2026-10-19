@@ -1,0 +1,18 @@
+fn f() {
+    let a = 1 + 2 * 3;
+    let b = 1 - 2 - 3;
+    let c = (x & MASK) == 0;
+    let d = 1 << (n + 1);
+    let e = a || b && c;
+    let f = a | b | ~c;
+    let g = a + b < c * d;
+    let h = -x as i64;
+    let i = a + b as i64;
+    let j = p as *u8 * 2;
+    let k = x as u8 as i32;
+    let l = !a == b;
+    let m = (1 + 2) * 3;
+    let n = pp.*.*;
+    let o = &a.b[0];
+    let p = -a.b(c)[d];
+}

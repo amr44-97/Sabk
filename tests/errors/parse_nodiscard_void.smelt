@@ -1,0 +1,2 @@
+// #nodiscard needs a result to keep
+fn f() #nodiscard {}

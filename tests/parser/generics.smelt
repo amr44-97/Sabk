@@ -1,0 +1,10 @@
+struct Pair($A, $B) { first: A; second: B; }
+fn max(a: $T, b: T) -> T { return a; }
+fn make($T: Type, n: usize = 4) -> List(T) {}
+fn f() {
+    let p = Pair(i32, u8).{ .first = 1 };
+    let l = make([]u8);
+    let m = make(*List(i32));
+    let k = make(fn(i32) -> bool);
+    let x: mem.Box(f32);
+}

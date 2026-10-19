@@ -1,0 +1,61 @@
+// Source files, and the messages that point into them:
+//
+//   [error]: expected `;` at [main.smelt:3:9]
+//        3 |     let x = 1
+//          |         ^
+
+import "std/io";
+import "std/fmt";
+import "std/mem";
+import "std/array";
+import "std/str";
+
+pub struct Source {
+    path: string;   // as it was given: messages show it this way
+    text: string;
+}
+
+pub fn load_source(path: string) -> (Source, IoError) {
+    let text = read_file(path) or_return;
+    return Source.{ .path = path, .text = text }, .None;
+}
+
+pub enum Severity { Error, Warning, Note }
+
+// a message about `at`, a view of the source's text (a token's text, or
+// an empty view where something is missing)
+pub fn report(src: *Source, severity: Severity, at: string, message: string) {
+    report_at(src, severity, (at.ptr as isize) - (src.text.ptr as isize), message);
+}
+
+// a message about the byte at `offset`; its line and column are counted
+// from the start of the file
+pub fn report_at(src: *Source, severity: Severity, offset: isize, message: string) {
+    let line = 1;
+    let line_start: isize = 0;
+    for (i in 0..offset) {
+        if (src.text[i] == '\n') {
+            line++;
+            line_start = i + 1;
+        }
+    }
+    let line_end = line_start;
+    while (line_end < src.text.len && src.text[line_end] != '\n')
+        line_end++;
+    let column = offset - line_start + 1;
+
+    let out: [..]u8;
+    out.allocator = context.temp_allocator;
+    let kind = switch (severity) {
+    case .Error:   "error";
+    case .Warning: "warning";
+    case .Note:    "note";
+    };
+    print_to(&out, "[%]: % at [%:%:%]\n", kind, message, src.path, line, column);
+    print_to(&out, "%{6} | %\n", line, src.text[line_start..line_end]);
+    append_string(&out, "       | ");
+    for (i in 1..column)
+        array_add(&out, ' ');
+    append_string(&out, "^\n");
+    eprint(out as string);
+}

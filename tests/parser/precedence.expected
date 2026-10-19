@@ -1,0 +1,104 @@
+ROOT
+  FUN_DECL `f`
+    rhs: BLOCK
+      VAR_DECL `a`
+        lhs: ADD `+`
+          lhs: NUMBER_LITERAL `1`
+          rhs: MUL `*`
+            lhs: NUMBER_LITERAL `2`
+            rhs: NUMBER_LITERAL `3`
+      VAR_DECL `b`
+        lhs: SUB `-`
+          lhs: SUB `-`
+            lhs: NUMBER_LITERAL `1`
+            rhs: NUMBER_LITERAL `2`
+          rhs: NUMBER_LITERAL `3`
+      VAR_DECL `c`
+        lhs: EQ_EQ `==`
+          lhs: GROUPED_EXPR `(`
+            lhs: BIT_AND `&`
+              lhs: IDENTIFIER `x`
+              rhs: IDENTIFIER `MASK`
+          rhs: NUMBER_LITERAL `0`
+      VAR_DECL `d`
+        lhs: SHL `<<`
+          lhs: NUMBER_LITERAL `1`
+          rhs: GROUPED_EXPR `(`
+            lhs: ADD `+`
+              lhs: IDENTIFIER `n`
+              rhs: NUMBER_LITERAL `1`
+      VAR_DECL `e`
+        lhs: BOOL_OR `||`
+          lhs: IDENTIFIER `a`
+          rhs: BOOL_AND `&&`
+            lhs: IDENTIFIER `b`
+            rhs: IDENTIFIER `c`
+      VAR_DECL `f`
+        lhs: BIT_OR `|`
+          lhs: BIT_OR `|`
+            lhs: IDENTIFIER `a`
+            rhs: IDENTIFIER `b`
+          rhs: BIT_NOT `~`
+            lhs: IDENTIFIER `c`
+      VAR_DECL `g`
+        lhs: LT `<`
+          lhs: ADD `+`
+            lhs: IDENTIFIER `a`
+            rhs: IDENTIFIER `b`
+          rhs: MUL `*`
+            lhs: IDENTIFIER `c`
+            rhs: IDENTIFIER `d`
+      VAR_DECL `h`
+        lhs: CAST
+          type: TYPE_NAME `i64`
+          lhs: NEG `-`
+            lhs: IDENTIFIER `x`
+      VAR_DECL `i`
+        lhs: ADD `+`
+          lhs: IDENTIFIER `a`
+          rhs: CAST
+            type: TYPE_NAME `i64`
+            lhs: IDENTIFIER `b`
+      VAR_DECL `j`
+        lhs: MUL `*`
+          lhs: CAST
+            type: TYPE_PTR `*`
+              lhs: TYPE_NAME `u8`
+            lhs: IDENTIFIER `p`
+          rhs: NUMBER_LITERAL `2`
+      VAR_DECL `k`
+        lhs: CAST
+          type: TYPE_NAME `i32`
+          lhs: CAST
+            type: TYPE_NAME `u8`
+            lhs: IDENTIFIER `x`
+      VAR_DECL `l`
+        lhs: EQ_EQ `==`
+          lhs: BOOL_NOT `!`
+            lhs: IDENTIFIER `a`
+          rhs: IDENTIFIER `b`
+      VAR_DECL `m`
+        lhs: MUL `*`
+          lhs: GROUPED_EXPR `(`
+            lhs: ADD `+`
+              lhs: NUMBER_LITERAL `1`
+              rhs: NUMBER_LITERAL `2`
+          rhs: NUMBER_LITERAL `3`
+      VAR_DECL `n`
+        lhs: DEREF `*`
+          lhs: DEREF `*`
+            lhs: IDENTIFIER `pp`
+      VAR_DECL `o`
+        lhs: ADDRESS_OF `&`
+          lhs: INDEX `[`
+            lhs: MEMBER `b`
+              lhs: IDENTIFIER `a`
+            rhs: NUMBER_LITERAL `0`
+      VAR_DECL `p`
+        lhs: NEG `-`
+          lhs: INDEX `[`
+            lhs: CALL `(`
+              lhs: MEMBER `b`
+                lhs: IDENTIFIER `a`
+              IDENTIFIER `c`
+            rhs: IDENTIFIER `d`

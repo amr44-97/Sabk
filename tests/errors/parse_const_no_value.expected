@@ -1,0 +1,3 @@
+[error]: expected `=` and a value (a constant needs a value), found `;` at [tests/errors/parse_const_no_value.smelt:1:13]
+     1 | const X: i32;
+       |             ^

@@ -1,0 +1,4 @@
+// a switch expression case is one value unless the switch is labeled
+enum E { A, B }
+fn g() {}
+fn f(e: E) -> i64 { return switch (e) { case .A: g(); 1; case .B: 2; }; }

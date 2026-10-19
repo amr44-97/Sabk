@@ -1,0 +1,120 @@
+ROOT
+  FUN_DECL `f`
+    rhs: BLOCK
+      VAR_DECL `a`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `g`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+          NUMBER_LITERAL `3`
+      VAR_DECL `b`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `g`
+      VAR_DECL `c`
+        lhs: MEMBER `x`
+          lhs: INDEX `[`
+            lhs: CALL `(`
+              lhs: CALL `(`
+                lhs: IDENTIFIER `h`
+              NUMBER_LITERAL `1`
+            rhs: NUMBER_LITERAL `2`
+      VAR_DECL `d`
+        lhs: CALL `(`
+          lhs: MEMBER `alloc`
+            lhs: MEMBER `arena`
+              lhs: IDENTIFIER `mem`
+          NUMBER_LITERAL `16`
+      VAR_DECL `e`
+        lhs: STRUCT_INIT
+          type: IDENTIFIER `Vec2`
+          FIELD_INIT `x`
+            rhs: NUMBER_LITERAL `1`
+          FIELD_INIT `y`
+            rhs: NUMBER_LITERAL `2`
+      VAR_DECL `f`
+        lhs: STRUCT_INIT
+          type: IDENTIFIER `Vec2`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+      VAR_DECL `g`
+        lhs: STRUCT_INIT
+          type: IDENTIFIER `Vec2`
+      VAR_DECL `h`
+        lhs: STRUCT_INIT
+          type: MEMBER `Pair`
+            lhs: IDENTIFIER `mem`
+          FIELD_INIT `a`
+            rhs: STRUCT_INIT
+              type: IDENTIFIER `Vec2`
+              FIELD_INIT `x`
+                rhs: NUMBER_LITERAL `0`
+      VAR_DECL `i`
+        lhs: ARRAY_LITERAL `.`
+          type: IDENTIFIER `i32`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+          NUMBER_LITERAL `3`
+      VAR_DECL `j`
+        lhs: ARRAY_LITERAL `.`
+          type: TYPE_EXPR `[`
+            lhs: TYPE_ARRAY `[`
+              lhs: TYPE_NAME `u8`
+              rhs: NUMBER_LITERAL `2`
+          ARRAY_LITERAL `.`
+            type: IDENTIFIER `u8`
+            NUMBER_LITERAL `1`
+            NUMBER_LITERAL `2`
+          ARRAY_LITERAL `.`
+            type: IDENTIFIER `u8`
+            NUMBER_LITERAL `3`
+            NUMBER_LITERAL `4`
+      VAR_DECL `k`
+        lhs: SIZE_OF
+          extra: STAR `*`
+            lhs: TYPE_EXPR `[`
+              lhs: TYPE_ARRAY `[`
+                lhs: TYPE_NAME `u8`
+                rhs: NUMBER_LITERAL `4`
+      VAR_DECL `l`
+        lhs: SIZE_OF
+          extra: MEMBER `Allocator`
+            lhs: IDENTIFIER `mem`
+      VAR_DECL `m`
+        lhs: NEW
+          extra: IDENTIFIER `Vec2`
+      VAR_DECL `n`
+        lhs: NEW
+          type: TYPE_PTR `*`
+            lhs: TYPE_NAME `i32`
+          lhs: MEMBER `temp_allocator`
+            lhs: CONTEXT
+      VAR_DECL `o`
+        lhs: MEMBER `allocator`
+          lhs: CONTEXT
+      VAR_DECL `p`
+        lhs: CHAR_LITERAL `'c'`
+      VAR_DECL `q`
+        lhs: STRING_LITERAL `"str"`
+      VAR_DECL `r`
+        lhs: FLOAT_LITERAL `1.5e3`
+      VAR_DECL `s`
+        lhs: NUMBER_LITERAL `0xFF`
+      VAR_DECL `t`
+        lhs: BOOL_LITERAL `true`
+      VAR_DECL `u`
+        lhs: BOOL_LITERAL `false`
+      VAR_DECL `v`
+        lhs: NULL_LITERAL
+      VAR_DECL `w`
+        lhs: BIT_NOT `~`
+          lhs: IDENTIFIER `x`
+      VAR_DECL `x`
+        lhs: CAST
+          type: TYPE_FN
+            type: TYPE_NAME `bool`
+            TYPE_NAME `i32`
+          lhs: IDENTIFIER `f`
+      ASSIGN `=`
+        lhs: MEMBER `allocator`
+          lhs: CONTEXT
+        rhs: IDENTIFIER `arena`

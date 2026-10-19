@@ -1,0 +1,16 @@
+fn plain(a: i32, body: Code) #expand {
+    `let it = a;
+    `defer finish();
+    #insert body;
+    let t = #text(body);
+    let where = #location(body);
+    `counter += #insert body;
+    `return 1;
+}
+pub fn value(x: i32) -> i32 #expand { return x; }
+
+fn f() {
+    plain(1) { work(); }
+    plain(2, 3);
+    let v = value(4);
+}

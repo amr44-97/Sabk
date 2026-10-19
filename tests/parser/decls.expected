@@ -1,0 +1,83 @@
+ROOT
+  IMPORT `"std/io"`
+  IMPORT `"vendor/my-lib"`
+    rhs: IDENTIFIER `lib`
+  STRUCT `Vec2` [pub]
+    STRUCT_FIELD `x`
+      type: TYPE_NAME `f32`
+    STRUCT_FIELD `y`
+      type: TYPE_NAME `f32`
+      lhs: FLOAT_LITERAL `1.0`
+  UNION `Bits`
+    STRUCT_FIELD `i`
+      type: TYPE_NAME `u32`
+    STRUCT_FIELD `f`
+      type: TYPE_NAME `f32`
+  STRUCT `Empty`
+  ENUM `Color`
+    type: TYPE_NAME `u8`
+    ENUM_VARIANT `Red`
+    ENUM_VARIANT `Green`
+    ENUM_VARIANT `Blue`
+      lhs: NUMBER_LITERAL `10`
+  ENUM `Plain`
+    ENUM_VARIANT `A`
+  TYPE_ALIAS `Callback`
+    type: TYPE_FN
+      type: TYPE_NAME `bool`
+      TYPE_NAME `i32`
+      TYPE_PTR `*`
+        lhs: TYPE_NAME `u8`
+  TYPE_ALIAS `Handler`
+    type: TYPE_FN
+  TYPE_ALIAS `Grid`
+    type: TYPE_ARRAY `[`
+      lhs: TYPE_ARRAY `[`
+        lhs: TYPE_NAME `f32`
+        rhs: NUMBER_LITERAL `4`
+      rhs: NUMBER_LITERAL `4`
+  TYPE_ALIAS `Bytes`
+    type: TYPE_SLICE `[`
+      lhs: TYPE_NAME `u8`
+  TYPE_ALIAS `Alloc`
+    type: TYPE_MEMBER `Allocator`
+      lhs: TYPE_NAME `mem`
+  CONST_DECL `MAX`
+    type: TYPE_NAME `i32`
+    lhs: NUMBER_LITERAL `64`
+  CONST_DECL `NAME` [pub]
+    lhs: STRING_LITERAL `"x"`
+  VAR_DECL `counter`
+    type: TYPE_NAME `u64`
+  VAR_DECL `ready`
+    lhs: BOOL_LITERAL `false`
+  FUN_DECL `printf` [extern] [variadic]
+    type: TYPE_NAME `i32`
+    FUN_PARAM `fmt`
+      type: TYPE_PTR `*`
+        lhs: TYPE_NAME `u8`
+  FUN_DECL `exit` [extern]
+    FUN_PARAM `code`
+      type: TYPE_NAME `i32`
+  FUN_DECL `callback` [extern]
+    type: TYPE_NAME `i32`
+    rhs: BLOCK
+      RETURN
+        lhs: IDENTIFIER `x`
+    FUN_PARAM `x`
+      type: TYPE_NAME `i32`
+  FUN_DECL `alloc`
+    type: TYPE_PTR `*`
+      lhs: TYPE_NAME `void`
+    rhs: BLOCK
+      RETURN
+        lhs: NULL_LITERAL
+    FUN_PARAM `size`
+      type: TYPE_NAME `usize`
+    FUN_PARAM `a`
+      type: TYPE_MEMBER `Allocator`
+        lhs: TYPE_NAME `mem`
+      lhs: MEMBER `allocator`
+        lhs: CONTEXT
+  FUN_DECL `noop` [pub]
+    rhs: BLOCK

@@ -1,0 +1,1 @@
+fn bad_kind($T: Kind) {}

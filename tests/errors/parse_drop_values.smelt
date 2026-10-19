@@ -1,0 +1,2 @@
+// `_ =` takes one value
+fn main() { _ = 1, 2; }

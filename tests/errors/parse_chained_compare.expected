@@ -1,0 +1,3 @@
+[error]: comparisons can't be chained, join them with `&&` at [tests/errors/parse_chained_compare.smelt:1:24]
+     1 | fn f() { let x = a < b < c; }
+       |                        ^

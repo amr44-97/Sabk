@@ -1,0 +1,3 @@
+[error]: `let` needs a type, an initializer, or both at [tests/errors/parse_let_no_type.smelt:1:14]
+     1 | fn f() { let x; }
+       |              ^

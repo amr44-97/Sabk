@@ -1,0 +1,3 @@
+[error]: an `extern` function can't be `#expand` at [tests/errors/macro_extern.smelt:1:15]
+     1 | extern fn m() #expand {}
+       |               ^

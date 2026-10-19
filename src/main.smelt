@@ -1,0 +1,76 @@
+// smelt: the Smelt compiler, written in Smelt.
+//
+//   smelt --tokens file.smelt     print the tokens of a file
+//   smelt --ast file.smelt        print its syntax tree
+//
+// The rest of the compiler is still the C++ one in ../the-compiler.
+
+import "std/io";
+import "std/os";
+import "std/fmt";
+import "std/str";
+import "std/array";
+import "source";
+import "token";
+import "lexer";
+import "parser";
+import "ast";
+
+extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+
+fn usage() -> i32 {
+    eprintln("usage: smelt --tokens|--ast <file>");
+    return 1;
+}
+
+fn main() -> i32 {
+    let argv = args();
+    let tokens_mode, ast_mode = false, false;
+    let path = "";
+    for (arg in argv[1..]) {
+        if (arg == "--tokens")
+            tokens_mode = true;
+        else if (arg == "--ast")
+            ast_mode = true;
+        else if (arg.len > 0 && arg[0] == '-' || path.len > 0)
+            return usage();
+        else
+            path = arg;
+    }
+    if ((!tokens_mode && !ast_mode) || path.len == 0)
+        return usage();
+
+    let src, err = load_source(path);
+    if (err != .None) {
+        eprintln("%: %", path, io_error_message(err));
+        return 1;
+    }
+    let tokens, ok = lex(&src);
+    if (!ok)
+        return 1;
+    if (tokens_mode) {
+        dump_tokens(tokens);
+        return 0;
+    }
+    let root, errors = parse_file(&src, tokens);
+    dump(root);
+    return if (errors > 0) 1 else 0;
+}
+
+fn dump_tokens(tokens: []Token) {
+    let out: [..]u8;
+    for (t in tokens) {
+        print_to(&out, "%{4}:%{<3} %{<22} `%`", t.line, t.column, token_name(t.kind), t.text);
+        if (t.kind == .Number) {
+            let value, _ = integer_value(t.text);
+            print_to(&out, " = %", value);
+        }
+        if (t.kind == .Float) {
+            let buffer: [64]u8 = ---;
+            snprintf(buffer.ptr, buffer.len as usize, "%g", float_value(t.text));
+            print_to(&out, " = %", from_cstring(buffer.ptr));
+        }
+        array_add(&out, '\n');
+    }
+    print(out as string);
+}

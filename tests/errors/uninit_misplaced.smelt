@@ -1,0 +1,6 @@
+// `---` only goes in a local's declaration: not a field default, a
+// constant, an assignment or an argument
+fn f(x: i32) {
+    x = ---;
+}
+fn main() {}

@@ -1,0 +1,92 @@
+ROOT
+  FUN_DECL `divide`
+    type: TYPE_TUPLE `(`
+      TYPE_NAME `i64`
+      TYPE_NAME `i64`
+    rhs: BLOCK
+      RETURN
+        lhs: VALUES `/`
+          DIV `/`
+            lhs: IDENTIFIER `a`
+            rhs: IDENTIFIER `b`
+          MOD `%`
+            lhs: IDENTIFIER `a`
+            rhs: IDENTIFIER `b`
+    FUN_PARAM `a`
+      type: TYPE_NAME `i64`
+    FUN_PARAM `b`
+      type: TYPE_NAME `i64`
+  FUN_DECL `apply`
+    type: TYPE_NAME `i64`
+    rhs: BLOCK
+      VAR_DECL `y`
+        lhs: OR_RETURN
+          lhs: CALL `(`
+            lhs: IDENTIFIER `f`
+            IDENTIFIER `x`
+      RETURN
+        lhs: IDENTIFIER `y`
+    FUN_PARAM `f`
+      type: TYPE_FN
+        type: TYPE_TUPLE `(`
+          TYPE_NAME `i64`
+          TYPE_NAME `bool`
+        TYPE_NAME `i64`
+    FUN_PARAM `x`
+      type: TYPE_NAME `i64`
+  FUN_DECL `main`
+    rhs: BLOCK
+      LET_VALUES `q`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `divide`
+          NUMBER_LITERAL `7`
+          NUMBER_LITERAL `2`
+        VAR_DECL `q`
+        VAR_DECL `r`
+      LET_VALUES `_`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `divide`
+          NUMBER_LITERAL `7`
+          NUMBER_LITERAL `2`
+        VAR_DECL `_`
+        VAR_DECL `rest`
+      ASSIGN `=`
+        lhs: VALUES `q`
+          IDENTIFIER `q`
+          IDENTIFIER `r`
+        rhs: VALUES `r`
+          IDENTIFIER `r`
+          IDENTIFIER `q`
+      ASSIGN `=`
+        lhs: VALUES `q`
+          IDENTIFIER `q`
+          IDENTIFIER `_`
+        rhs: CALL `(`
+          lhs: IDENTIFIER `divide`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `1`
+      VAR_DECL `v`
+        lhs: OR_ELSE
+          lhs: CALL `(`
+            lhs: IDENTIFIER `f`
+          rhs: OR_ELSE
+            lhs: CALL `(`
+              lhs: IDENTIFIER `g`
+            rhs: NUMBER_LITERAL `0`
+      VAR_DECL `w`
+        lhs: OR_ELSE
+          lhs: CALL `(`
+            lhs: IDENTIFIER `f`
+          rhs: BOOL_OR `||`
+            lhs: IDENTIFIER `a`
+            rhs: IDENTIFIER `b`
+      VAR_DECL `n`
+        lhs: ADD `+`
+          lhs: OR_RETURN
+            lhs: CALL `(`
+              lhs: IDENTIFIER `f`
+          rhs: NUMBER_LITERAL `1`
+      EXPR_STMT `f`
+        lhs: OR_RETURN
+          lhs: CALL `(`
+            lhs: IDENTIFIER `f`

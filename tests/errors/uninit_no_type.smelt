@@ -1,0 +1,4 @@
+// `---` has no type for the variable to take
+fn main() {
+    let a = ---;
+}

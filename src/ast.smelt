@@ -1,0 +1,361 @@
+// The syntax tree the parser makes. Every node has a token (its name, its
+// operator, or the token it starts at: errors point there) and a kind,
+// which holds the node's own parts by name. A missing part is null.
+//
+// dump() prints a tree as the C++ compiler's --ast did, so the two parsers
+// can be compared on the same files.
+
+import "std/array";
+import "std/fmt";
+import "std/io";
+import "std/str";
+import "token";
+
+pub struct Node {
+    tok: Token;
+    span: string;      // its source text, where a message quotes it (call
+                       // arguments, operands of operators); else empty
+    kind: NodeKind;
+}
+
+pub enum BinaryOp {
+    Add, Sub, Mul, Div, Mod,
+    Lt, Gt, LtEq, GtEq, EqEq, NotEq,
+    And, Or,
+    BitOr, BitAnd, BitXor, Shl, Shr,
+}
+
+pub enum UnaryOp {
+    Not, Neg, BitNot,
+    AddressOf,          // &x
+    PointerType,        // *T written where an expression goes: make(*Node)
+}
+
+pub enum NodeKind {
+    Root(decls: []*Node),
+
+    // ---- declarations; tok is the name unless said otherwise
+    Import(alias: *Node),                    // tok: the path, a string token
+    Fn(params: []*Node, result: *Node, body: *Node, is_pub: bool,
+       is_extern: bool, is_macro: bool, variadic: bool, format: bool,
+       nodiscard: bool, no_bounds_check: bool),
+    Param(declared: *Node, value: *Node, is_type: bool, variadic: bool),
+    Struct(fields: []*Node, type_params: []*Node, is_union: bool, is_pub: bool),
+    Field(declared: *Node, value: *Node),
+    Enum(backing: *Node, variants: []*Node, type_params: []*Node, is_pub: bool),
+    // Number(i64) has a payload type; Binary(op: Op, ...) fields, a Struct
+    Variant(payload: *Node, fields: *Node, value: *Node),
+    TypeAlias(aliased: *Node, is_pub: bool),
+    Let(declared: *Node, value: *Node, is_pub: bool, is_extern: bool,
+        uninit: bool, caller: bool),
+    LetValues(names: []*Node, values: *Node, caller: bool), // let a, b = ...; names are Lets
+    Const(declared: *Node, value: *Node, is_pub: bool, caller: bool),
+    Run(value: *Node),                       // #run value; tok: `#run`
+    InsertString(value: *Node),              // #insert value; tok: `#insert`
+
+    // ---- statements; tok is their keyword unless said otherwise
+    Block(stmts: []*Node, label: *Node, gives_value: bool), // tok: `{`
+    ExprStmt(value: *Node, dropped: bool),   // tok: where it starts
+    Assign(target: *Node, value: *Node),     // tok: `=`, `+=`, ...
+    Inc(target: *Node),                      // tok: `++`
+    Dec(target: *Node),
+    Return(value: *Node, caller: bool),
+    Break(label: *Node, value: *Node),
+    Continue(label: *Node, value: *Node),
+    Defer(stmt: *Node, caller: bool),
+    If(cond: *Node, then: *Node, else_: *Node, gives_value: bool),
+    StaticIf(cond: *Node, then: *Node, else_: *Node), // #if; tok: `if`
+    While(cond: *Node, body: *Node, label: *Node),
+    DoWhile(body: *Node, cond: *Node, label: *Node),
+    For(init: *Node, cond: *Node, step: *Node, body: *Node, label: *Node),
+    ForIn(iterable: *Node, range_end: *Node, body: *Node, label: *Node), // tok: the variable
+    Switch(value: *Node, cases: []*Node, label: *Node, gives_value: bool),
+    Case(patterns: []*Node, guard: *Node, body: *Node),
+    DefaultCase(body: *Node),
+    Insert,                                  // #insert code; tok: the Code parameter
+
+    // ---- expressions
+    Identifier(caller: bool),                // `name: the macro caller's
+    Number, Float, String, Char, Bool, Null, Context,
+    Unary(op: UnaryOp, operand: *Node),      // tok: the operator
+    Binary(op: BinaryOp, lhs: *Node, rhs: *Node),
+    Deref(pointer: *Node),                   // p.*; tok: `*`
+    Grouped(inner: *Node),                   // (inner); tok: `(`
+    Call(callee: *Node, args: []*Node, trailing_block: bool), // tok: `(`
+    Member(object: *Node),                   // object.name; tok: the name
+    Index(object: *Node, index: *Node),      // tok: `[`
+    Slice(object: *Node, lo: *Node, hi: *Node),
+    Cast(value: *Node, to: *Node),
+    SizeOf(of: *Node),                       // a type or a value
+    TypeInfo(of: *Node),
+    Spread(value: *Node),                    // ..xs as arguments; tok: `..`
+    Values(items: []*Node),                  // a, b; tok: the first's
+    OrReturn(value: *Node),
+    OrElse(value: *Node, fallback: *Node),
+    // new(T, ...), new([]T, n, ...), new(value, ...): the resolver tells
+    // what `first` and `second` are
+    New(declared: *Node, value: *Node, first: *Node, second: *Node),
+    StructInit(declared: *Node, items: []*Node), // T.{...}; tok: `{`, or `.` in .{...}
+    FieldInit(value: *Node),                 // .name = value; tok: the name
+    ArrayLiteral(elem: *Node, items: []*Node), // T.[...]; tok: the `.`
+    EnumShorthand,                           // .Red; tok: `.Red`
+    TextOf,                                  // #text(code)
+    LocationOf,                              // #location(code)
+    TypeExpr(declared: *Node),               // a type where an expression goes
+
+    // ---- patterns, in cases and after `is`
+    Is(value: *Node, pattern: *Node),
+    Range(lo: *Node, hi: *Node, inclusive: bool), // tok: `..`
+    VariantPattern(variant: *Node, bindings: []*Node, by_fields: bool),
+    FieldPattern(pattern: *Node, field: *Node),
+    Binding(field: *Node, by_ref: bool),     // x or &x; tok: the name
+
+    // ---- types
+    TypeName(args: []*Node),                 // tok: the name, or `?` in ?T
+    TypeMember(module: *Node, args: []*Node), // mem.Allocator; tok: the member
+    TypePointer(to: *Node),
+    TypeArray(elem: *Node, len: *Node),
+    TypeSlice(elem: *Node),
+    TypeGrowable(elem: *Node),
+    TypeFn(params: []*Node, result: *Node),
+    TypeTuple(items: []*Node),               // (i64, bool) after `->`
+    TypeParam,                               // $T; tok: the name
+}
+
+pub fn new_node(tok: Token, kind: NodeKind) -> *Node {
+    return new(Node.{ .tok = tok, .kind = kind });
+}
+
+// ---- the C++ compiler's dump
+
+// a node as the C++ Node held it: its tag, and its parts in lhs, rhs,
+// extra and list
+struct OldShape {
+    tag: string;
+    declared: *Node;    // `type:`
+    lhs: *Node;
+    rhs: *Node;
+    extra: *Node;
+    list: []*Node;
+    type_params: []*Node;
+    caller: bool;
+    is_pub: bool;
+    is_extern: bool;
+    uninit: bool;
+    no_bounds_check: bool;
+    nodiscard: bool;
+    dropped: bool;
+    variadic: bool;
+    type_param: bool;
+    generic: bool;
+}
+
+fn binary_tag(op: BinaryOp) -> string {
+    return switch (op) {
+    case .Add: "ADD";       case .Sub: "SUB";       case .Mul: "MUL";
+    case .Div: "DIV";       case .Mod: "MOD";
+    case .Lt: "LT";         case .Gt: "GT";         case .LtEq: "LT_EQ";
+    case .GtEq: "GT_EQ";    case .EqEq: "EQ_EQ";    case .NotEq: "NOT_EQ";
+    case .And: "BOOL_AND";  case .Or: "BOOL_OR";
+    case .BitOr: "BIT_OR";  case .BitAnd: "BIT_AND"; case .BitXor: "BIT_XOR";
+    case .Shl: "SHL";       case .Shr: "SHR";
+    };
+}
+
+fn unary_tag(op: UnaryOp) -> string {
+    return switch (op) {
+    case .Not: "BOOL_NOT";
+    case .Neg: "NEG";
+    case .BitNot: "BIT_NOT";
+    case .AddressOf: "ADDRESS_OF";
+    case .PointerType: "STAR";
+    };
+}
+
+fn old_shape(n: *Node) -> OldShape {
+    let s: OldShape;
+    switch (n.kind) {
+    case .Root{decls}: s.tag = "ROOT"; s.list = decls;
+    case .Import{alias}: s.tag = "IMPORT"; s.rhs = alias;
+    case .Fn(f):
+        s.tag = if (f.is_macro) "MACRO_DECL" else "FUN_DECL";
+        s.declared = f.result;
+        s.rhs = f.body;
+        s.list = f.params;
+        s.is_pub = f.is_pub;
+        s.is_extern = f.is_extern;
+        s.variadic = f.variadic;
+        s.nodiscard = f.nodiscard;
+        s.no_bounds_check = f.no_bounds_check;
+    case .Param(p):
+        s.tag = "FUN_PARAM";
+        s.declared = p.declared;
+        s.lhs = p.value;
+        s.type_param = p.is_type;
+        s.variadic = p.variadic;
+    case .Struct(st):
+        s.tag = if (st.is_union) "UNION" else "STRUCT";
+        s.list = st.fields;
+        s.type_params = st.type_params;
+        s.generic = st.type_params.len > 0;
+        s.is_pub = st.is_pub;
+    case .Field{declared, value}:
+        s.tag = "STRUCT_FIELD"; s.declared = declared; s.lhs = value;
+    case .Enum(e):
+        s.tag = "ENUM";
+        s.declared = e.backing;
+        s.list = e.variants;
+        s.generic = e.type_params.len > 0;
+        s.is_pub = e.is_pub;
+    case .Variant{payload, fields, value}:
+        s.tag = "ENUM_VARIANT"; s.declared = payload; s.lhs = value; s.rhs = fields;
+    case .TypeAlias{aliased, is_pub}:
+        s.tag = "TYPE_ALIAS"; s.declared = aliased; s.is_pub = is_pub;
+    case .Let(l):
+        s.tag = "VAR_DECL";
+        s.declared = l.declared;
+        s.lhs = l.value;
+        s.is_pub = l.is_pub;
+        s.is_extern = l.is_extern;
+        s.uninit = l.uninit;
+        s.caller = l.caller;
+    case .LetValues{names, values, caller}:
+        s.tag = "LET_VALUES"; s.lhs = values; s.list = names; s.caller = caller;
+    case .Const(c):
+        s.tag = "CONST_DECL"; s.declared = c.declared; s.lhs = c.value;
+        s.is_pub = c.is_pub; s.caller = c.caller;
+    case .Run{value}: s.tag = "RUN"; s.lhs = value;
+    case .InsertString{value}: s.tag = "INSERT_STRING"; s.lhs = value;
+
+    case .Block{stmts, gives_value}:
+        s.tag = if (gives_value) "BLOCK_EXPR" else "BLOCK"; s.list = stmts;
+    case .ExprStmt{value, dropped}: s.tag = "EXPR_STMT"; s.lhs = value; s.dropped = dropped;
+    case .Assign{target, value}: s.tag = "ASSIGN"; s.lhs = target; s.rhs = value;
+    case .Inc{target}: s.tag = "INC"; s.lhs = target;
+    case .Dec{target}: s.tag = "DEC"; s.lhs = target;
+    case .Return{value, caller}: s.tag = "RETURN"; s.lhs = value; s.caller = caller;
+    case .Break{value}: s.tag = "BREAK"; s.rhs = value;
+    case .Continue{value}: s.tag = "CONTINUE"; s.rhs = value;
+    case .Defer{stmt, caller}: s.tag = "DEFER"; s.lhs = stmt; s.caller = caller;
+    case .If(i):
+        s.tag = if (i.gives_value) "IF_EXPR" else "IF";
+        s.lhs = i.cond; s.rhs = i.then; s.extra = i.else_;
+    case .StaticIf{cond, then, else_}:
+        s.tag = "STATIC_IF"; s.lhs = cond; s.rhs = then; s.extra = else_;
+    case .While{cond, body}: s.tag = "WHILE"; s.lhs = cond; s.rhs = body;
+    case .DoWhile{body, cond}: s.tag = "DO_WHILE"; s.lhs = cond; s.rhs = body;
+    case .For(f):
+        s.tag = "FOR";
+        s.rhs = f.body;
+        s.list = new([]*Node, 3);
+        s.list[0] = f.init;
+        s.list[1] = f.cond;
+        s.list[2] = f.step;
+    case .ForIn{iterable, range_end, body}:
+        s.tag = "FOR_IN"; s.lhs = iterable; s.rhs = body; s.extra = range_end;
+    case .Switch{value, cases, gives_value}:
+        s.tag = if (gives_value) "SWITCH_EXPR" else "SWITCH"; s.lhs = value; s.list = cases;
+    case .Case{patterns, guard, body}:
+        s.tag = "CASE"; s.rhs = body; s.extra = guard; s.list = patterns;
+    case .DefaultCase{body}: s.tag = "DEFAULT_CASE"; s.rhs = body;
+    case .Insert: s.tag = "INSERT";
+
+    case .Identifier{caller}: s.tag = "IDENTIFIER"; s.caller = caller;
+    case .Number: s.tag = "NUMBER_LITERAL";
+    case .Float: s.tag = "FLOAT_LITERAL";
+    case .String: s.tag = "STRING_LITERAL";
+    case .Char: s.tag = "CHAR_LITERAL";
+    case .Bool: s.tag = "BOOL_LITERAL";
+    case .Null: s.tag = "NULL_LITERAL";
+    case .Context: s.tag = "CONTEXT";
+    case .Unary{op, operand}: s.tag = unary_tag(op); s.lhs = operand;
+    case .Binary{op, lhs, rhs}: s.tag = binary_tag(op); s.lhs = lhs; s.rhs = rhs;
+    case .Deref{pointer}: s.tag = "DEREF"; s.lhs = pointer;
+    case .Grouped{inner}: s.tag = "GROUPED_EXPR"; s.lhs = inner;
+    case .Call{callee, args}: s.tag = "CALL"; s.lhs = callee; s.list = args;
+    case .Member{object}: s.tag = "MEMBER"; s.lhs = object;
+    case .Index{object, index}: s.tag = "INDEX"; s.lhs = object; s.rhs = index;
+    case .Slice{object, lo, hi}: s.tag = "SLICE"; s.lhs = object; s.rhs = lo; s.extra = hi;
+    case .Cast{value, to}: s.tag = "CAST"; s.declared = to; s.lhs = value;
+    case .SizeOf{of}: s.tag = "SIZE_OF"; s.extra = of;
+    case .TypeInfo{of}: s.tag = "TYPE_INFO"; s.extra = of;
+    case .Spread{value}: s.tag = "SPREAD"; s.lhs = value;
+    case .Values{items}: s.tag = "VALUES"; s.list = items;
+    case .OrReturn{value}: s.tag = "OR_RETURN"; s.lhs = value;
+    case .OrElse{value, fallback}: s.tag = "OR_ELSE"; s.lhs = value; s.rhs = fallback;
+    case .New(nw):
+        s.tag = "NEW"; s.declared = nw.declared; s.lhs = nw.first; s.rhs = nw.second;
+        s.extra = nw.value;
+    case .StructInit{declared, items}: s.tag = "STRUCT_INIT"; s.declared = declared; s.list = items;
+    case .FieldInit{value}: s.tag = "FIELD_INIT"; s.rhs = value;
+    case .ArrayLiteral{elem, items}: s.tag = "ARRAY_LITERAL"; s.declared = elem; s.list = items;
+    case .EnumShorthand: s.tag = "ENUM_SHORTHAND";
+    case .TextOf: s.tag = "TEXT_OF";
+    case .LocationOf: s.tag = "LOCATION_OF";
+    case .TypeExpr{declared}: s.tag = "TYPE_EXPR"; s.lhs = declared;
+
+    case .Is{value, pattern}: s.tag = "IS"; s.lhs = value; s.rhs = pattern;
+    case .Range{lo, hi}: s.tag = "RANGE"; s.lhs = lo; s.rhs = hi;
+    case .VariantPattern{variant, bindings}:
+        s.tag = "VARIANT_PATTERN"; s.lhs = variant; s.list = bindings;
+    case .FieldPattern{pattern, field}: s.tag = "FIELD_PATTERN"; s.lhs = pattern; s.extra = field;
+    case .Binding{field}: s.tag = "VAR_DECL"; s.extra = field;
+
+    case .TypeName{args}: s.tag = "TYPE_NAME"; s.list = args;
+    case .TypeMember{module, args}: s.tag = "TYPE_MEMBER"; s.lhs = module; s.list = args;
+    case .TypePointer{to}: s.tag = "TYPE_PTR"; s.lhs = to;
+    case .TypeArray{elem, len}: s.tag = "TYPE_ARRAY"; s.lhs = elem; s.rhs = len;
+    case .TypeSlice{elem}: s.tag = "TYPE_SLICE"; s.lhs = elem;
+    case .TypeGrowable{elem}: s.tag = "TYPE_GROWABLE"; s.lhs = elem;
+    case .TypeFn{params, result}: s.tag = "TYPE_FN"; s.declared = result; s.list = params;
+    case .TypeTuple{items}: s.tag = "TYPE_TUPLE"; s.list = items;
+    case .TypeParam: s.tag = "TYPE_PARAM";
+    }
+    return s;
+}
+
+// prints the tree to stdout
+pub fn dump(n: *Node) {
+    let out: [..]u8;
+    dump_into(&out, n, 0, "");
+    print(out as string);
+    array_free(&out);
+}
+
+fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
+    for (i in 0..indent * 2)
+        array_add(out, ' ');
+    if (label.len > 0)
+        print_to(out, "%: ", label);
+    if (n == null) {
+        append_string(out, "(none)\n");
+        return;
+    }
+    let s = old_shape(n);
+    append_string(out, s.tag);
+    // keyword and `{` tokens repeat the tag, so only the others show;
+    // `true` and `false` are the value, so they show
+    let keyword = (n.tok.kind as u8) >= (TokenKind.Fn as u8) && n.kind.tag != .Bool;
+    if (n.tok.text.len > 0 && !keyword && n.tok.kind != .LBrace)
+        print_to(out, " `%`", n.tok.text);
+    if (s.caller) append_string(out, " [caller]");
+    if (s.is_pub) append_string(out, " [pub]");
+    if (s.is_extern) append_string(out, " [extern]");
+    if (s.uninit) append_string(out, " [uninit]");
+    if (s.no_bounds_check) append_string(out, " [no_bounds_check]");
+    if (s.nodiscard) append_string(out, " [nodiscard]");
+    if (s.dropped) append_string(out, " [dropped]");
+    if (s.variadic) append_string(out, " [variadic]");
+    if (s.type_param) append_string(out, " [type param]");
+    if (s.generic) append_string(out, " [generic]");
+    array_add(out, '\n');
+
+    if (s.declared != null) dump_into(out, s.declared, indent + 1, "type");
+    if (s.lhs != null) dump_into(out, s.lhs, indent + 1, "lhs");
+    if (s.rhs != null) dump_into(out, s.rhs, indent + 1, "rhs");
+    if (s.extra != null) dump_into(out, s.extra, indent + 1, "extra");
+    for (child in s.list)
+        dump_into(out, child, indent + 1, "");
+    for (param in s.type_params)
+        dump_into(out, param, indent + 1, "type_param");
+}

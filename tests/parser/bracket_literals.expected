@@ -1,0 +1,105 @@
+ROOT
+  FUN_DECL `f`
+    rhs: BLOCK
+      VAR_DECL `a`
+        lhs: ARRAY_LITERAL `.`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+          NUMBER_LITERAL `3`
+      VAR_DECL `b`
+        lhs: ARRAY_LITERAL `.`
+          IDENTIFIER `x`
+      VAR_DECL `c`
+        lhs: ARRAY_LITERAL `.`
+      VAR_DECL `d`
+        lhs: ARRAY_LITERAL `.`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+      VAR_DECL `e`
+        lhs: ARRAY_LITERAL `.`
+          type: IDENTIFIER `i32`
+          NUMBER_LITERAL `1`
+          NUMBER_LITERAL `2`
+      VAR_DECL `g`
+        lhs: ARRAY_LITERAL `.`
+          type: TYPE_EXPR `[`
+            lhs: TYPE_ARRAY `[`
+              lhs: TYPE_NAME `u8`
+              rhs: NUMBER_LITERAL `2`
+          IDENTIFIER `x`
+          IDENTIFIER `y`
+      VAR_DECL `h`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `make_list`
+          TYPE_EXPR `[`
+            lhs: TYPE_SLICE `[`
+              lhs: TYPE_NAME `u8`
+      VAR_DECL `i`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `make_list`
+          TYPE_EXPR `[`
+            lhs: TYPE_ARRAY `[`
+              lhs: TYPE_NAME `u8`
+              rhs: NUMBER_LITERAL `4`
+      VAR_DECL `r`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `make_list`
+          TYPE_EXPR `[`
+            lhs: TYPE_GROWABLE `[`
+              lhs: TYPE_NAME `u8`
+      VAR_DECL `j`
+        lhs: INDEX `[`
+          lhs: ARRAY_LITERAL `.`
+            IDENTIFIER `x`
+            IDENTIFIER `y`
+          rhs: NUMBER_LITERAL `0`
+      VAR_DECL `k`
+        lhs: INDEX `[`
+          lhs: ARRAY_LITERAL `.`
+            IDENTIFIER `x`
+          rhs: NUMBER_LITERAL `0`
+      VAR_DECL `l`
+        lhs: ARRAY_LITERAL `.`
+          ARRAY_LITERAL `.`
+            NUMBER_LITERAL `1`
+            NUMBER_LITERAL `2`
+          ARRAY_LITERAL `.`
+            NUMBER_LITERAL `3`
+            NUMBER_LITERAL `4`
+      VAR_DECL `m`
+        lhs: ARRAY_LITERAL `.`
+          type: GROUPED_EXPR `(`
+            lhs: STAR `*`
+              lhs: IDENTIFIER `Node`
+          IDENTIFIER `p`
+          IDENTIFIER `q`
+      VAR_DECL `n`
+        lhs: ARRAY_LITERAL `.`
+          type: CALL `(`
+            lhs: IDENTIFIER `List`
+            IDENTIFIER `i32`
+          IDENTIFIER `a`
+          IDENTIFIER `b`
+      VAR_DECL `o`
+        lhs: STRUCT_INIT
+          type: MEMBER `Arena`
+            lhs: IDENTIFIER `mem`
+          FIELD_INIT `size`
+            rhs: NUMBER_LITERAL `4`
+      VAR_DECL `p`
+        lhs: STRUCT_INIT
+          type: IDENTIFIER `Point`
+          FIELD_INIT `x`
+            rhs: NUMBER_LITERAL `1`
+      VAR_DECL `q`
+        lhs: STRUCT_INIT
+          type: CALL `(`
+            lhs: IDENTIFIER `List`
+            IDENTIFIER `i32`
+      EXPR_STMT `sum`
+        lhs: CALL `(`
+          lhs: IDENTIFIER `sum`
+          SPREAD `..`
+            lhs: ARRAY_LITERAL `.`
+              NUMBER_LITERAL `1`
+              NUMBER_LITERAL `2`

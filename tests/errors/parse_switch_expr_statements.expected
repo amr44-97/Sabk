@@ -1,0 +1,3 @@
+[error]: a switch expression's case is one value; to run statements first, label the switch (`s: switch (...)`) and give the value with `break s = value;` at [tests/errors/parse_switch_expr_statements.smelt:4:55]
+     4 | fn f(e: E) -> i64 { return switch (e) { case .A: g(); 1; case .B: 2; }; }
+       |                                                       ^

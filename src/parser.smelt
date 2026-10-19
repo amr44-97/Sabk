@@ -1,0 +1,1587 @@
+// The parser: tokens to a syntax tree, by recursive descent, for the
+// grammar in ../the-compiler/docs/reference.md.
+//
+//   let root, errors = parse_file(&src, tokens);
+//
+// A syntax error is reported, and the compiler stops there (`exit(1)`), as
+// the C++ one did. Code that parses but is wrong anyway (mixed operators,
+// C's spellings of literals) is reported and counted, and parsing goes on.
+
+import "std/array";
+import "std/fmt";
+import "std/mem";
+import "std/os";
+import "std/str";
+import "ast";
+import "source";
+import "token";
+
+// binary operator precedences that other code refers to
+const BIT_OR_PREC = 4; // `|`, the loosest bit operator
+const CMP_PREC = 7;    // comparisons, and `is`
+
+struct Parser {
+    src: *Source;
+    tokens: []Token;      // the last one is Eof
+    idx: isize;
+    error_count: isize;
+    statement_head: bool; // parsing the first expression of a statement
+    in_pattern: bool;     // a case's `X:` isn't a label there
+}
+
+// the file's declarations, and how many errors were reported and gone past
+pub fn parse_file(src: *Source, tokens: []Token) -> (*Node, isize) {
+    let p = Parser.{ .src = src, .tokens = tokens };
+    let start = peek(&p);
+    let decls: [..]*Node;
+    while (!at(&p, .Eof))
+        array_add(&decls, top_decl(&p));
+    return new_node(start, .Root(decls)), p.error_count;
+}
+
+/* ---------------------------------------------------------------- tokens */
+
+// looking past the end gives the Eof
+fn peek(p: *Parser, k: isize = 0) -> Token {
+    let i = p.idx + k;
+    return if (i < p.tokens.len) p.tokens[i] else p.tokens[p.tokens.len - 1];
+}
+
+fn at(p: *Parser, kind: TokenKind, k: isize = 0) -> bool { return peek(p, k).kind == kind; }
+
+fn next(p: *Parser) -> Token {
+    let t = peek(p);
+    if (p.idx < p.tokens.len - 1)
+        p.idx++;
+    return t;
+}
+
+fn eat(p: *Parser, kind: TokenKind) -> bool {
+    if (!at(p, kind))
+        return false;
+    next(p);
+    return true;
+}
+
+// `#name`; the name can be a keyword (`#if`)
+fn at_directive(p: *Parser, name: string) -> bool {
+    return at(p, .Hash) && peek(p, 1).text == name;
+}
+
+fn describe(t: Token) -> string {
+    if (t.kind == .Eof)
+        return "end of file";
+    return tformat("`%`", t.text);
+}
+
+fn expect(p: *Parser, kind: TokenKind, what: string) -> Token {
+    if (!at(p, kind))
+        fail(p, peek(p), tformat("expected %, found %", what, describe(peek(p))));
+    return next(p);
+}
+
+// a syntax error: reported, and the compiler stops
+fn fail(p: *Parser, t: Token, message: string) -> *Node {
+    report(p.src, .Error, t.text, message);
+    exit(1);
+    return null;
+}
+
+// an error parsing can go past
+fn report_error(p: *Parser, t: Token, message: string) {
+    report(p.src, .Error, t.text, message);
+    p.error_count++;
+}
+
+// `#name`: both tokens, as one token for errors to point at
+fn directive(p: *Parser) -> Token {
+    let hash = next(p);
+    let name = next(p);
+    return joined(hash, name);
+}
+
+// `a` and `b` as one token when nothing is between them: `#run`, `.Red`
+fn joined(a: Token, b: Token) -> Token {
+    if (b.text.ptr != a.text.ptr + a.text.len)
+        return b;
+    let t = b;
+    t.text = a.text.ptr[0..a.text.len + b.text.len] as string;
+    t.line = a.line;
+    t.column = a.column;
+    return t;
+}
+
+// the source text from `begin` to the end of the last token taken
+fn span_from(p: *Parser, begin: *u8) -> string {
+    let last = p.tokens[p.idx - 1];
+    let end = last.text.ptr + last.text.len;
+    return begin[0..(end as isize) - (begin as isize)] as string;
+}
+
+/* ---------------------------------------------------------- declarations */
+
+// #if (condition) { declarations } [else #if (...) { ... }] [else { ... }]
+// at the top level: the branch taken is part of the module
+fn top_static_if(p: *Parser) -> *Node {
+    next(p); // #
+    let t = next(p);
+    expect(p, .LParen, "`(` after `#if`");
+    let cond = expr(p);
+    expect(p, .RParen, "`)` after the condition");
+    let then = top_block(p);
+    let else_: *Node = null;
+    if (eat(p, .Else))
+        else_ = if (at_directive(p, "if")) top_static_if(p) else top_block(p);
+    return new_node(t, .StaticIf(cond, then, else_));
+}
+
+// a top-level `#if`'s branch: `{` declarations `}`
+fn top_block(p: *Parser) -> *Node {
+    let open = expect(p, .LBrace, "`{` and the declarations for this branch of the `#if`");
+    let decls: [..]*Node;
+    while (!at(p, .RBrace)) {
+        if (at(p, .Eof))
+            fail(p, open, "this `{` of an `#if` branch is never closed");
+        array_add(&decls, top_decl(p));
+    }
+    next(p);
+    return new_node(open, .Block(decls, null, false));
+}
+
+fn top_decl(p: *Parser) -> *Node {
+    if (at(p, .Import))
+        return import_decl(p);
+    if (at_directive(p, "if"))
+        return top_static_if(p);
+    if (at_directive(p, "run")) {
+        // `#run build();`: runs once the program is checked (a build script)
+        let t = directive(p);
+        let value = expr(p);
+        expect(p, .Semicolon, "`;` after `#run`");
+        return new_node(t, .Run(value));
+    }
+    if (at_directive(p, "insert")) {
+        // `#insert #run f();`: declarations made from a string
+        let t = directive(p);
+        let value = expr(p);
+        expect(p, .Semicolon, "`;` after `#insert`");
+        return new_node(t, .InsertString(value));
+    }
+
+    let is_pub = eat(p, .Pub);
+    let decl: *Node;
+    switch (peek(p).kind) {
+    case .Extern:
+        if (at(p, .Let, 1)) {
+            // extern let stdout: *void; a variable C defines
+            next(p);
+            next(p); // let
+            let name = expect(p, .Identifier, "a variable name");
+            if (!eat(p, .Colon))
+                fail(p, peek(p), tformat("an `extern let` needs its type: `extern let %: T;`", name.text));
+            let declared = type_(p);
+            let value: *Node = null;
+            if (eat(p, .Equal))
+                value = expr(p);
+            if (value != null)
+                fail(p, value.tok, "an `extern let` can't have a value: C defines the variable");
+            expect(p, .Semicolon, "`;` after the declaration");
+            decl = new_node(name, .Let(declared, null, false, true, false, false));
+        } else {
+            decl = fn_decl(p);
+        }
+    case .Fn:     decl = fn_decl(p);
+    case .Struct: decl = aggregate(p, false);
+    case .Union:  decl = aggregate(p, true);
+    case .Enum:   decl = enum_decl(p);
+    case .Type:   decl = type_alias(p);
+    case .Const:  decl = const_decl(p);
+    case .Let:
+        decl = let_decl(p);
+        if (decl.kind is .LetValues{names})
+            fail(p, names[1].tok, tformat("a global variable is declared one at a time: `let % = ...;`", decl.tok.text));
+        expect(p, .Semicolon, "`;` after the declaration");
+    default:
+        return fail(p, peek(p), tformat("expected a declaration (fn, struct, union, enum, type, const, let or import), found %", describe(peek(p))));
+    }
+    if (is_pub) {
+        switch (decl.kind) {
+        case .Fn(&f): f.is_pub = true;
+        case .Struct(&s): s.is_pub = true;
+        case .Enum(&e): e.is_pub = true;
+        case .TypeAlias(&t): t.is_pub = true;
+        case .Let(&l): l.is_pub = true;
+        case .Const(&c): c.is_pub = true;
+        default:
+        }
+    }
+    return decl;
+}
+
+fn import_decl(p: *Parser) -> *Node {
+    next(p); // import
+    let path = expect(p, .String, "a module path after `import`");
+    let alias: *Node = null;
+    if (eat(p, .As))
+        alias = new_node(expect(p, .Identifier, "a module name after `as`"), .Identifier(false));
+    expect(p, .Semicolon, "`;` after the import");
+    return new_node(path, .Import(alias));
+}
+
+fn fn_decl(p: *Parser) -> *Node {
+    let is_extern = eat(p, .Extern);
+    expect(p, .Fn, "`fn` after `extern`");
+    let name = expect(p, .Identifier, "a function name");
+    let params: [..]*Node;
+    let variadic = false;
+
+    expect(p, .LParen, "`(` to start the parameter list");
+    while (!at(p, .RParen)) {
+        if (at(p, .Ellipsis3)) {
+            let dots = next(p);
+            if (!is_extern)
+                fail(p, dots, "only `extern` functions can be variadic");
+            variadic = true;
+            break;
+        }
+        if (at(p, .Dollar)) {
+            // $T: Type, a parameter that takes a type: make_list(i32)
+            let declared = type_(p);
+            expect(p, .Colon, "`: Type` after the type parameter");
+            let kind = expect(p, .Identifier, "`Type`");
+            if (kind.text != "Type")
+                fail(p, kind, tformat("a `$%` parameter takes a type, so it's written `$%: Type`",
+                                      declared.tok.text, declared.tok.text));
+            array_add(&params, new_node(declared.tok, .Param(declared, null, true, false)));
+            if (!eat(p, .Comma))
+                break;
+            continue;
+        }
+        let param_name = expect(p, .Identifier, "a parameter name");
+        expect(p, .Colon, "`:` and a type after the parameter name");
+        if (at(p, .Ellipsis2)) {
+            // args: ..Any takes any number of arguments, as a []Any; none is
+            // an empty slice
+            let dots = next(p);
+            let declared = new_node(dots, .TypeSlice(type_(p)));
+            let empty = new_node(dots, .ArrayLiteral(null, .[]));
+            array_add(&params, new_node(param_name, .Param(declared, empty, false, true)));
+            if (eat(p, .Comma) && !at(p, .RParen))
+                fail(p, peek(p), "the `..` parameter must be the last one");
+            break;
+        }
+        let declared = type_(p);
+        let value: *Node = null;
+        if (eat(p, .Equal))
+            value = expr(p);
+        array_add(&params, new_node(param_name, .Param(declared, value, false, false)));
+        if (!eat(p, .Comma))
+            break;
+    }
+    expect(p, .RParen, "`)` to close the parameter list");
+
+    let result: *Node = null;
+    if (eat(p, .Arrow))
+        result = result_type(p);
+
+    // fn name(...) #expand { ... } is a macro
+    // fn print(fmt: string, args: ..Any) #format: calls get their format
+    // string checked against their values
+    // fn write_file(...) -> IoError #nodiscard: a call can't drop its result
+    // fn sum(xs: []i64) -> i64 #no_bounds_check { ... }: its indexing and
+    // slicing aren't checked (unless the build says always)
+    // These come in any order, before `#expand`.
+    let format, nodiscard, no_bounds_check = false, false, false;
+    let no_checks: Token;
+    while (true) {
+        if (at_directive(p, "format")) {
+            next(p);
+            next(p);
+            format = true;
+        } else if (at_directive(p, "nodiscard")) {
+            let hash = next(p);
+            next(p);
+            nodiscard = true;
+            if (result == null)
+                fail(p, hash, "`#nodiscard` is for a function that returns a value; this one returns nothing");
+        } else if (at_directive(p, "no_bounds_check")) {
+            no_checks = next(p);
+            next(p);
+            no_bounds_check = true;
+        } else {
+            break;
+        }
+    }
+
+    let is_macro = false;
+    if (at_directive(p, "expand")) {
+        let hash = next(p);
+        next(p);
+        if (no_bounds_check)
+            fail(p, no_checks, "a macro's code runs in its caller, so it's checked as its caller is; `#no_bounds_check` goes on the caller");
+        if (is_extern)
+            fail(p, hash, "an `extern` function can't be `#expand`");
+        let last_variadic = params.len > 0 && params[params.len - 1].kind is .Param{variadic: true};
+        if (variadic || last_variadic)
+            fail(p, hash, "an `#expand` function can't be variadic");
+        is_macro = true;
+        if (!at(p, .LBrace))
+            fail(p, peek(p), tformat("expected the body of the `#expand` function, found %", describe(peek(p))));
+    }
+
+    let body: *Node = null;
+    if (at(p, .LBrace)) {
+        body = block(p);
+    } else if (is_extern) {
+        if (no_bounds_check)
+            fail(p, no_checks, "`#no_bounds_check` is for a function with a body; C's own code isn't checked");
+        expect(p, .Semicolon, "a function body or `;`");
+    } else {
+        fail(p, peek(p), tformat("expected a function body `{`, found % (only `extern` functions can omit the body)", describe(peek(p))));
+    }
+    return new_node(name, .Fn(params, result, body, false, is_extern, is_macro,
+                              variadic, format, nodiscard, no_bounds_check));
+}
+
+// a generic declaration's ($A, $B)
+fn type_params(p: *Parser) -> [..]*Node {
+    let params: [..]*Node;
+    if (eat(p, .LParen)) {
+        while (!at(p, .RParen)) {
+            expect(p, .Dollar, "`$` and a type parameter name");
+            array_add(&params, new_node(expect(p, .Identifier, "a type parameter name"), .TypeParam));
+            if (!eat(p, .Comma))
+                break;
+        }
+        expect(p, .RParen, "`,` or `)` after the type parameters");
+    }
+    return params;
+}
+
+fn aggregate(p: *Parser, is_union: bool) -> *Node {
+    next(p); // struct / union
+    let name = expect(p, .Identifier, "a name");
+    let params = type_params(p); // a generic struct: struct List($T) { ... }
+    expect(p, .LBrace, "`{` to start the fields");
+    let fields: [..]*Node;
+    while (!at(p, .RBrace)) {
+        let field = expect(p, .Identifier, "a field name");
+        expect(p, .Colon, "`:` and a type after the field name");
+        let declared = type_(p);
+        let value: *Node = null;
+        if (eat(p, .Equal))
+            value = expr(p);
+        expect(p, .Semicolon, "`;` after the field");
+        array_add(&fields, new_node(field, .Field(declared, value)));
+    }
+    next(p); // }
+    return new_node(name, .Struct(fields, params, is_union, false));
+}
+
+fn enum_decl(p: *Parser) -> *Node {
+    next(p); // enum
+    let name = expect(p, .Identifier, "an enum name");
+    let params = type_params(p); // a generic tagged enum: enum Option($T) { ... }
+    let backing: *Node = null;
+    if (eat(p, .Colon))
+        backing = type_(p);
+    expect(p, .LBrace, "`{` to start the variants");
+    let variants: [..]*Node;
+    while (!at(p, .RBrace)) {
+        let variant = expect(p, .Identifier, "a variant name");
+        let payload: *Node = null;
+        let fields: *Node = null;
+        let value: *Node = null;
+        if (eat(p, .LParen)) {
+            // a payload: Number(i64), or fields: Binary(op: Op, lhs: *Expr)
+            if (at(p, .Identifier) && at(p, .Colon, 1)) {
+                let list: [..]*Node;
+                while (!at(p, .RParen)) {
+                    let field = expect(p, .Identifier, "a field name");
+                    expect(p, .Colon, "`:` and a type after the field name");
+                    let declared = type_(p);
+                    let field_value: *Node = null;
+                    if (eat(p, .Equal))
+                        field_value = expr(p);
+                    array_add(&list, new_node(field, .Field(declared, field_value)));
+                    if (!eat(p, .Comma))
+                        break;
+                }
+                fields = new_node(variant, .Struct(list, .[], false, false));
+            } else {
+                payload = type_(p);
+            }
+            expect(p, .RParen, "`)` after the variant's payload");
+        }
+        if (eat(p, .Equal))
+            value = expr(p);
+        array_add(&variants, new_node(variant, .Variant(payload, fields, value)));
+        if (!eat(p, .Comma))
+            break;
+    }
+    expect(p, .RBrace, "`,` or `}` after the variant");
+    return new_node(name, .Enum(backing, variants, params, false));
+}
+
+fn type_alias(p: *Parser) -> *Node {
+    next(p); // type
+    let name = expect(p, .Identifier, "a type name");
+    expect(p, .Equal, "`=` after the type name");
+    let aliased = type_(p);
+    expect(p, .Semicolon, "`;` after the type alias");
+    return new_node(name, .TypeAlias(aliased, false));
+}
+
+fn const_decl(p: *Parser) -> *Node {
+    next(p); // const
+    let name = expect(p, .Identifier, "a constant name");
+    let declared: *Node = null;
+    if (eat(p, .Colon))
+        declared = type_(p);
+    expect(p, .Equal, "`=` and a value (a constant needs a value)");
+    let value = expr(p);
+    expect(p, .Semicolon, "`;` after the constant");
+    return new_node(name, .Const(declared, value, false, false));
+}
+
+// `let ...` without its `;`
+fn let_decl(p: *Parser) -> *Node {
+    next(p); // let
+    let name = expect(p, .Identifier, "a variable name after `let`");
+    if (at(p, .Comma)) {
+        // let q, r = divide(a, b); several names, from several values
+        let names: [..]*Node;
+        array_add(&names, new_node(name, .Let(null, null, false, false, false, false)));
+        while (eat(p, .Comma))
+            array_add(&names, new_node(expect(p, .Identifier, "a variable name"),
+                                       .Let(null, null, false, false, false, false)));
+        if (at(p, .Colon))
+            fail(p, peek(p), "names declared together get their types from the values; to give them types, declare them one at a time");
+        expect(p, .Equal, "`=` and the values");
+        return new_node(name, .LetValues(names, values(p), false));
+    }
+    let declared: *Node = null;
+    let value: *Node = null;
+    let uninit = false;
+    if (eat(p, .Colon))
+        declared = type_(p);
+    if (eat(p, .Equal)) {
+        if (at(p, .TripleDash)) { // let buf: [4096]u8 = ---; left as it is
+            let dashes = next(p);
+            uninit = true;
+            if (declared == null)
+                fail(p, dashes, tformat("`---` gives `%` no value to take a type from; give it one: `let %: T = ---;`",
+                                        name.text, name.text));
+        } else {
+            value = values(p);
+        }
+    }
+    if (declared == null && value == null && !uninit)
+        fail(p, name, "`let` needs a type, an initializer, or both");
+    return new_node(name, .Let(declared, value, false, false, uninit, false));
+}
+
+// one expression, or several separated by commas: `a, b`
+fn values(p: *Parser) -> *Node {
+    let first = expr(p);
+    if (!at(p, .Comma))
+        return first;
+    let items: [..]*Node;
+    array_add(&items, first);
+    while (eat(p, .Comma))
+        array_add(&items, expr(p));
+    return new_node(first.tok, .Values(items));
+}
+
+/* ------------------------------------------------------------ statements */
+
+fn block(p: *Parser) -> *Node {
+    let open = expect(p, .LBrace, "`{`");
+    let stmts: [..]*Node;
+    while (!at(p, .RBrace)) {
+        if (at(p, .Eof))
+            fail(p, open, "this `{` is never closed");
+        array_add(&stmts, stmt(p));
+    }
+    next(p); // }
+    return new_node(open, .Block(stmts, null, false));
+}
+
+fn stmt(p: *Parser) -> *Node {
+    let t = peek(p);
+    // `outer: for (...)`: a label on a loop, a switch or a block
+    if (t.kind == .Identifier && at(p, .Colon, 1) &&
+        (at(p, .For, 2) || at(p, .While, 2) || at(p, .Do, 2) ||
+         at(p, .Switch, 2) || at(p, .LBrace, 2))) {
+        let label = new_node(next(p), .Identifier(false));
+        next(p); // :
+        let n = stmt(p);
+        switch (n.kind) {
+        case .Block{label: &l}: l.* = label;
+        case .While{label: &l}: l.* = label;
+        case .DoWhile{label: &l}: l.* = label;
+        case .For{label: &l}: l.* = label;
+        case .ForIn{label: &l}: l.* = label;
+        case .Switch{label: &l}: l.* = label;
+        default:
+        }
+        return n;
+    }
+    switch (t.kind) {
+    case .LBrace:
+        return block(p);
+
+    case .Let:
+        let n = let_decl(p);
+        expect(p, .Semicolon, "`;` after the declaration");
+        return n;
+
+    case .Const:
+        return const_decl(p);
+
+    case .If:
+        next(p);
+        expect(p, .LParen, "`(` after `if`");
+        let cond = expr(p);
+        expect(p, .RParen, "`)` after the condition");
+        let then = stmt(p);
+        let else_: *Node = null;
+        if (eat(p, .Else))
+            else_ = stmt(p);
+        return new_node(t, .If(cond, then, else_, false));
+
+    case .While:
+        next(p);
+        expect(p, .LParen, "`(` after `while`");
+        let cond = expr(p);
+        expect(p, .RParen, "`)` after the condition");
+        return new_node(t, .While(cond, stmt(p), null));
+
+    case .Do:
+        next(p);
+        let body = stmt(p);
+        expect(p, .While, "`while` after the `do` body");
+        expect(p, .LParen, "`(` after `while`");
+        let cond = expr(p);
+        expect(p, .RParen, "`)` after the condition");
+        expect(p, .Semicolon, "`;` after `do ... while (...)`");
+        return new_node(t, .DoWhile(body, cond, null));
+
+    case .For:
+        return for_stmt(p);
+
+    case .Switch:
+        next(p);
+        return switch_body(p, t, false, null);
+
+    case .Return:
+        next(p);
+        let value: *Node = null;
+        if (!at(p, .Semicolon))
+            value = values(p); // return q, r;
+        expect(p, .Semicolon, "`;` after `return`");
+        return new_node(t, .Return(value, false));
+
+    case .Break, .Continue:
+        // break; break outer; continue outer; continue state = .Next;
+        // break value = 1; (a labeled block's or switch expression's value)
+        next(p);
+        let label: *Node = null;
+        let value: *Node = null;
+        if (at(p, .Identifier)) {
+            label = new_node(next(p), .Identifier(false));
+            if (eat(p, .Equal))
+                value = expr(p);
+        }
+        expect(p, .Semicolon, "`;`");
+        if (t.kind == .Break)
+            return new_node(t, .Break(label, value));
+        return new_node(t, .Continue(label, value));
+
+    case .Defer:
+        next(p);
+        return new_node(t, .Defer(stmt(p), false));
+
+    case .Hash:
+        // #if (condition known at compile time) stmt [else stmt]
+        if (at_directive(p, "if")) {
+            next(p);
+            let if_tok = next(p);
+            expect(p, .LParen, "`(` after `#if`");
+            let cond = expr(p);
+            expect(p, .RParen, "`)` after the condition");
+            let then = stmt(p);
+            let else_: *Node = null;
+            if (eat(p, .Else))
+                else_ = stmt(p);
+            return new_node(if_tok, .StaticIf(cond, then, else_));
+        }
+        // `#insert #run f();`: statements made from a string, in place
+        if (at_directive(p, "insert") && !at(p, .Identifier, 2)) {
+            let d = directive(p);
+            let value = expr(p);
+            expect(p, .Semicolon, "`;` after `#insert`");
+            return new_node(d, .InsertString(value));
+        }
+        // `#insert body;` on its own; `#insert a = ...;` is an expression
+        if (at_directive(p, "insert") && at(p, .Identifier, 2) && at(p, .Semicolon, 3)) {
+            next(p);
+            next(p);
+            let code = expect(p, .Identifier, "a Code parameter after `#insert`");
+            expect(p, .Semicolon, "`;` after `#insert`");
+            return new_node(code, .Insert);
+        }
+
+    case .Backtick:
+        // `let, `const, `defer and `return act on the macro's caller
+        if (at(p, .Let, 1) || at(p, .Const, 1) || at(p, .Defer, 1) || at(p, .Return, 1)) {
+            next(p);
+            let n = stmt(p);
+            switch (n.kind) {
+            case .Let(&l): l.caller = true;
+            case .LetValues(&l): l.caller = true;
+            case .Const(&c): c.caller = true;
+            case .Defer(&d): d.caller = true;
+            case .Return(&r): r.caller = true;
+            default:
+            }
+            return n;
+        }
+
+    default:
+    }
+
+    let n = simple_stmt(p);
+    // m(args) { ... }: a block after a call is its last argument
+    if (n.kind is .ExprStmt{value} && value.kind.tag == .Call && at(p, .LBrace)) {
+        let body = block(p);
+        body.span = span_from(p, body.tok.text.ptr);
+        switch (value.kind) {
+        case .Call{&args, &trailing_block}:
+            let more: [..]*Node;
+            array_append(&more, args.*);
+            array_add(&more, body);
+            args.* = more;
+            trailing_block.* = true;
+        default:
+        }
+        return n;
+    }
+    expect(p, .Semicolon, "`;` after the statement");
+    return n;
+}
+
+fn is_assign_op(kind: TokenKind) -> bool {
+    switch (kind) {
+    case .Equal, .PlusEq, .MinusEq, .StarEq, .SlashEq, .PercentEq, .AmpEq,
+         .PipeEq, .CaretEq, .ShlEq, .ShrEq:
+        return true;
+    default:
+        return false;
+    }
+}
+
+fn simple_stmt(p: *Parser) -> *Node {
+    let start = peek(p);
+    p.statement_head = true;
+    let e = expr(p);
+
+    if (at(p, .Comma)) {
+        // a, b = b, a; or several results: q, r = divide(a, b)
+        let targets: [..]*Node;
+        array_add(&targets, e);
+        while (eat(p, .Comma))
+            array_add(&targets, expr(p));
+        if (is_assign_op(peek(p).kind) && !at(p, .Equal))
+            fail(p, peek(p), "only `=` assigns to several targets at once");
+        let op = expect(p, .Equal, "`=` after the targets");
+        return new_node(op, .Assign(new_node(e.tok, .Values(targets)), values(p)));
+    }
+    // `_ = f();` drops a value on purpose, even a #nodiscard one
+    if (at(p, .Equal) && e.kind.tag == .Identifier && e.tok.text == "_") {
+        next(p);
+        let value = expr(p);
+        if (at(p, .Comma))
+            fail(p, peek(p), "`_ =` drops one value, or all of one call's results; for several values, give each a target: `_, _ = a, b;`");
+        return new_node(start, .ExprStmt(value, true));
+    }
+    if (is_assign_op(peek(p).kind)) {
+        let op = next(p);
+        return new_node(op, .Assign(e, values(p)));
+    }
+    if (at(p, .PlusPlus))
+        return new_node(next(p), .Inc(e));
+    if (at(p, .MinusMinus))
+        return new_node(next(p), .Dec(e));
+    return new_node(start, .ExprStmt(e, false));
+}
+
+fn for_stmt(p: *Parser) -> *Node {
+    let t = next(p); // for
+    expect(p, .LParen, "`(` after `for`");
+
+    // for (x in xs) / for (i in a..b)
+    if (at(p, .Identifier) && at(p, .In, 1)) {
+        let name = next(p);
+        next(p); // in
+        let iterable = expr(p);
+        let range_end: *Node = null;
+        if (eat(p, .Ellipsis2))
+            range_end = expr(p);
+        expect(p, .RParen, "`)` after the loop header");
+        return new_node(name, .ForIn(iterable, range_end, stmt(p), null));
+    }
+
+    // for (init; cond; step)
+    let init: *Node = null;
+    let cond: *Node = null;
+    let step: *Node = null;
+    if (at(p, .Let))
+        init = let_decl(p);
+    else if (!at(p, .Semicolon))
+        init = simple_stmt(p);
+    expect(p, .Semicolon, "`;` after the loop initializer");
+    if (!at(p, .Semicolon))
+        cond = expr(p);
+    expect(p, .Semicolon, "`;` after the loop condition");
+    if (!at(p, .RParen))
+        step = simple_stmt(p);
+    expect(p, .RParen, "`)` after the loop header");
+    return new_node(t, .For(init, cond, step, stmt(p), null));
+}
+
+// does a pattern bind names? (`_` doesn't)
+fn binds_names(pattern: *Node) -> bool {
+    switch (pattern.kind) {
+    case .Binding: return pattern.tok.text != "_";
+    case .FieldPattern{pattern: inner}: return binds_names(inner);
+    case .VariantPattern{bindings}:
+        for (b in bindings)
+            if (binds_names(b))
+                return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
+// `(value) { case ...: ... }`, after `switch`; as an expression each case
+// gives a value
+fn switch_body(p: *Parser, t: Token, gives_value: bool, label: *Node) -> *Node {
+    expect(p, .LParen, "`(` after `switch`");
+    let value = expr(p);
+    expect(p, .RParen, "`)` after the switch value");
+    expect(p, .LBrace, "`{` to start the cases");
+
+    let cases: [..]*Node;
+    while (!at(p, .RBrace)) {
+        let head = peek(p);
+        let patterns: [..]*Node;
+        let guard: *Node = null;
+        let is_default = false;
+        if (eat(p, .Case)) {
+            // a constant can use any operator but `&&` and `||`: case A | B:
+            array_add(&patterns, pattern(p, BIT_OR_PREC));
+            while (eat(p, .Comma))
+                array_add(&patterns, pattern(p, BIT_OR_PREC));
+            if (patterns.len > 1)
+                for (q in patterns)
+                    if (binds_names(q))
+                        fail(p, q.tok, "a case that binds a variant's value can only have that one pattern");
+            if (eat(p, .If)) { // case .Number(n) if (n < 0): a guard
+                expect(p, .LParen, "`(` after `if`");
+                guard = expr(p);
+                expect(p, .RParen, "`)` after the guard");
+            }
+        } else if (eat(p, .Default)) {
+            is_default = true;
+        } else {
+            fail(p, head, tformat("expected `case` or `default`, found %", describe(head)));
+        }
+        expect(p, .Colon, "`:` after the case");
+
+        let body: *Node;
+        if (gives_value && label != null) {
+            // a labeled switch expression's case is its value, or statements
+            // that give it with `break label = value;`
+            let stmts = case_stmts(p);
+            if (stmts.len == 1 && stmts[0].kind is .ExprStmt{value: only})
+                body = only;
+            else
+                body = new_node(head, .Block(stmts, null, false));
+        } else if (gives_value) {
+            // a case of a switch expression is its value
+            body = expr(p);
+            expect(p, .Semicolon, "`;` after the case's value");
+            if (!at(p, .Case) && !at(p, .Default) && !at(p, .RBrace))
+                fail(p, peek(p), "a switch expression's case is one value; to run statements first, label the switch (`s: switch (...)`) and give the value with `break s = value;`");
+        } else {
+            // a case runs until the next case, default or the closing `}`
+            body = new_node(head, .Block(case_stmts(p), null, false));
+        }
+        if (is_default)
+            array_add(&cases, new_node(head, .DefaultCase(body)));
+        else
+            array_add(&cases, new_node(head, .Case(patterns, guard, body)));
+    }
+    next(p); // }
+    return new_node(t, .Switch(value, cases, label, gives_value));
+}
+
+// a case's statements: up to the next case, default or the closing `}`
+fn case_stmts(p: *Parser) -> [..]*Node {
+    let stmts: [..]*Node;
+    while (!at(p, .Case) && !at(p, .Default) && !at(p, .RBrace))
+        array_add(&stmts, stmt(p));
+    return stmts;
+}
+
+// A pattern, in a case or after `is`: a value; a range, a..b or a..=b; or
+// a variant, with what it holds: .V, .V(x), .V(&x), .V{a, &b, field: c}
+// (also written Type.V). Its value takes operators of `min_prec` and up.
+fn pattern(p: *Parser, min_prec: isize) -> *Node {
+    let saved = p.in_pattern;
+    p.in_pattern = true;
+    let n = pattern_inner(p, min_prec);
+    p.in_pattern = saved;
+    return n;
+}
+
+fn pattern_inner(p: *Parser, min_prec: isize) -> *Node {
+    // a variant with what it holds: .V(...), .V{...}, Type.V(...)
+    let k: isize = 0;
+    if (at(p, .Period) && at(p, .Identifier, 1)) {
+        k = 2;
+    } else if (at(p, .Identifier)) {
+        k = 1;
+        while (at(p, .Period, k) && at(p, .Identifier, k + 1))
+            k += 2;
+        if (k < 3)
+            k = 0;
+    }
+    if (k > 0 && (at(p, .LBrace, k) || at(p, .LParen, k))) {
+        let variant: *Node;
+        if (at(p, .Period)) {
+            let dot = next(p);
+            variant = new_node(joined(dot, next(p)), .EnumShorthand); // `.Binary` as one token
+        } else {
+            variant = new_node(next(p), .Identifier(false));
+            while (eat(p, .Period))
+                variant = new_node(next(p), .Member(variant));
+        }
+        if (at(p, .LBrace))
+            return variant_fields(p, variant);
+        expect(p, .LParen, "`(`");
+        let bindings: [..]*Node;
+        array_add(&bindings, subpattern(p, null));
+        expect(p, .RParen, "`)` after what the variant holds");
+        return new_node(variant.tok, .VariantPattern(variant, bindings, false));
+    }
+
+    let value = expr(p, min_prec);
+    if (at(p, .Ellipsis2)) { // a range: a..b leaves b out, a..=b has it
+        let dots = next(p);
+        let inclusive = eat(p, .Equal);
+        return new_node(dots, .Range(value, expr(p, min_prec), inclusive));
+    }
+    return value;
+}
+
+// what goes where a variant's value or field is: a name that binds it (`x`,
+// `&x`, or `_` for none), or a pattern it must match. `field` is the field's
+// name in .V{field: ...}
+fn subpattern(p: *Parser, field: *Node) -> *Node {
+    let by_ref = at(p, .Amp);
+    if ((by_ref && at(p, .Identifier, 1)) ||
+        (at(p, .Identifier) && !at(p, .Period, 1) && !at(p, .LParen, 1) && !at(p, .Ellipsis2, 1))) {
+        if (by_ref)
+            next(p);
+        return new_node(next(p), .Binding(field, by_ref));
+    }
+    let t = if (field != null) field.tok else peek(p);
+    return new_node(t, .FieldPattern(pattern_inner(p, BIT_OR_PREC), field));
+}
+
+// {a, &b, field: c, field: &d}: names for a variant's fields
+fn variant_fields(p: *Parser, variant: *Node) -> *Node {
+    expect(p, .LBrace, "`{`");
+    let bindings: [..]*Node;
+    while (!at(p, .RBrace)) {
+        if (at(p, .Identifier) && at(p, .Colon, 1)) { // field: name or pattern
+            let field = new_node(next(p), .Identifier(false));
+            next(p);
+            array_add(&bindings, subpattern(p, field));
+        } else { // field, or &field: bound to its own name
+            let by_ref = eat(p, .Amp);
+            let name = expect(p, .Identifier, "a name for the field");
+            let field = new_node(name, .Identifier(false));
+            array_add(&bindings, new_node(name, .Binding(field, by_ref)));
+        }
+        if (!eat(p, .Comma))
+            break;
+    }
+    expect(p, .RBrace, "`,` or `}` after the field");
+    return new_node(variant.tok, .VariantPattern(variant, bindings, true));
+}
+
+/* ----------------------------------------------------------- expressions */
+
+// C's order. A bit operator or shift next to a different operator is an
+// error without parentheses (check_mixing), so the order between them only
+// decides what that error shows. 0: not a binary operator.
+fn binary_prec(kind: TokenKind) -> isize {
+    switch (kind) {
+    case .OrElse: return 1;
+    case .PipePipe: return 2;
+    case .AmpAmp: return 3;
+    case .Pipe: return BIT_OR_PREC;
+    case .Caret: return 5;
+    case .Amp: return 6;
+    case .EqualEq, .BangEq, .Less, .Greater, .LessEq, .GreaterEq, .Is: return CMP_PREC;
+    case .Shl, .Shr: return 8;
+    case .Plus, .Minus: return 9;
+    case .Star, .Slash, .Percent: return 10;
+    default: return 0;
+    }
+}
+
+fn binary_op(kind: TokenKind) -> BinaryOp {
+    return switch (kind) {
+    case .PipePipe: .Or;
+    case .AmpAmp: .And;
+    case .EqualEq: .EqEq;
+    case .BangEq: .NotEq;
+    case .Less: .Lt;
+    case .Greater: .Gt;
+    case .LessEq: .LtEq;
+    case .GreaterEq: .GtEq;
+    case .Plus: .Add;
+    case .Minus: .Sub;
+    case .Pipe: .BitOr;
+    case .Caret: .BitXor;
+    case .Star: .Mul;
+    case .Slash: .Div;
+    case .Percent: .Mod;
+    case .Shl: .Shl;
+    case .Shr: .Shr;
+    default: .BitAnd; // `&`: only called when binary_prec isn't 0
+    };
+}
+
+// an expression with operators of precedence `min_prec` and up
+fn expr(p: *Parser, min_prec: isize = 1) -> *Node {
+    let e = binary(p, min_prec);
+    check_mixing(p, e);
+    return e;
+}
+
+// gives `n` its source text, from `begin`, unless it has one
+fn end_here(p: *Parser, n: *Node, begin: *u8) {
+    if (n.span.len == 0)
+        n.span = span_from(p, begin);
+}
+
+// precedence climbing; each operand and operator gets its source text, for
+// check_mixing's message
+fn binary(p: *Parser, min_prec: isize) -> *Node {
+    let begin = peek(p).text.ptr;
+    let lhs = cast(p);
+    end_here(p, lhs, begin);
+    while (true) {
+        let prec = binary_prec(peek(p).kind);
+        if (prec == 0 || prec < min_prec)
+            return lhs;
+
+        let op = next(p);
+        let n: *Node;
+        if (op.kind == .OrElse) {
+            // right to left: `a() or_else b() or_else c` tries a, then b
+            n = new_node(op, .OrElse(lhs, binary(p, prec)));
+        } else if (op.kind == .Is) {
+            // e is .Number(n): the right side is a pattern, which binds
+            // tighter than comparisons, so `e is .V(x) && x > 0` ends it
+            // before the `&&`
+            n = new_node(op, .Is(lhs, pattern(p, CMP_PREC + 1)));
+        } else {
+            // +1 makes operators left-associative
+            n = new_node(op, .Binary(binary_op(op.kind), lhs, binary(p, prec + 1)));
+        }
+        end_here(p, n, begin);
+        lhs = n;
+        if (op.kind == .OrElse || op.kind == .Is)
+            continue;
+        if (prec == CMP_PREC && binary_prec(peek(p).kind) == CMP_PREC)
+            fail(p, peek(p), "comparisons can't be chained, join them with `&&`");
+    }
+}
+
+// ---- mixed operators
+
+// the operators check_mixing looks at: every binary one but `&&`, `||` and
+// `or_else`, whose operands are bools or several values
+fn is_operator(n: *Node) -> bool {
+    switch (n.kind) {
+    case .Binary{op}: return op != .And && op != .Or;
+    case .Is: return true;
+    default: return false;
+    }
+}
+
+fn is_bit_operator(n: *Node) -> bool {
+    switch (n.kind) {
+    case .Binary{op}:
+        return op == .BitAnd || op == .BitOr || op == .BitXor || op == .Shl || op == .Shr;
+    default:
+        return false;
+    }
+}
+
+// are they the same operator?
+fn same_operator(a: *Node, b: *Node) -> bool {
+    if (a.kind is .Binary{op: x} && b.kind is .Binary{op: y})
+        return x == y;
+    return a.kind.tag == b.kind.tag;
+}
+
+// `child`, an operand of `n`, needs parentheses: one of them is a bit
+// operator or shift, and they're different operators
+fn mixes(n: *Node, child: *Node) -> bool {
+    return is_operator(child) && !same_operator(n, child) &&
+           (is_bit_operator(n) || is_bit_operator(child));
+}
+
+// a binary operator's two sides
+fn operands(n: *Node) -> (*Node, *Node) {
+    switch (n.kind) {
+    case .Binary{lhs, rhs}: return lhs, rhs;
+    case .OrElse{value, fallback}: return value, fallback;
+    case .Is{value, pattern}: return value, pattern;
+    default: return null, null;
+    }
+}
+
+// `n` with parentheses where it mixes operators: how it's grouped
+fn grouped(n: *Node) -> string {
+    if (!is_operator(n) || n.kind.tag == .Is)
+        return n.span;
+    let lhs, rhs = operands(n);
+    return tformat("% % %", side(n, lhs), n.tok.text, side(n, rhs));
+}
+
+fn side(n: *Node, child: *Node) -> string {
+    return if (mixes(n, child)) tformat("(%)", grouped(child)) else grouped(child);
+}
+
+// the first pair of operators in `n` that mix, or false
+fn find_mixing(n: *Node, parent: **Node, child: **Node) -> bool {
+    let joins = n.kind is .Binary{op: .And} || n.kind is .Binary{op: .Or} || n.kind.tag == .OrElse;
+    if (!joins && !is_operator(n))
+        return false; // a parenthesized or other expression: checked on its own
+    let lhs, rhs = operands(n);
+    for (c in .[lhs, rhs]) {
+        if (n.kind.tag == .Is && c == rhs)
+            break; // a pattern: parsed, and checked, on its own
+        if (is_operator(n) && mixes(n, c)) {
+            parent.* = n;
+            child.* = c;
+            return true;
+        }
+        if (find_mixing(c, parent, child))
+            return true;
+    }
+    return false;
+}
+
+// is `inner`'s text inside `outer`'s?
+fn contains_span(outer: string, inner: string) -> bool {
+    return outer.ptr <= inner.ptr && inner.ptr + inner.len <= outer.ptr + outer.len;
+}
+
+// `x >> 8 * k` is an error: C reads it as `x >> (8 * k)`, which is easy to
+// get wrong, so a bit operator or shift next to a different operator needs
+// parentheses. One error per expression, for the part where they mix.
+fn check_mixing(p: *Parser, e: *Node) {
+    let parent: *Node = null;
+    let child: *Node = null;
+    if (!find_mixing(e, &parent, &child))
+        return;
+    // the whole run of operators around the pair: up to `&&`, `||`,
+    // `or_else` or parentheses
+    let top = e;
+    while (!is_operator(top)) {
+        let lhs, rhs = operands(top);
+        top = if (contains_span(rhs.span, parent.span)) rhs else lhs;
+    }
+    // in the order they're written; the second is where the reading goes
+    // wrong
+    let first, second = parent.tok, child.tok;
+    if (first.text.ptr > second.text.ptr)
+        first, second = second, first;
+    let text, as_grouped = top.span, grouped(top);
+    let how = if (parent.kind.tag == .Is || child.kind.tag == .Is)
+                  tformat("`%` would mean `%`", text, as_grouped)
+              else
+                  tformat("C reads `%` as `%`", text, as_grouped);
+    report_error(p, second, tformat("`%` next to `%` needs parentheses: %", first.text, second.text, how));
+}
+
+// ---- operands
+
+fn cast(p: *Parser) -> *Node {
+    let e = unary(p);
+    while (at(p, .As)) {
+        let t = next(p);
+        e = new_node(t, .Cast(e, type_(p)));
+    }
+    return e;
+}
+
+fn unary(p: *Parser) -> *Node {
+    let op: UnaryOp;
+    switch (peek(p).kind) {
+    case .Minus: op = .Neg;
+    case .Bang: op = .Not;
+    case .Tilde: op = .BitNot;
+    case .Star: op = .PointerType; // a type: make(*Node)
+    case .Amp: op = .AddressOf;
+    default: return postfix(p);
+    }
+    let t = next(p);
+    let begin = peek(p).text.ptr;
+    let operand = unary(p);
+    if (op == .PointerType && operand.span.len == 0) // quoted by the resolver
+        operand.span = span_from(p, begin);
+    return new_node(t, .Unary(op, operand));
+}
+
+fn postfix(p: *Parser) -> *Node {
+    // only the first expression of a statement is its head; anything parsed
+    // inside it (arguments, operands) isn't
+    let head = p.statement_head;
+    p.statement_head = false;
+    let begin = peek(p).text.ptr;
+    let e = primary(p);
+    while (true) {
+        switch (peek(p).kind) {
+        case .LParen:
+            let open = next(p);
+            let args: [..]*Node;
+            while (!at(p, .RParen)) {
+                let arg_begin = peek(p).text.ptr;
+                let arg: *Node;
+                if (at(p, .Ellipsis2)) { // ..xs: a slice for a `..T` parameter
+                    let dots = next(p);
+                    arg = new_node(dots, .Spread(expr(p)));
+                } else {
+                    arg = expr(p);
+                }
+                arg.span = span_from(p, arg_begin);
+                array_add(&args, arg);
+                if (!eat(p, .Comma))
+                    break;
+            }
+            expect(p, .RParen, "`,` or `)` in the argument list");
+            e = new_node(open, .Call(e, args, false));
+        case .LBracket:
+            // x[i], or a slice: x[lo..hi], where both bounds are optional
+            let open = next(p);
+            let lo: *Node = if (at(p, .Ellipsis2)) null else expr(p);
+            if (eat(p, .Ellipsis2)) {
+                let hi: *Node = if (at(p, .RBracket)) null else expr(p);
+                expect(p, .RBracket, "`]` after the slice bounds");
+                e = new_node(open, .Slice(e, lo, hi));
+            } else {
+                expect(p, .RBracket, "`]` after the index");
+                e = new_node(open, .Index(e, lo));
+            }
+        case .OrReturn:
+            // f() or_return: returns f's last value from here if it says f
+            // failed
+            e = new_node(next(p), .OrReturn(e));
+        case .Period:
+            let dot = next(p);
+            if (at(p, .LBracket)) { // i64.[1, 2, 3]: e is the element type
+                e = array_items(p, dot, e);
+            } else if (at(p, .LBrace)) { // Point.{ .x = 1 }: e is the type
+                e = init_list(p, e, false);
+            } else if (at(p, .Star)) { // p.*: what p points at
+                e = new_node(next(p), .Deref(e));
+            } else {
+                e = new_node(expect(p, .Identifier, "a member name after `.`"), .Member(e));
+            }
+        case .LBrace:
+            // `{` after a name ends the expression (conditions are
+            // parenthesized, so `if (x) {` is fine), except C's way of
+            // writing a struct literal, `Vec2{...}`, which is an error. At
+            // the head of a statement, `m(x) {` is a macro call with a
+            // trailing block.
+            let named = e.kind.tag == .Identifier || e.kind.tag == .Member;
+            let generic_type = false;
+            if (!head && e.kind is .Call{callee})
+                generic_type = callee.kind.tag == .Identifier || callee.kind.tag == .Member;
+            if (!named && !generic_type)
+                return e;
+            report_error(p, peek(p), tformat("a struct literal is written with a dot before the `{`: `%.{ ... }`",
+                                             span_from(p, begin)));
+            e = init_list(p, e, false);
+        default:
+            return e;
+        }
+    }
+}
+
+// `{ .x = 1, 2 }` after `T.` or `.`; in C's `[2]i64{1, 2}`, an array's
+fn init_list(p: *Parser, declared: *Node, array: bool) -> *Node {
+    let open = expect(p, .LBrace, "`{`");
+    let items: [..]*Node;
+    while (!at(p, .RBrace)) {
+        if (at(p, .Period) && at(p, .Identifier, 1) && at(p, .Equal, 2)) {
+            next(p); // .
+            let name = next(p);
+            next(p); // =
+            array_add(&items, new_node(name, .FieldInit(expr(p))));
+        } else {
+            array_add(&items, expr(p));
+        }
+        if (!eat(p, .Comma))
+            break;
+    }
+    expect(p, .RBrace, "`,` or `}` in the initializer");
+    if (array)
+        return new_node(open, .ArrayLiteral(null, items));
+    return new_node(open, .StructInit(declared, items));
+}
+
+// `[a, b, c]` after `.` or `T.`; `t` is the `.`
+fn array_items(p: *Parser, t: Token, elem: *Node) -> *Node {
+    expect(p, .LBracket, "`[`");
+    let items: [..]*Node;
+    while (!at(p, .RBracket)) {
+        array_add(&items, expr(p));
+        if (!eat(p, .Comma))
+            break;
+    }
+    expect(p, .RBracket, "`,` or `]` after the element");
+    return new_node(t, .ArrayLiteral(elem, items));
+}
+
+// can a type start with this token? (type_'s cases)
+fn can_start_type(kind: TokenKind) -> bool {
+    return kind == .Identifier || kind == .Star || kind == .LBracket ||
+           kind == .Fn || kind == .Dollar || kind == .Question;
+}
+
+// with the `[` after `[x]` k tokens ahead: is it `[x][i]` with no type
+// after, C's way of indexing a one-element literal, rather than an array
+// type `[x][N]T`?
+fn indexes_a_literal(p: *Parser, k: isize) -> bool {
+    let depth = 0;
+    for (i in p.idx + k..p.tokens.len) {
+        if (p.tokens[i].kind == .LBracket) {
+            depth++;
+        } else if (p.tokens[i].kind == .RBracket) {
+            depth--;
+            if (depth == 0)
+                return i + 1 < p.tokens.len && !can_start_type(p.tokens[i + 1].kind);
+        }
+    }
+    return false;
+}
+
+// a [T], []T or [..]T type's element type
+fn element_of(t: *Node) -> *Node {
+    switch (t.kind) {
+    case .TypeArray{elem}: return elem;
+    case .TypeSlice{elem}: return elem;
+    case .TypeGrowable{elem}: return elem;
+    default: return t;
+    }
+}
+
+fn primary(p: *Parser) -> *Node {
+    let t = peek(p);
+    switch (t.kind) {
+    case .Number: return new_node(next(p), .Number);
+    case .Float: return new_node(next(p), .Float);
+    case .String: return new_node(next(p), .String);
+    case .Char: return new_node(next(p), .Char);
+    case .True, .False: return new_node(next(p), .Bool);
+    case .Null: return new_node(next(p), .Null);
+    case .Identifier:
+        // `name: { ... }` and `name: switch (...) { ... }`: labeled, they
+        // give a value with `break name = value;`
+        if (!p.in_pattern && at(p, .Colon, 1) && (at(p, .LBrace, 2) || at(p, .Switch, 2))) {
+            let label = new_node(next(p), .Identifier(false));
+            next(p); // :
+            if (at(p, .Switch))
+                return switch_body(p, next(p), true, label);
+            let n = block(p);
+            switch (n.kind) {
+            case .Block(&b):
+                b.label = label;
+                b.gives_value = true;
+            default:
+            }
+            return n;
+        }
+        return new_node(next(p), .Identifier(false));
+    case .If: // if (c) a else b: one of two values
+        next(p);
+        expect(p, .LParen, "`(` after `if`");
+        let cond = expr(p);
+        expect(p, .RParen, "`)` after the condition");
+        let then = expr(p);
+        expect(p, .Else, "`else` and a second value: an `if` that gives a value needs both");
+        return new_node(t, .If(cond, then, expr(p), true));
+    case .Context:
+        return new_node(next(p), .Context);
+
+    case .Period:
+        // `.{ ... }`, `.[ ... ]` and `.Red`: the type comes from where
+        // they're used; errors point at the `.`
+        let dot = next(p);
+        if (at(p, .LBrace)) {
+            let n = init_list(p, null, false);
+            n.tok = dot;
+            return n;
+        }
+        if (at(p, .LBracket)) // .[1, 2, 3]
+            return array_items(p, dot, null);
+        let name = expect(p, .Identifier, "`{`, `[` or an enum variant after `.`");
+        return new_node(joined(dot, name), .EnumShorthand); // `.Red`: one token
+
+    case .Backtick:
+        // `name: the macro caller's `name`
+        next(p);
+        return new_node(expect(p, .Identifier, "a name after the backtick"), .Identifier(true));
+
+    case .Hash:
+        if (!at(p, .Identifier, 1))
+            fail(p, peek(p, 1), tformat("expected a directive name after `#`, found %", describe(peek(p, 1))));
+        let name = directive(p);
+        let d = if (starts_with(name.text, "#")) name.text[1..] else name.text;
+        if (d == "insert" && !at(p, .Identifier)) // `#insert #run f()`: code from a string
+            return new_node(name, .InsertString(unary(p)));
+        if (d == "insert")
+            return new_node(expect(p, .Identifier, "a Code parameter after `#insert`"), .Insert);
+        if (d == "run")
+            return new_node(name, .Run(unary(p)));
+        if (d == "text" || d == "location") {
+            expect(p, .LParen, tformat("`(` after `#%`", d));
+            let code = expect(p, .Identifier, "a Code parameter");
+            expect(p, .RParen, "`)`");
+            return new_node(code, if (d == "text") NodeKind.TextOf else NodeKind.LocationOf);
+        }
+        return fail(p, name, tformat("unknown directive `#%`", d));
+
+    case .Switch: // a switch expression: each case gives a value
+        return switch_body(p, next(p), true, null);
+
+    case .LParen:
+        let open = next(p);
+        let inner = expr(p);
+        expect(p, .RParen, "`)` to close the parenthesis");
+        return new_node(open, .Grouped(inner));
+
+    case .TypeInfo, .Sizeof:
+        // sizeof(T) or sizeof(value), as in C, and type_info the same way:
+        // every type can be written as an expression, and the resolver
+        // tells which it is
+        next(p);
+        let what = if (t.kind == .Sizeof) "sizeof" else "type_info";
+        expect(p, .LParen, tformat("`(` after `%`", what));
+        let of = expr(p);
+        expect(p, .RParen, tformat("`)` after `%(...`", what));
+        if (t.kind == .Sizeof)
+            return new_node(t, .SizeOf(of));
+        return new_node(t, .TypeInfo(of));
+
+    case .New:
+        // new(T [, allocator]) or new([]T, length [, allocator])
+        next(p);
+        expect(p, .LParen, "`(` after `new`");
+        // new(Point.{ ... }), new(.{ ... }) or new(i64.[1, 2]): a value to
+        // copy in
+        let start = p.idx;
+        let declared: *Node = null;
+        let value: *Node = null;
+        let first: *Node = null;
+        let second: *Node = null;
+        if (literal_ahead(p) || at(p, .Identifier)) {
+            // a name: a type (new(Point), new(List(i32))) or a value
+            // (new(Expr.Number(1)), new(make_point())); the resolver knows
+            value = expr(p);
+        } else {
+            declared = type_(p);
+            if (literal_ahead(p)) { // new([2]i64.[ ... ])
+                p.idx = start;
+                declared = null;
+                value = expr(p);
+            }
+        }
+        if (eat(p, .Comma))
+            first = expr(p);
+        if (first != null && eat(p, .Comma))
+            second = expr(p);
+        expect(p, .RParen, "`)` after `new(...`");
+        return new_node(t, .New(declared, value, first, second));
+
+    case .LBracket:
+        return bracket(p);
+
+    case .Fn, .Question:
+        // a function type used as a type argument: make_list(fn(i32) -> bool),
+        // or an option: type_info(?i64)
+        return new_node(t, .TypeExpr(type_(p)));
+
+    case .TripleDash:
+        return fail(p, t, "`---` leaves a variable uninitialized, so it only goes in a local's declaration: `let buf: [4096]u8 = ---;`");
+
+    default:
+        return fail(p, t, tformat("expected an expression, found %", describe(t)));
+    }
+}
+
+fn literal_ahead(p: *Parser) -> bool {
+    return at(p, .Period) && (at(p, .LBrace, 1) || at(p, .LBracket, 1));
+}
+
+// `[` in an expression: a type, as a type argument: make_list([]u8). Array
+// literals are `.[1, 2]` and `i64.[1, 2]`; the forms from before (`[1, 2]`,
+// `[2]i64{1, 2}`) are errors that show the new spelling, and parse on as
+// literals.
+fn bracket(p: *Parser) -> *Node {
+    let open = next(p);
+    let declared: *Node;
+    if (at(p, .RBracket) && !can_start_type(peek(p, 1).kind)) {
+        next(p); // []
+        return old_literal(p, open, new_node(open, .ArrayLiteral(null, .[])));
+    }
+    if (at(p, .RBracket)) {
+        next(p);
+        declared = new_node(open, .TypeSlice(type_(p)));
+    } else if (at(p, .Ellipsis2) && at(p, .RBracket, 1)) { // [..]T
+        next(p);
+        next(p);
+        declared = new_node(open, .TypeGrowable(type_(p)));
+    } else {
+        let first = expr(p);
+        if (at(p, .Comma) || (at(p, .RBracket) && !can_start_type(peek(p, 1).kind)) ||
+            (at(p, .RBracket) && at(p, .LBracket, 1) && indexes_a_literal(p, 1))) {
+            let items: [..]*Node; // [1, 2] or [x][0]
+            array_add(&items, first);
+            while (eat(p, .Comma) && !at(p, .RBracket))
+                array_add(&items, expr(p));
+            expect(p, .RBracket, "`,` or `]` after the element");
+            return old_literal(p, open, new_node(open, .ArrayLiteral(null, items)));
+        }
+        expect(p, .RBracket, "`]` after the array length");
+        declared = new_node(open, .TypeArray(type_(p), first));
+    }
+    if (at(p, .LBrace)) { // [2]i64{1, 2}
+        report_error(p, peek(p), tformat("an array literal is written with its element type before `.[`: `%.[ ... ]`, or `.[ ... ]` where the type is known",
+                                         element_of(declared).tok.text));
+        return init_list(p, null, true);
+    }
+    return new_node(open, .TypeExpr(declared));
+}
+
+fn old_literal(p: *Parser, open: Token, n: *Node) -> *Node {
+    report_error(p, open, tformat("`[` in an expression starts a type; an array literal is written with a dot before the `[`: `.%`",
+                                  span_from(p, open.text.ptr)));
+    return n;
+}
+
+/* ----------------------------------------------------------------- types */
+
+// what follows a function's `->`: a type, or several in parentheses,
+// `(i64, bool)`
+fn result_type(p: *Parser) -> *Node {
+    if (!at(p, .LParen))
+        return type_(p);
+    let open = next(p);
+    let items: [..]*Node;
+    array_add(&items, type_(p));
+    while (eat(p, .Comma))
+        array_add(&items, type_(p));
+    expect(p, .RParen, "`,` or `)` after the result types");
+    if (items.len == 1)
+        return items[0];
+    return new_node(open, .TypeTuple(items));
+}
+
+fn type_(p: *Parser) -> *Node {
+    let t = peek(p);
+    switch (t.kind) {
+    case .Star:
+        next(p);
+        return new_node(t, .TypePointer(type_(p)));
+
+    case .LBracket:
+        next(p);
+        if (eat(p, .RBracket))
+            return new_node(t, .TypeSlice(type_(p)));
+        if (at(p, .Ellipsis2) && at(p, .RBracket, 1)) { // [..]T
+            next(p);
+            next(p);
+            return new_node(t, .TypeGrowable(type_(p)));
+        }
+        let len = expr(p);
+        expect(p, .RBracket, "`]` after the array length");
+        return new_node(t, .TypeArray(type_(p), len));
+
+    case .Fn:
+        next(p);
+        expect(p, .LParen, "`(` after `fn`");
+        let params: [..]*Node;
+        while (!at(p, .RParen)) {
+            array_add(&params, type_(p));
+            if (!eat(p, .Comma))
+                break;
+        }
+        expect(p, .RParen, "`,` or `)` in the parameter types");
+        let result: *Node = null;
+        if (eat(p, .Arrow))
+            result = result_type(p);
+        return new_node(t, .TypeFn(params, result));
+
+    case .Question: // ?T: the prelude's Option(T), whatever `Option` names here
+        next(p);
+        let args: [..]*Node;
+        array_add(&args, type_(p));
+        return new_node(t, .TypeName(args));
+
+    case .Identifier:
+        let name = new_node(next(p), .TypeName(.[]));
+        let member: *Node = null; // mem.Allocator
+        if (at(p, .Period) && at(p, .Identifier, 1)) {
+            next(p);
+            member = new_node(next(p), .TypeMember(name, .[]));
+        }
+        // type arguments of a generic struct: List(i32)
+        if (eat(p, .LParen)) {
+            let args: [..]*Node;
+            while (!at(p, .RParen)) {
+                array_add(&args, type_(p));
+                if (!eat(p, .Comma))
+                    break;
+            }
+            expect(p, .RParen, "`,` or `)` after the type arguments");
+            let n = if (member != null) member else name;
+            switch (n.kind) {
+            case .TypeName{args: &a}: a.* = args;
+            case .TypeMember{args: &a}: a.* = args;
+            default:
+            }
+        }
+        return if (member != null) member else name;
+
+    case .Dollar:
+        // $T: declares a type parameter, bound to whatever type is here
+        next(p);
+        return new_node(expect(p, .Identifier, "a type parameter name after `$`"), .TypeParam);
+
+    default:
+        return fail(p, t, tformat("expected a type, found %", describe(t)));
+    }
+}

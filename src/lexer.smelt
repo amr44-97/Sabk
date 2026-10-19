@@ -1,0 +1,339 @@
+// The lexer: a file's text cut into tokens, the last one Eof.
+//
+//   let tokens, ok = lex(&src);     ok is false after it reported an error
+//
+// Whitespace and comments (`// ...`, `/* ... */`) are skipped. A string
+// or char literal keeps its quotes and escapes; decoding them is the
+// parser's. A zero byte ends the file, as the end of the text does.
+
+import "std/array";
+import "std/checked";
+import "std/fmt";
+import "std/mem";
+import "std/str";
+import "source";
+import "token";
+
+struct Lexer {
+    src: *Source;
+    tokens: [..]Token;
+    pos: isize;         // the next byte
+    start: isize;       // where the token being made starts
+    line: i32;
+    line_start: isize;  // where the line `pos` is on starts
+}
+
+pub fn lex(src: *Source) -> ([..]Token, bool) {
+    let l = Lexer.{ .src = src, .line = 1 };
+    while (true) {
+        let kind, ok = next_token(&l);
+        if (!ok) {
+            array_free(&l.tokens);
+            return l.tokens, false;
+        }
+        if (kind == .Eof)
+            return l.tokens, true;
+    }
+}
+
+// the byte `ahead` places after pos; 0 past the end
+fn peek(l: *Lexer, ahead: isize = 0) -> u8 {
+    let i = l.pos + ahead;
+    return if (i < l.src.text.len) l.src.text[i] else 0;
+}
+
+fn is_digit(c: u8) -> bool { return c >= '0' && c <= '9'; }
+fn is_hex_digit(c: u8) -> bool {
+    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+fn is_name_start(c: u8) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+}
+fn is_name_char(c: u8) -> bool { return is_name_start(c) || is_digit(c); }
+
+// past a newline at pos
+fn newline(l: *Lexer) {
+    l.pos++;
+    l.line++;
+    l.line_start = l.pos;
+}
+
+// the token from `start` to pos, located where it starts
+fn add(l: *Lexer, kind: TokenKind, line: i32, line_start: isize) -> TokenKind {
+    array_add(&l.tokens, Token.{
+        .text = l.src.text[l.start..l.pos],
+        .kind = kind,
+        .line = line,
+        .column = (l.start - line_start + 1) as i32,
+    });
+    return kind;
+}
+
+// the next `len` bytes as a token
+fn symbol(l: *Lexer, kind: TokenKind, len: isize) -> (TokenKind, bool) {
+    l.pos += len;
+    return add(l, kind, l.line, l.line_start), true;
+}
+
+fn fail(l: *Lexer, message: string, offset: isize) -> (TokenKind, bool) {
+    report_at(l.src, .Error, offset, message);
+    return .Eof, false;
+}
+
+// adds the next token and says which kind it was; false after an error
+fn next_token(l: *Lexer) -> (TokenKind, bool) {
+    while (true) { // whitespace and comments loop back here
+        l.start = l.pos;
+        let c = peek(l);
+        let next = peek(l, 1);
+        switch (c) {
+        case 0:
+            return add(l, .Eof, l.line, l.line_start), true;
+        case ' ', '\t', '\r':
+            l.pos++;
+            continue;
+        case '\n':
+            newline(l);
+            continue;
+        case '\'':
+            return char_literal(l);
+        case '"':
+            return string_literal(l);
+        case '=':
+            return symbol(l, if (next == '=') .EqualEq else .Equal, if (next == '=') 2 else 1);
+        case '+':
+            if (next == '=') return symbol(l, .PlusEq, 2);
+            if (next == '+') return symbol(l, .PlusPlus, 2);
+            return symbol(l, .Plus, 1);
+        case '-':
+            if (next == '=') return symbol(l, .MinusEq, 2);
+            if (next == '-' && peek(l, 2) == '-') return symbol(l, .TripleDash, 3);
+            if (next == '-') return symbol(l, .MinusMinus, 2);
+            if (next == '>') return symbol(l, .Arrow, 2);
+            return symbol(l, .Minus, 1);
+        case '*':
+            // `p.*= 1` is `p.*` and then `=`
+            if (next == '=' && !(l.pos > 0 && l.src.text[l.pos - 1] == '.'))
+                return symbol(l, .StarEq, 2);
+            return symbol(l, .Star, 1);
+        case '/':
+            if (next == '=') return symbol(l, .SlashEq, 2);
+            if (next == '/') {
+                while (peek(l) != '\n' && peek(l) != 0)
+                    l.pos++;
+                continue;
+            }
+            if (next == '*') {
+                if (!skip_block_comment(l))
+                    return .Eof, false;
+                continue;
+            }
+            return symbol(l, .Slash, 1);
+        case '%':
+            return symbol(l, if (next == '=') .PercentEq else .Percent, if (next == '=') 2 else 1);
+        case ':':
+            if (next == '=') return symbol(l, .ColonEq, 2);
+            if (next == ':') return symbol(l, .ColonColon, 2);
+            return symbol(l, .Colon, 1);
+        case '.':
+            if (next != '.')
+                return symbol(l, .Period, 1);
+            // `..` and then `.[` or `.{` in `f(...[1, 2])`: a literal spread
+            // into a `..` parameter; C's `...` is never followed by those
+            let third, fourth = peek(l, 2), peek(l, 3);
+            if (third == '.' && fourth != '[' && fourth != '{')
+                return symbol(l, .Ellipsis3, 3);
+            return symbol(l, .Ellipsis2, 2);
+        case '~':
+            return symbol(l, if (next == '=') .TildeEq else .Tilde, if (next == '=') 2 else 1);
+        case '^':
+            return symbol(l, if (next == '=') .CaretEq else .Caret, if (next == '=') 2 else 1);
+        case '&':
+            if (next == '=') return symbol(l, .AmpEq, 2);
+            if (next == '&') return symbol(l, .AmpAmp, 2);
+            return symbol(l, .Amp, 1);
+        case '<':
+            if (next == '=') return symbol(l, .LessEq, 2);
+            if (next == '<' && peek(l, 2) == '=') return symbol(l, .ShlEq, 3);
+            if (next == '<') return symbol(l, .Shl, 2);
+            return symbol(l, .Less, 1);
+        case '>':
+            if (next == '=') return symbol(l, .GreaterEq, 2);
+            if (next == '>' && peek(l, 2) == '=') return symbol(l, .ShrEq, 3);
+            if (next == '>') return symbol(l, .Shr, 2);
+            return symbol(l, .Greater, 1);
+        case '|':
+            if (next == '=') return symbol(l, .PipeEq, 2);
+            if (next == '|') return symbol(l, .PipePipe, 2);
+            return symbol(l, .Pipe, 1);
+        case '!':
+            return symbol(l, if (next == '=') .BangEq else .Bang, if (next == '=') 2 else 1);
+        case ';': return symbol(l, .Semicolon, 1);
+        case ',': return symbol(l, .Comma, 1);
+        case '$': return symbol(l, .Dollar, 1);
+        case '@': return symbol(l, .At, 1);
+        case '#': return symbol(l, .Hash, 1);
+        case '`': return symbol(l, .Backtick, 1);
+        case '?': return symbol(l, .Question, 1);
+        case '{': return symbol(l, .LBrace, 1);
+        case '}': return symbol(l, .RBrace, 1);
+        case '[': return symbol(l, .LBracket, 1);
+        case ']': return symbol(l, .RBracket, 1);
+        case '(': return symbol(l, .LParen, 1);
+        case ')': return symbol(l, .RParen, 1);
+        default:
+            if (is_name_start(c))
+                return name(l), true;
+            if (is_digit(c))
+                return number(l);
+            return fail(l, tformat("Unhandled char `%{c}`", c), l.pos);
+        }
+    }
+}
+
+// a name, or the keyword it spells
+fn name(l: *Lexer) -> TokenKind {
+    while (is_name_char(peek(l)))
+        l.pos++;
+    let word = l.src.text[l.start..l.pos];
+    return add(l, keyword_kind(word), l.line, l.line_start);
+}
+
+fn number(l: *Lexer) -> (TokenKind, bool) {
+    if (peek(l) == '0' && (peek(l, 1) == 'x' || peek(l, 1) == 'X')) {
+        l.pos += 2;
+        if (!is_hex_digit(peek(l)))
+            return fail(l, "Expected hex digits after `0x`", l.start);
+        while (is_hex_digit(peek(l)))
+            l.pos++;
+        return add(l, .Number, l.line, l.line_start), true;
+    }
+    while (is_digit(peek(l)))
+        l.pos++;
+    let float = false;
+    // a fraction only with a digit after the `.`: `1..5` stays a range and
+    // `1.foo` a member
+    if (peek(l) == '.' && is_digit(peek(l, 1))) {
+        float = true;
+        l.pos++;
+        while (is_digit(peek(l)))
+            l.pos++;
+    }
+    // an exponent: 1e10, 2.5E-3, 1e+4
+    if (peek(l) == 'e' || peek(l) == 'E') {
+        let sign: isize = if (peek(l, 1) == '+' || peek(l, 1) == '-') 1 else 0;
+        if (is_digit(peek(l, 1 + sign))) {
+            float = true;
+            l.pos += 1 + sign;
+            while (is_digit(peek(l)))
+                l.pos++;
+        }
+    }
+    return add(l, if (float) .Float else .Number, l.line, l.line_start), true;
+}
+
+fn char_literal(l: *Lexer) -> (TokenKind, bool) {
+    l.pos++; // the opening quote
+    while (true) {
+        switch (peek(l)) {
+        case '\\':
+            if (peek(l, 1) == 0)
+                return fail(l, "Eof inside char literal", l.start);
+            l.pos += 2; // the backslash and what it escapes
+        case '\n', 0:
+            return fail(l, "Unterminated char literal", l.start);
+        case '\'':
+            l.pos++;
+            return add(l, .Char, l.line, l.line_start), true;
+        default:
+            l.pos++;
+        }
+    }
+}
+
+// a string may span lines: it's located where it starts
+fn string_literal(l: *Lexer) -> (TokenKind, bool) {
+    let line, line_start = l.line, l.line_start;
+    l.pos++; // the opening quote
+    while (true) {
+        switch (peek(l)) {
+        case '\\':
+            if (peek(l, 1) == 0)
+                return fail(l, "Eof inside string literal", l.start);
+            l.pos++;
+            if (peek(l) == '\n')
+                newline(l);
+            else
+                l.pos++; // what it escapes
+        case '\n':
+            newline(l);
+        case 0:
+            return fail(l, "Eof at the end of string", l.start);
+        case '"':
+            l.pos++;
+            return add(l, .String, line, line_start), true;
+        default:
+            l.pos++;
+        }
+    }
+}
+
+fn skip_block_comment(l: *Lexer) -> bool {
+    l.pos += 2; // `/*`
+    while (true) {
+        switch (peek(l)) {
+        case '*':
+            l.pos++;
+            if (peek(l) == '/') {
+                l.pos++;
+                return true;
+            }
+        case '\n':
+            newline(l);
+        case 0:
+            fail(l, "Unterminated block comment", l.start);
+            return false;
+        default:
+            l.pos++;
+        }
+    }
+}
+
+// ---- the values of number tokens
+
+// a Number token's value, and false when it doesn't fit in a u64
+pub fn integer_value(text: string) -> (u64, bool) {
+    let base: u64 = 10;
+    let digits = text;
+    if (text.len > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+        base = 16;
+        digits = text[2..];
+    }
+    let value: u64 = 0;
+    for (c in digits) {
+        let digit: u64 = if (is_digit(c)) (c - '0') as u64
+                         else if (c >= 'a') (c - 'a' + 10) as u64
+                         else (c - 'A' + 10) as u64;
+        let times, ok1 = mul_u64(value, base);
+        let plus, ok2 = add_u64(times, digit);
+        if (!ok1 || !ok2)
+            return 0xffffffffffffffff, false;
+        value = plus;
+    }
+    return value, true;
+}
+
+extern fn strtod(text: *u8, end: **u8) -> f64;
+
+// a Float token's value, rounded to the nearest f64
+pub fn float_value(text: string) -> f64 {
+    let buffer: [64]u8 = ---;
+    if (text.len >= buffer.len) {
+        let c_text = to_cstring(text);
+        defer free(c_text);
+        return strtod(c_text, null);
+    }
+    copy_bytes(buffer[..], text as []u8);
+    buffer[text.len] = 0;
+    return strtod(buffer.ptr, null);
+}

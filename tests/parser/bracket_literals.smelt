@@ -1,0 +1,22 @@
+// `.[` starts an array literal and `T.[` one with element type T; `[` in
+// an expression is a type
+fn f() {
+    let a = .[1, 2, 3];
+    let b = .[x];
+    let c = .[];
+    let d = .[1, 2,];
+    let e = i32.[1, 2];
+    let g = [2]u8.[x, y];               // an array of [2]u8
+    let h = make_list([]u8);
+    let i = make_list([4]u8);
+    let r = make_list([..]u8);          // a growable array type
+    let j = .[x, y][0];
+    let k = .[x][0];
+    let l = .[.[1, 2], .[3, 4]];
+    let m = (*Node).[p, q];
+    let n = List(i32).[a, b];
+    let o = mem.Arena.{ .size = 4 };
+    let p = Point.{ .x = 1 };
+    let q = List(i32).{};
+    sum(...[1, 2]);                     // `..` then `.[`
+}
