@@ -1,0 +1,4 @@
+Some(5) Some(200) Some({x = 1, y = 2}) Some(Green) None Some([3, 4])
+Some(2) None 7
+-1 Some(42)
+[exit 0]

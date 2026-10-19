@@ -1287,6 +1287,15 @@ fn postfix(p: *Parser) -> *Node {
                 generic_type = callee.kind.tag == .Identifier || callee.kind.tag == .Member;
             if (!named && !generic_type)
                 return e;
+            if (e.kind.tag == .Member && !head) {
+                // K.Let{ .declared = t }: a variant, its fields by name (the
+                // resolver says so when it's a struct written C's way)
+                let lit = init_list(p, e, false);
+                if (lit.kind is .StructInit{variant: &v})
+                    v.* = true;
+                e = lit;
+                continue;
+            }
             report_error(p, peek(p), tformat("a struct literal is written with a dot before the `{`: `%.{ ... }`",
                                              span_from(p, begin)));
             e = init_list(p, e, false);
@@ -1414,7 +1423,14 @@ fn primary(p: *Parser) -> *Node {
         if (at(p, .LBracket)) // .[1, 2, 3]
             return array_items(p, dot, null);
         let name = expect(p, .Identifier, "`{`, `[` or an enum variant after `.`");
-        return new_node(joined(dot, name), .EnumShorthand); // `.Red`: one token
+        let shorthand = new_node(joined(dot, name), .EnumShorthand); // `.Red`: one token
+        if (at(p, .LBrace)) { // .Let{ .declared = t }: a variant, by its fields
+            let lit = init_list(p, shorthand, false);
+            if (lit.kind is .StructInit{variant: &v})
+                v.* = true;
+            return lit;
+        }
+        return shorthand;
 
     case .Backtick:
         // `name: the macro caller's `name`

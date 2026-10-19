@@ -1554,9 +1554,23 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
             // type checker
         }
 
-    case .StructInit{declared: &declared, items}:
+    case .StructInit{declared: &declared, items, variant}:
         let t = declared.*;
-        if (t == null) {
+        if (variant) {
+            // K.Let{...} or .Let{...}: a variant; .Let finds its enum in
+            // the type checker
+            if (t.kind.tag != .EnumShorthand) {
+                resolve_expr(r, t, true);
+                let d = t.decl;
+                if (d != null && d.kind.tag != .Variant) {
+                    if (is_type_decl(d))
+                        error(r, n.tok, tformat("a struct literal is written with a dot before the `{`: `%.{ ... }`",
+                                                expr_text(t)));
+                    else
+                        error(r, t.tok, tformat("`%` isn't an enum variant, so `{` can't follow it", t.tok.text));
+                }
+            }
+        } else if (t == null) {
             // .{...}: the type checker gets its type from the context
         } else if (t.kind.tag == .Call) {
             // List(i32).{...}
@@ -1570,7 +1584,10 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
         } else {
             resolve_expr(r, t, true);
             let d = t.decl;
-            if (d != null && d.kind.tag != .Struct && d.kind.tag != .TypeAlias && d.kind.tag != .TypeParam)
+            if (d != null && d.kind.tag == .Variant)
+                error(r, t.tok, tformat("`%` is a variant: its fields go right after it, `%{}{ ... }`",
+                                        expr_text(t), expr_text(t)));
+            else if (d != null && d.kind.tag != .Struct && d.kind.tag != .TypeAlias && d.kind.tag != .TypeParam)
                 error(r, t.tok, tformat("`%` is not a struct type", t.tok.text));
             // a generic struct without its types (`Box.{ .value = 1.5 }`)
             // gets them from the field values, in the type checker
@@ -1787,6 +1804,13 @@ fn resolve_call(r: *Resolver, n: *Node) {
 }
 
 // C's `*p`, as Smelt writes it: `p.*`; `**pp` is `pp.*.*`
+// a name as written: `K.Let`, `mod.Point`
+fn expr_text(n: *Node) -> string {
+    if (n.kind is .Member{object})
+        return tformat("%.%", expr_text(object), n.tok.text);
+    return n.tok.text;
+}
+
 fn postfix_deref(star: *Node) -> string {
     let inner: *Node = null;
     if (star.kind is .Unary{operand})

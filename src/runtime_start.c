@@ -109,3 +109,12 @@ static inline void rt_slice_check(isize lo, isize hi, isize len,
             "length %td\n", where, lo, hi, len);
   abort();
 }
+
+/* a pointer about to be followed, in a checked build: null panics */
+#define rt_nonnull(p, where)                                                   \
+  ({                                                                           \
+    __typeof__(&*(p)) rt_p_ = (p);                                            \
+    if (!rt_p_)                                                                \
+      rt_panic(where, "null pointer");                                         \
+    rt_p_;                                                                     \
+  })

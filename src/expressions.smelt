@@ -25,6 +25,11 @@ import "formats";
 pub fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
     if (from == to)
         return true;
+    // a value becomes an option holding it: `let o: ?i64 = 5;` (not
+    // `null`, which could mean either)
+    if (to.is_tagged && is_option(c, to) && from.kind != .Null && from.kind != .Error &&
+        can_coerce(c, e, from, option_value(to)))
+        return true;
     if (to == c.any_type && to != null)
         return from.kind != .Void && from.kind != .GenericFn;
     switch (from.kind) {
@@ -137,6 +142,8 @@ pub fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
     }
     if (from.kind == .GenericFn)
         return pick_instance(c, e, to);
+    if (to.is_tagged && is_option(c, to) && from != to && can_coerce(c, e, from, to))
+        return wrap_some(c, e, to);
     if (can_coerce(c, e, from, to)) {
         if (is_untyped(from)) {
             e.ty = to;
@@ -149,6 +156,13 @@ pub fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
         }
         return true;
     }
+    if (to.is_tagged && is_option(c, to) && from.kind == .Null) {
+        error(c, e.tok, tformat("`null` doesn't become % on its own: for no value write `.None`, for a null pointer in it `.Some(null)`",
+                                qt(to)));
+        return false;
+    }
+    if (to.is_tagged && is_option(c, to) && from.kind != .Error && !(from.is_tagged && is_option(c, from)))
+        return coerce(c, e, option_value(to)); // why the value doesn't fit what it would hold
     if (from.kind == .UntypedInt && to.kind == .Int && e.cval.kind == .Int) {
         error(c, e.tok, tformat("the constant % doesn't fit in %", i128_to_string(e.cval.i), qt(to)));
     } else if (to.kind == .Fn && e.decl != null && e.decl.kind is .Fn{is_extern: true}) {
@@ -178,6 +192,53 @@ pub fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
         explain_pointer_index(c, e);
     }
     return false;
+}
+
+// `e` becomes `.Some(e)` of option type `to`: the value is moved into a
+// node of its own, converted to what the option holds
+fn wrap_some(c: *Checker, e: *Node, to: *Type) -> bool {
+    let value = new(e.*);
+    if (!coerce(c, value, option_value(to)))
+        return false;
+    let some: *Node = null;
+    for (v in enum_variants(to.decl))
+        if (v.tok.text == "Some")
+            some = v;
+    let tok = e.tok;
+    let color = e.color;
+    e.* = Node.{ .tok = tok, .color = color, .span = value.span, .decl = some, .kind = .VariantValue(value), .ty = to };
+    return true;
+}
+
+// what a literal that takes its type from where it's used takes it from:
+// inside an option, what the option holds (`let p: ?Point = .{ ... };`,
+// then wrapped), unless it names the option's own variants
+fn context_type(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    if (expected == null || !expected.is_tagged || !is_option(c, expected))
+        return expected;
+    let e = ungroup(n);
+    let name = "";
+    switch (e.kind) {
+    case .StructInit{declared}:
+        if (declared != null)
+            return expected;
+        if (e.kind is .StructInit{variant: true} && declared == null)
+            return expected;
+        return option_value(expected);
+    case .ArrayLiteral{elem}:
+        return if (elem == null) option_value(expected) else expected;
+    case .EnumShorthand:
+        name = e.tok.text;
+    case .Call{callee}:
+        if (callee.kind.tag != .EnumShorthand)
+            return expected;
+        name = callee.tok.text;
+    default:
+        return expected;
+    }
+    if (name == ".Some" || name == ".None")
+        return expected;
+    return option_value(expected);
 }
 
 // `p[i]` on a `*[N]T` or `*[..]T` is the i-th array from `p`, as in C.
@@ -295,6 +356,7 @@ pub fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
 pub fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
     if (n.is_baked)
         return n.ty;
+    expected = context_type(c, n, expected);
     // several values are only taken where the caller of check_expr said so
     let several_ok = c.several_ok_for == n;
     c.several_ok_for = null;

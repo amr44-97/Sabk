@@ -25,7 +25,10 @@ known=" tests/resolve/macro_labels.smelt
   tests/run/for_index.smelt tests/errors/for_index_assign.smelt
   tests/errors/for_index_twice.smelt tests/errors/for_index_range.smelt
   tests/run/let_typed.smelt tests/errors/let_typed_discard.smelt
-  tests/errors/parse_let_values_type.smelt "
+  tests/errors/parse_let_values_type.smelt tests/run/variant_literal.smelt
+  tests/errors/variant_literal_misuse.smelt tests/errors/variant_literal_dot.smelt
+  tests/errors/parse_old_literals.smelt tests/run/null_pointer.smelt
+  tests/run/option_wrap.smelt tests/errors/option_wrap.smelt "
 
 modes=("$@")
 ((${#modes[@]})) || modes=(--tokens --ast --resolve --types)

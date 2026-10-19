@@ -16,9 +16,9 @@
 [error]: a struct literal is written with a dot before the `{`: `Point.{ ... }` at [tests/errors/parse_old_literals.smelt:11:18]
     11 |     let p = Point{ .x = 1 };
        |                  ^
-[error]: a struct literal is written with a dot before the `{`: `mem.Arena.{ ... }` at [tests/errors/parse_old_literals.smelt:12:22]
-    12 |     let q = mem.Arena{};
-       |                      ^
 [error]: a struct literal is written with a dot before the `{`: `Pair(i32).{ ... }` at [tests/errors/parse_old_literals.smelt:13:22]
     13 |     let r = Pair(i32){};
+       |                      ^
+[error]: a struct literal is written with a dot before the `{`: `mem.Arena.{ ... }` at [tests/errors/parse_old_literals.smelt:12:22]
+    12 |     let q = mem.Arena{};
        |                      ^

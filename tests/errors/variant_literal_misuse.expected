@@ -1,0 +1,15 @@
+[error]: `K.Wrap` holds an `i32`, not fields; write `K.Wrap(...)` at [tests/errors/variant_literal_misuse.smelt:8:15]
+     8 |     let a = K.Wrap{ 1 };
+       |               ^
+[error]: `K.Nil` holds no value, so it has no fields; write `K.Nil` at [tests/errors/variant_literal_misuse.smelt:9:15]
+     9 |     let b = K.Nil{};
+       |               ^
+[error]: `K.Let` has no field `nope` at [tests/errors/variant_literal_misuse.smelt:10:21]
+    10 |     let c = K.Let{ .nope = 1 };
+       |                     ^
+[error]: `Color.Red` holds no value, so it has no fields; write `Color.Red` at [tests/errors/variant_literal_misuse.smelt:11:19]
+    11 |     let d = Color.Red{};
+       |                   ^
+[error]: can't tell which enum `.Let` is from here; write the enum too, like `K.Let{ ... }` at [tests/errors/variant_literal_misuse.smelt:12:13]
+    12 |     let e = .Let{ .declared = 1 };
+       |             ^

@@ -123,7 +123,8 @@ pub enum NodeKind {
     // new(T, ...), new([]T, n, ...), new(value, ...): the resolver tells
     // what `first` and `second` are
     New(declared: *Node, value: *Node, first: *Node, second: *Node),
-    StructInit(declared: *Node, items: []*Node), // T.{...}; tok: `{`, or `.` in .{...}
+    StructInit(declared: *Node, items: []*Node, // T.{...}; tok: `{`, or `.` in .{...}
+               variant: bool = false),      // K.Let{...} or .Let{...}: a variant's fields
     FieldInit(value: *Node),                 // .name = value; tok: the name
     ArrayLiteral(elem: *Node, items: []*Node), // T.[...]; tok: the `.`
     EnumShorthand,                           // .Red; tok: `.Red`

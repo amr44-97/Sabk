@@ -1250,9 +1250,10 @@ fn expr_inner(g: *CodeGen, n: *Node) -> string {
             object = o;
         let base = object.ty;
         let arrow = if (base.kind == .Ptr) "->" else ".";
+        let held = if (base.kind == .Ptr) nonnull(g, expr(g, object), n.tok) else expr(g, object);
         if ((if (base.kind == .Ptr) base.elem else base).kind == .Array)
-            return cat("(", expr(g, object), ")", arrow, "data");
-        return cat("(", expr(g, object), ")", arrow, local_name(n.tok.text));
+            return cat("(", held, ")", arrow, "data");
+        return cat("(", held, ")", arrow, local_name(n.tok.text));
 
     case .Grouped{inner}:
         return cat("(", expr(g, inner), ")");
@@ -1297,7 +1298,7 @@ fn expr_inner(g: *CodeGen, n: *Node) -> string {
     case .Deref{pointer}:
         if (pointer.ty.kind == .Rawptr) // a void, read through a *void
             return cat("(*(smelt_void *)", expr(g, pointer), ")");
-        return cat("(*", expr(g, pointer), ")");
+        return cat("(*", nonnull(g, expr(g, pointer), n.tok), ")");
 
     case .MacroExpansion:
         // a macro used as a value: a GNU C statement expression, ({ ...; v; })
@@ -1577,6 +1578,13 @@ fn sequence(g: *CodeGen, n: *Node) -> string {
     return expr(g, n);
 }
 
+// a pointer about to be followed, checked for null where bounds are
+fn nonnull(g: *CodeGen, pointer: string, at: Token) -> string {
+    if (g.static_init || !checks_bounds(g))
+        return pointer;
+    return cat("rt_nonnull(", pointer, ", ", location(g, at), ")");
+}
+
 // are this function's indexing and slicing checked: the build's
 // BoundsChecks, then the function's #no_bounds_check
 fn checks_bounds(g: *CodeGen) -> bool {
@@ -1624,7 +1632,7 @@ fn index(g: *CodeGen, n: *Node) -> string {
             i = cat("rt_index(", i, ", ", unum(t.len), ", ", location(g, n.tok), ")");
         return cat("(", expr(g, object), ").data[", i, "]");
     }
-    return cat("(", expr(g, object), ")[", i, "]"); // raw pointers aren't checked
+    return cat("(", nonnull(g, expr(g, object), n.tok), ")[", i, "]"); // not its bounds, only null
 }
 
 // x[lo..hi], through the slice type's bounds-checked helpers

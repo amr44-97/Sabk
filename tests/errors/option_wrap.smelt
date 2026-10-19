@@ -1,0 +1,6 @@
+// a value wraps into ?T only when it fits T, and null doesn't wrap
+fn main() {
+    let a: ?u8 = 300;
+    let b: ?*i32 = null;
+    let c: ?i32 = "text";
+}

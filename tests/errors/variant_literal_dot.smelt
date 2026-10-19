@@ -1,0 +1,5 @@
+// a variant's fields go right after it, without the dot of `T.{ ... }`
+enum K { Let(declared: i32), Nil }
+fn main() {
+    let f = K.Let.{ .declared = 1 };
+}

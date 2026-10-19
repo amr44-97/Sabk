@@ -669,7 +669,30 @@ pub fn variant_value(c: *Checker, n: *Node, t: *Type, name: string, call: *Node)
     let fields: *Node = null;
     if (v.kind is .Variant{fields: f})
         fields = f;
-    if (call == null) {
+    // K.Let{ .declared = t }: its fields by name or in order, like a
+    // struct literal's, the rest defaulted
+    let braces = call != null && call.kind.tag == .StructInit;
+    if (braces) {
+        let at = call.tok;
+        if (call.kind is .StructInit{declared} && declared != null)
+            at = declared.tok;
+        if (pt == null) {
+            error(c, at, tformat("% holds no value, so it has no fields; write %", q(written), q(written)));
+            check_items_for_error(c, call);
+            return c.types.error;
+        }
+        if (fields == null) {
+            error(c, at, tformat("% holds % %, not fields; write %", q(written), if (index_of_char("aeiou", type_name(pt)[0]) >= 0) "an" else "a",
+                                 qt(pt), q(tformat("%(...)", written))));
+            check_items_for_error(c, call);
+            return c.types.error;
+        }
+        let init = new_node(call.tok, .StructInit(null, items_of(call)));
+        init.color = call.color;
+        if (check_expr(c, init, pt).kind == .Error)
+            return c.types.error;
+        held = init;
+    } else if (call == null) {
         if (pt != null) {
             error(c, n.tok, tformat("% holds a value of type %; write %. To test which variant a value is, compare its `.tag` with `.%`",
                                     q(written), qt(pt), q(tformat("%(...)", written)), name));

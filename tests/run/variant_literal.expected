@@ -1,0 +1,2 @@
+Let(declared = 1, value = 7, uninit = true) Let(declared = 2, value = 7, uninit = false) Let(declared = 3, value = 4, uninit = false) Let(declared = 9, value = 7, uninit = true) Let(declared = 9, value = 7, uninit = true)
+[exit 0]

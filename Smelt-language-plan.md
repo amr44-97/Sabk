@@ -22,7 +22,7 @@ switch to them at the bootstrap.
 - [ ] **Results:** `E!T`, `E!void`, `!T` (inferred failure), wrapping, destructuring, `or_return .Replacement` (section 5)
 - [ ] **Dropped failures:** a warning that shows the handling; levels from flags and build options (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
-- [ ] **Smaller additions:** named variant construction, ~~`for (x, i in xs)`~~, ~~`let a, b: T;`~~, ~~keywords as field names~~ (done), null checks, wrapping into `?T` (section 6)
+- [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 
 ## 1. Formatting
 

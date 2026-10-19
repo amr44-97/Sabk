@@ -1328,6 +1328,18 @@ expected. The arguments fill a variant's fields in order; fields with a
 default (`Rect(w: f64, h: f64 = 1)`) can be left off the end. A variant that
 holds nothing is just `Expr.Nil`.
 
+A variant with fields can also be made like a struct, its fields by name
+(or in order) in braces right after it, the rest defaulted:
+
+```
+let r = Shape.Rect{ .w = 2 };                // h: its default, 1
+let e: Expr = .Binary{ .op = .Add, .lhs = &x, .rhs = &y };
+```
+
+The braces follow the variant without a dot (`T.{ ... }` is a struct's), and
+only a variant with fields takes them: `Expr.Number{ 1 }` is an error that
+says to write `Expr.Number(1)`.
+
 **Getting the value out** is what `switch` (or `is`, see
 [Patterns](#patterns)) does. A case names a variant and a binding for what
 it holds, or for its fields:
@@ -1391,7 +1403,7 @@ zeroed allocation) is empty. `or_else` takes its value, or a fallback for
 
 ```
 fn find(items: []isize, x: isize) -> ?isize {
-    for (i in 0..items.len) if (items[i] == x) return .Some(i);
+    for (item, i in items) if (item == x) return i;   // .Some(i)
     return .None;
 }
 
@@ -1402,6 +1414,10 @@ struct Config { port: ?isize; }                // not set until it's .Some
 let port = cfg.port or_else 8080;
 ```
 
+- **A value wraps itself**: where a `?T` is expected, a value that fits `T`
+  becomes `.Some(value)`: `let o: ?i64 = 5;`, `return i;`, `f(.{ .x = 1 })`
+  for a `?Point` parameter. `null` doesn't wrap (it could mean either):
+  write `.None`, or `.Some(null)` for a null pointer inside.
 - A missing value isn't a failure, so `or_return` doesn't take a `?T`.
   Failures are bools and enums (see [Handling errors](#handling-errors)).
 - Pointers don't need it: a `*T` can already be null, and `or_else` takes
@@ -2741,9 +2757,12 @@ arguments, so a build script can take options.
 - Small integer types wrap at their own size: a `u8` sum wraps at 256.
 - Indexing an array or slice is bounds-checked. An out-of-range index prints
   `file:line:col: panic: ...` and aborts. Indexing a raw pointer isn't
-  checked.
+  checked against a length.
+- **Null pointers.** Following a null pointer (`p.*`, `p.x`, `p[i]`)
+  panics with `file:line:col: panic: null pointer`, under the same setting
+  as the bounds checks.
 - **Turning the checks off.** `#no_bounds_check` after a function's
-  signature, like Jai's `#no_abc`, drops its index and slice checks (a
+  signature, like Jai's `#no_abc`, drops its index, slice and null checks (a
   generic's instances too):
 
   ```
@@ -2757,7 +2776,7 @@ arguments, so a build script can take options.
   The build decides the rest, with `--bounds-checks` or std/build's
   `set_bounds_checks`: `On` (the default) checks everything except those
   functions, `Off` checks nothing, and `Always` checks them too, to find a
-  bug one hides. It covers indexing and slicing only: division by zero is
+  bug one hides. It covers indexing, slicing and null pointers: division by zero is
   checked either way, and `#run` code keeps its checks. A macro can't be
   `#no_bounds_check`, since its code runs in its caller and is checked as
   the caller is, and neither can an `extern fn` without a body.

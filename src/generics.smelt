@@ -930,6 +930,8 @@ pub fn check_struct_init(c: *Checker, n: *Node, expected: *Type) -> *Type {
     let items: []*Node;
     if (n.kind is .StructInit{declared: d, items: i})
         declared, items = d, i;
+    if (n.kind is .StructInit{variant: true})
+        return check_variant_literal(c, n, declared, expected);
     let t: *Type = null;
     if (declared == null) {
         // .{...}: whatever its context expects, which can also be an array
@@ -1017,6 +1019,41 @@ pub fn check_struct_init(c: *Checker, n: *Node, expected: *Type) -> *Type {
         }
     }
     return t;
+}
+
+// K.Let{...} or .Let{...}: a tagged enum's variant, made from its fields
+fn check_variant_literal(c: *Checker, n: *Node, declared: *Node, expected: *Type) -> *Type {
+    let t: *Type = null;
+    let name = declared.tok.text;
+    if (declared.kind.tag == .EnumShorthand) {
+        name = name[1..];
+        if (expected == null || (!expected.is_tagged && expected.kind != .Enum)) {
+            if (expected == null || expected.kind != .Error)
+                error(c, declared.tok, tformat("can't tell which enum `.%` is from here; write the enum too, like `K.%{}{ ... }`",
+                                               name, name));
+            return check_items_for_error(c, n);
+        }
+        t = expected;
+    } else {
+        let object: *Node = null;
+        if (declared.kind is .Member{object: o})
+            object = o;
+        if (object == null || object.decl == null || declared.decl == null)
+            return check_items_for_error(c, n); // the resolver reported it
+        if (is_template(object.decl)) {
+            error(c, declared.tok, generic_variant_hint(object.decl, name));
+            return check_items_for_error(c, n);
+        }
+        t = decl_type(c, object.decl);
+        object.ty = t;
+    }
+    if (t.kind == .Error)
+        return check_items_for_error(c, n);
+    if (!t.is_tagged) {
+        error(c, declared.tok, tformat("`%.%` holds no value, so it has no fields; write `%.%`", t.name, name, t.name, name));
+        return check_items_for_error(c, n);
+    }
+    return variant_value(c, n, t, name, n);
 }
 
 /* ------------------------------------------------------------------ casts */
