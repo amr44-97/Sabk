@@ -11,8 +11,8 @@ std/mem.sabk:69:15: panic: delete can't free a `*i64`: it frees strings, slices,
 [note]: called from here at [std/os.sabk:36:52]
     36 |     handler.procedure(handler.data, what, message, location);
        |                                                    ^
-[note]: called from here at [std/str.sabk:137:64]
-   137 | pub fn join(parts: []string, separator: string, a: Allocator = context.allocator) -> string {
+[note]: called from here at [std/str.sabk:141:64]
+   141 | pub fn join(parts: []string, separator: string, a: Allocator = context.allocator) -> string {
        |                                                                ^
 [note]: called from here at [std/mem.sabk:61:34]
     61 |         #insert #run delete_code(type_info(T));

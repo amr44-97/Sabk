@@ -18,6 +18,9 @@
 //   parse_int(s), parse_uint(s), parse_float(s), parse_bool(s)
 //                            the value and a ParseError, .None when `s`
 //                            is all of one: let n = parse_int(s) or_return;
+//                            A failure is logged as a warning (std/logging):
+//                            `"12x" isn't an integer`; for a fallback on
+//                            purpose, set context.log_level = .Error
 //
 //   let b = make_builder();        text built on a growable [..]u8
 //   defer builder_free(&b);
@@ -28,6 +31,7 @@
 import "std/mem";
 import "std/os";
 import "std/array";
+import "std/logging";
 
 extern fn strlen(s: *u8) -> usize;
 extern fn memcmp(a: *void, b: *void, size: usize) -> i32;
@@ -214,7 +218,7 @@ pub fn parse_int(s: string) -> (i64, ParseError = .None) {
         limit = 9223372036854775808;
     let value, err = parse_digits(digits, limit);
     if (err != .None)
-        return 0, err;
+        return 0, parse_failed(err, s, "an integer");
     if (negative)
         return -(value as i64); // the minimum negates to itself
     return value as i64;
@@ -222,7 +226,20 @@ pub fn parse_int(s: string) -> (i64, ParseError = .None) {
 
 // a decimal integer without a sign: "42"
 pub fn parse_uint(s: string) -> (u64, ParseError = .None) {
-    return parse_digits(s, 18446744073709551615);
+    let value, err = parse_digits(s, 18446744073709551615);
+    if (err != .None)
+        return 0, parse_failed(err, s, "an unsigned integer");
+    return value;
+}
+
+// a failure, logged as a warning: `"12x" isn't an integer`
+fn parse_failed(err: ParseError, s: string, what: string) -> ParseError {
+    switch (err) {
+    case .Empty:      log(.Warning, "an empty string isn't %", what);
+    case .OutOfRange: log(.Warning, "%q is out of range for %", s, what);
+    default:          log(.Warning, "%q isn't %", s, what);
+    }
+    return err;
 }
 
 fn parse_digits(s: string, limit: u64) -> (u64, ParseError = .None) {
@@ -244,19 +261,19 @@ fn parse_digits(s: string, limit: u64) -> (u64, ParseError = .None) {
 // "inf", "nan"
 pub fn parse_float(s: string) -> (f64, ParseError = .None) {
     if (s.len == 0)
-        return 0, .Empty;
+        return 0, parse_failed(.Empty, s, "a number");
     if (s[0] == ' ' || s[0] == '\t' || s[0] == '\n') // strtod would skip them
-        return 0, .Invalid;
+        return 0, parse_failed(.Invalid, s, "a number");
     let c = to_cstring(s);
     defer free(c);
     let end: *u8;
     let value = strtod(c, &end);
     if (end != &c[s.len]) // it stopped early, or `s` has a NUL in it
-        return 0, .Invalid;
+        return 0, parse_failed(.Invalid, s, "a number");
     let huge = 1.7976931348623157e308;
     if ((value > huge || value < -huge) && index_of_char(s, 'i') < 0 &&
         index_of_char(s, 'I') < 0)
-        return 0, .OutOfRange; // too big, but not written as infinity
+        return 0, parse_failed(.OutOfRange, s, "a number"); // too big, but not written as infinity
     return value;
 }
 
@@ -265,8 +282,8 @@ pub fn parse_bool(s: string) -> (bool, ParseError = .None) {
     switch (s) {
     case "true":  return true;
     case "false": return false;
-    case "":      return false, .Empty;
-    default:      return false, .Invalid;
+    case "":      return false, parse_failed(.Empty, s, "`true` or `false`");
+    default:      return false, parse_failed(.Invalid, s, "`true` or `false`");
     }
 }
 

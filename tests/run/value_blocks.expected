@@ -1,6 +1,7 @@
 -1 1 pos
 negative rect: -1 x 2
 3 6 -2
+warning: "x" isn't an integer
 bad worker count 'x', using 1
 4 1
 left the block

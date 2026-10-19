@@ -1,6 +1,7 @@
 load /tmp/the-compiler-error-values-good.conf:
   ok: demo on port 9000 with 4 workers
 load /tmp/the-compiler-error-values-number.conf:
+warning: "90x" isn't an integer
   `90x` isn't a number: Invalid
   failed: BadNumber
 load /tmp/the-compiler-error-values-key.conf:
@@ -10,11 +11,13 @@ error: can't read /no/such/config: no such file or directory
   can't read /no/such/config: no such file or directory
   failed: CantRead
 workers from the environment: 2
+warning: "not a port" isn't an integer
 port or a default: 80
 copy: None
 error: can't read /no/such/config: no such file or directory
 copy a missing file: NotFound
 the copy has 48 bytes (None)
 average: 5 true
+warning: "four" isn't an integer
 average with a bad number: false
 [exit 0]

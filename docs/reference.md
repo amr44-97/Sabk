@@ -1909,7 +1909,11 @@ let text, err = read_file("app.cfg");
 The functions that log: `read_file`, `write_file`, `append_file`,
 `delete_file` (std/io), `make_dir`, `remove_dir`, `make_temp_dir`,
 `current_dir` (std/fs), `path_absolute`, `path_real` (std/path),
-`run_command` and `run_shell` (std/process). Your own I/O code can do
+`run_command` and `run_shell` (std/process). The parse functions
+(`parse_int`, `parse_uint`, `parse_float`, `parse_bool`) log theirs as
+warnings, `warning: "12x" isn't an integer`, since a fallback on purpose
+(`parse_int(arg) or_else 8080`) is common: `context.log_level = .Error`
+quiets them for a block. Your own I/O code can do
 the same with `log_io_error(err, "read", path)`, which logs and gives
 `err` back. A caller that expects a failure quiets it for a block:
 

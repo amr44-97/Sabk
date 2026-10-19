@@ -21,7 +21,8 @@ switch to them at the bootstrap.
 - [x] **Error enums:** `enum IoError: Error { ... }`; plain enums go back to being plain (section 5)
 - [x] **Result defaults and taking results:** `-> (i64, ParseError = .None)`, results taken from the left, a call's first value in an expression (section 5)
 - [x] **Logged failures:** std's I/O, path and process functions log why; `context.log_level` (section 5)
-- [ ] **Failures, the rest:** whether std/str's parse functions log (open), `or_return .Replacement` (section 5)
+- [x] **Parse failures logged** as warnings (section 5)
+- [ ] **`or_return .Replacement`** (section 5)
 - [ ] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
 - [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
@@ -473,10 +474,11 @@ parse_int(s);                         // a statement: all dropped
    (`capture_logger`) and prints them with the name taken out.
 5. **`log` skips a message below `context.log_level` before formatting
    it**, so a skipped `.Debug` costs a comparison.
-6. **Open: the parse functions don't log.** `parse_int("oops")` returns
-   `.Invalid` and prints nothing, so `total += parse_int(s)` adds 0
-   silently. Logging them would print on every `parse_int(arg) or_else
-   8080` that falls back on purpose. To be decided.
+6. **The parse functions log at `.Warning`** (decided Oct 20, 2026), not
+   `.Error`: `total += parse_int(s)` adding 0 shows in the log
+   (`warning: "oops" isn't an integer`), and a fallback on purpose
+   (`parse_int(arg) or_else 8080`) is quieted with
+   `context.log_level = .Error`.
 
 ### Handling one
 

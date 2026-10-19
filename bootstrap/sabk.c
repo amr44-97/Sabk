@@ -147,13 +147,13 @@ typedef struct str__Builder str__Builder;
 typedef struct grow__u8 grow__u8;
 typedef struct prelude__Any prelude__Any;
 typedef struct slice__prelude__Any slice__prelude__Any;
+typedef struct prelude__Logger prelude__Logger;
 typedef struct fmt__FormatSpec fmt__FormatSpec;
 typedef struct prelude__TypeField prelude__TypeField;
 typedef struct slice__prelude__TypeField slice__prelude__TypeField;
 typedef struct prelude__TypeVariant prelude__TypeVariant;
 typedef u32 io__IoError;
 typedef struct tuple__2 tuple__2;
-typedef struct prelude__Logger prelude__Logger;
 typedef u32 process__ProcessError;
 typedef struct tuple__3 tuple__3;
 typedef struct process__Exit process__Exit;
@@ -4631,8 +4631,9 @@ static void str__builder_free(prelude__Context *ctx, str__Builder* b);
 static void str__builder_append(prelude__Context *ctx, str__Builder* b, slice__u8 s);
 static void str__builder_append_char(prelude__Context *ctx, str__Builder* b, u8 c);
 static void str__append_string(prelude__Context *ctx, grow__u8* buf, slice__u8 s);
-static u64 reflect__hash_memory(prelude__Context *ctx, rawptr memory, isize size);
-static u64 reflect__combine_hashes(prelude__Context *ctx, u64 h, u64 more);
+static void logging__log(prelude__Context *ctx, prelude__LogLevel level, slice__u8 fmt, slice__prelude__Any args);
+static prelude__Logger logging__silent_logger(prelude__Context *ctx);
+static void logging__drop(prelude__Context *ctx, rawptr data, prelude__LogLevel level, slice__u8 message);
 i32 snprintf(u8* buffer, usize size, u8* format, ...);
 f64 strtod(u8* text, u8** end);
 static slice__u8 fmt__format(prelude__Context *ctx, slice__u8 fmt, slice__prelude__Any args);
@@ -4661,6 +4662,8 @@ static void fmt__repeat_char(prelude__Context *ctx, str__Builder* b, u8 c, isize
 static isize fmt__count_chars(prelude__Context *ctx, slice__u8 s);
 static isize fmt__char_offset(prelude__Context *ctx, slice__u8 s, isize n);
 static void fmt__append_decimal(prelude__Context *ctx, str__Builder* b, i64 n);
+static u64 reflect__hash_memory(prelude__Context *ctx, rawptr memory, isize size);
+static u64 reflect__combine_hashes(prelude__Context *ctx, u64 h, u64 more);
 rawptr opendir(u8* path);
 i32 closedir(rawptr dir);
 i32 rmdir(u8* path);
@@ -4691,9 +4694,6 @@ static io__IoError io__write_file(prelude__Context *ctx, slice__u8 path, slice__
 static io__IoError io__put_file(prelude__Context *ctx, slice__u8 path, slice__u8 data, u8* mode);
 static io__IoError io__delete_file(prelude__Context *ctx, slice__u8 path);
 static bool io__file_exists(prelude__Context *ctx, slice__u8 path);
-static void logging__log(prelude__Context *ctx, prelude__LogLevel level, slice__u8 fmt, slice__prelude__Any args);
-static prelude__Logger logging__silent_logger(prelude__Context *ctx);
-static void logging__drop(prelude__Context *ctx, rawptr data, prelude__LogLevel level, slice__u8 message);
 u8* getcwd(u8* buffer, usize size);
 u8* realpath(u8* path, u8* resolved);
 static slice__u8 path__path_dir(prelude__Context *ctx, slice__u8 p);
@@ -7947,18 +7947,18 @@ static bool str__equal(prelude__Context *ctx, slice__u8 a, slice__u8 b) {
 }
 
 static bool str__starts_with(prelude__Context *ctx, slice__u8 s, slice__u8 prefix) {
-  return (((s).len >= (prefix).len) && str__equal(ctx, slice__u8__slice(s, 0, (prefix).len, "std/str.sabk:62:42"), prefix));
+  return (((s).len >= (prefix).len) && str__equal(ctx, slice__u8__slice(s, 0, (prefix).len, "std/str.sabk:66:42"), prefix));
 }
 
 static bool str__ends_with(prelude__Context *ctx, slice__u8 s, slice__u8 suffix) {
-  return (((s).len >= (suffix).len) && str__equal(ctx, slice__u8__from(s, ((isize)((s).len - (suffix).len)), "std/str.sabk:66:42"), suffix));
+  return (((s).len >= (suffix).len) && str__equal(ctx, slice__u8__from(s, ((isize)((s).len - (suffix).len)), "std/str.sabk:70:42"), suffix));
 }
 
 static isize str__index_of_char(prelude__Context *ctx, slice__u8 s, u8 c) {
   {
     isize end__146 = (s).len;
     for (isize i = ((isize)0LL); i < end__146; i++) {
-      if (((*slice__u8__at(s, i, "std/str.sabk:71:14")) == c)) {
+      if (((*slice__u8__at(s, i, "std/str.sabk:75:14")) == c)) {
         return i;
       }
     }
@@ -7973,7 +7973,7 @@ static isize str__index_of(prelude__Context *ctx, slice__u8 s, slice__u8 needle)
   {
     isize end__147 = ((isize)(((isize)((s).len - (needle).len)) + ((isize)1LL)));
     for (isize i = ((isize)0LL); i < end__147; i++) {
-      if (str__equal(ctx, slice__u8__slice(s, i, ((isize)(i + (needle).len)), "std/str.sabk:80:20"), needle)) {
+      if (str__equal(ctx, slice__u8__slice(s, i, ((isize)(i + (needle).len)), "std/str.sabk:84:20"), needle)) {
         return i;
       }
     }
@@ -7986,13 +7986,13 @@ static bool str__contains(prelude__Context *ctx, slice__u8 s, slice__u8 needle) 
 }
 
 static slice__u8 str__copy_string(prelude__Context *ctx, slice__u8 s, prelude__Allocator a) {
-  slice__u8 copy = slice__u8__make(ctx, a, (s).len, "std/str.sabk:156:16");
+  slice__u8 copy = slice__u8__make(ctx, a, (s).len, "std/str.sabk:160:16");
   mem__copy_bytes(ctx, copy, s);
   return copy;
 }
 
 static u8* str__to_cstring(prelude__Context *ctx, slice__u8 s, prelude__Allocator a) {
-  slice__u8 copy = slice__u8__make(ctx, a, ((isize)((s).len + ((isize)1LL))), "std/str.sabk:163:16");
+  slice__u8 copy = slice__u8__make(ctx, a, ((isize)((s).len + ((isize)1LL))), "std/str.sabk:167:16");
   mem__copy_bytes(ctx, copy, s);
   return (copy).ptr;
 }
@@ -8001,17 +8001,17 @@ static slice__u8 str__from_cstring(prelude__Context *ctx, u8* s) {
   if ((s == ((u8*)0))) {
     return ((slice__u8){0});
   }
-  return slice__u8__sub(s, PTRDIFF_MAX, ((isize)0LL), strlen(s), "std/str.sabk:172:13");
+  return slice__u8__sub(s, PTRDIFF_MAX, ((isize)0LL), strlen(s), "std/str.sabk:176:13");
 }
 
 static slice__u8 str__format_uint(prelude__Context *ctx, u64 n, arr24__u8* buffer) {
   isize i = ((isize)24LL);
   do {
     i--;
-    ((*rt_nonnull(buffer, "std/str.sabk:182:16"))).data[rt_index(i, 24, "std/str.sabk:182:17")] = ((u8)((((u64)(((u64)(((u8)48LL))) + ((u64)(n % ((u64)10LL))))))));
+    ((*rt_nonnull(buffer, "std/str.sabk:186:16"))).data[rt_index(i, 24, "std/str.sabk:186:17")] = ((u8)((((u64)(((u64)(((u8)48LL))) + ((u64)(n % ((u64)10LL))))))));
     ({ u64 *target__148 = &n; *target__148 = ((u64)(*target__148 / ((u64)10LL))); });
   } while ((n != ((u64)0LL)));
-  return slice__u8__sub(((*rt_nonnull(buffer, "std/str.sabk:185:19"))).data, 24, i, 24, "std/str.sabk:185:20");
+  return slice__u8__sub(((*rt_nonnull(buffer, "std/str.sabk:189:19"))).data, 24, i, 24, "std/str.sabk:189:20");
 }
 
 static slice__u8 str__format_int(prelude__Context *ctx, i64 n, arr24__u8* buffer) {
@@ -8020,8 +8020,8 @@ static slice__u8 str__format_int(prelude__Context *ctx, i64 n, arr24__u8* buffer
   }
   slice__u8 digits = str__format_uint(ctx, ((u64)((((i64)(-n))))), buffer);
   isize start = ((isize)(((isize)(((isize)24LL) - (digits).len)) - ((isize)1LL)));
-  ((*rt_nonnull(buffer, "std/str.sabk:195:12"))).data[rt_index(start, 24, "std/str.sabk:195:13")] = ((u8)45LL);
-  return slice__u8__sub(((*rt_nonnull(buffer, "std/str.sabk:196:19"))).data, 24, start, 24, "std/str.sabk:196:20");
+  ((*rt_nonnull(buffer, "std/str.sabk:199:12"))).data[rt_index(start, 24, "std/str.sabk:199:13")] = ((u8)45LL);
+  return slice__u8__sub(((*rt_nonnull(buffer, "std/str.sabk:200:19"))).data, 24, start, 24, "std/str.sabk:200:20");
 }
 
 static str__Builder str__make_builder(prelude__Context *ctx, prelude__Allocator a) {
@@ -8031,40 +8031,42 @@ static str__Builder str__make_builder(prelude__Context *ctx, prelude__Allocator 
 }
 
 static slice__u8 str__builder_string(prelude__Context *ctx, str__Builder* b) {
-  return grow__u8__view((rt_nonnull(b, "std/str.sabk:289:57"))->bytes);
+  return grow__u8__view((rt_nonnull(b, "std/str.sabk:306:57"))->bytes);
 }
 
 static void str__builder_free(prelude__Context *ctx, str__Builder* b) {
-  array__array_free__u8(ctx, (&(rt_nonnull(b, "std/str.sabk:293:50"))->bytes));
+  array__array_free__u8(ctx, (&(rt_nonnull(b, "std/str.sabk:310:50"))->bytes));
 }
 
 static void str__builder_append(prelude__Context *ctx, str__Builder* b, slice__u8 s) {
-  array__array_append__u8(ctx, (&(rt_nonnull(b, "std/str.sabk:295:65"))->bytes), s);
+  array__array_append__u8(ctx, (&(rt_nonnull(b, "std/str.sabk:312:65"))->bytes), s);
 }
 
 static void str__builder_append_char(prelude__Context *ctx, str__Builder* b, u8 c) {
-  array__array_add__u8(ctx, (&(rt_nonnull(b, "std/str.sabk:297:63"))->bytes), c);
+  array__array_add__u8(ctx, (&(rt_nonnull(b, "std/str.sabk:314:63"))->bytes), c);
 }
 
 static void str__append_string(prelude__Context *ctx, grow__u8* buf, slice__u8 s) {
   array__array_append__u8(ctx, buf, s);
 }
 
-static u64 reflect__hash_memory(prelude__Context *ctx, rawptr memory, isize size) {
-  u64 h = ((u64)14695981039346656037ULL);
-  {
-    slice__u8 seq__149 = slice__u8__sub((((u8*)(memory))), PTRDIFF_MAX, ((isize)0LL), size, "std/reflect.sabk:35:30");
-    for (isize i__150 = 0; i__150 < seq__149.len; i__150++) {
-      u8 b = seq__149.ptr[i__150];
-      h ^= ((u64)(b));
-      h *= ((u64)1099511628211LL);
-    }
+static void logging__log(prelude__Context *ctx, prelude__LogLevel level, slice__u8 fmt, slice__prelude__Any args) {
+  if (((((u8)(level))) < (((u8)(((*ctx)).log_level))))) {
+    return;
   }
-  return h;
+  str__Builder b = str__make_builder(ctx, ((*ctx)).allocator);
+  fmt__format_into(ctx, (&b), fmt, args);
+  ({ fn__11 v__149 = (((*ctx)).logger).procedure; rawptr v__150 = (((*ctx)).logger).data; prelude__LogLevel v__151 = level; slice__u8 v__152 = str__builder_string(ctx, (&b)); (v__149)(ctx, v__150, v__151, v__152); });
+  {
+    str__builder_free(ctx, (&b));
+  }
 }
 
-static u64 reflect__combine_hashes(prelude__Context *ctx, u64 h, u64 more) {
-  return ((u64)(h ^ (((u64)(((u64)(((u64)(more + ((u64)11400714819323198485ULL))) + (((u64)(h << ((u32)6LL)))))) + (((u64)(h >> ((u32)2LL)))))))));
+static prelude__Logger logging__silent_logger(prelude__Context *ctx) {
+  return ((prelude__Logger){.procedure = logging__drop});
+}
+
+static void logging__drop(prelude__Context *ctx, rawptr data, prelude__LogLevel level, slice__u8 message) {
 }
 
 static slice__u8 fmt__format(prelude__Context *ctx, slice__u8 fmt, slice__prelude__Any args) {
@@ -8167,8 +8169,8 @@ static void fmt__format_into(prelude__Context *ctx, str__Builder* b, slice__u8 f
   if ((next < (args).len)) {
     str__builder_append(ctx, b, ((slice__u8){(u8*)" %(extra: ", 10}));
     {
-      isize end__151 = (args).len;
-      for (isize k = next; k < end__151; k++) {
+      isize end__153 = (args).len;
+      for (isize k = next; k < end__153; k++) {
         if ((k > next)) {
           str__builder_append(ctx, b, ((slice__u8){(u8*)", ", 2}));
         }
@@ -8230,8 +8232,8 @@ static bool fmt__is_format_kind(prelude__Context *ctx, u8 c) {
 
 static bool fmt__is_kind(prelude__Context *ctx, u8 c) {
   {
-    u8 switch__152 = c;
-    switch (switch__152) {
+    u8 switch__154 = c;
+    switch (switch__154) {
     case ((u8)115LL):
     case ((u8)113LL):
     case ((u8)119LL):
@@ -8317,9 +8319,9 @@ static void fmt__put(prelude__Context *ctx, str__Builder* b, rawptr p, prelude__
   }
   u8* bytes = ((u8*)(p));
   if ((((rt_nonnull(spec, "std/fmt.sabk:309:14"))->kind == ((u8)115LL)) || ((rt_nonnull(spec, "std/fmt.sabk:309:34"))->kind == ((u8)113LL)))) {
-    tuple__1 values__153 = fmt__as_text(ctx, p, t);
-    slice__u8 text = values__153._0;
-    bool is_text = values__153._1;
+    tuple__1 values__155 = fmt__as_text(ctx, p, t);
+    slice__u8 text = values__155._0;
+    bool is_text = values__155._1;
     if (is_text) {
       fmt__put_string(ctx, b, text, (nested || ((rt_nonnull(spec, "std/fmt.sabk:312:48"))->kind == ((u8)113LL))), spec);
       return;
@@ -8334,8 +8336,8 @@ static void fmt__put(prelude__Context *ctx, str__Builder* b, rawptr p, prelude__
     return;
   }
   {
-    prelude__TypeKind switch__154 = (rt_nonnull(t, "std/fmt.sabk:324:15"))->kind;
-    switch (switch__154) {
+    prelude__TypeKind switch__156 = (rt_nonnull(t, "std/fmt.sabk:324:15"))->kind;
+    switch (switch__156) {
     case ((prelude__TypeKind)0LL):
     {
       str__builder_append(ctx, b, ((slice__u8){(u8*)"void", 4}));
@@ -8352,7 +8354,7 @@ static void fmt__put(prelude__Context *ctx, str__Builder* b, rawptr p, prelude__
     break;
     case ((prelude__TypeKind)2LL):
     {
-      ({ str__Builder* v__155 = b; i64 v__156 = fmt__read_int(ctx, p, t); bool v__157 = (rt_nonnull(t, "std/fmt.sabk:333:38"))->is_signed; fmt__FormatSpec* v__158 = spec; fmt__put_int(ctx, v__155, v__156, v__157, v__158); });
+      ({ str__Builder* v__157 = b; i64 v__158 = fmt__read_int(ctx, p, t); bool v__159 = (rt_nonnull(t, "std/fmt.sabk:333:38"))->is_signed; fmt__FormatSpec* v__160 = spec; fmt__put_int(ctx, v__157, v__158, v__159, v__160); });
     }
     break;
     case ((prelude__TypeKind)3LL):
@@ -8407,9 +8409,9 @@ static void fmt__put(prelude__Context *ctx, str__Builder* b, rawptr p, prelude__
       }
       i64 value = fmt__read_int(ctx, p, (rt_nonnull(t, "std/fmt.sabk:359:35"))->elem);
       {
-        slice__prelude__TypeVariant seq__159 = (rt_nonnull(t, "std/fmt.sabk:360:21"))->variants;
-        for (isize i__160 = 0; i__160 < seq__159.len; i__160++) {
-          prelude__TypeVariant v = seq__159.ptr[i__160];
+        slice__prelude__TypeVariant seq__161 = (rt_nonnull(t, "std/fmt.sabk:360:21"))->variants;
+        for (isize i__162 = 0; i__162 < seq__161.len; i__162++) {
+          prelude__TypeVariant v = seq__161.ptr[i__162];
           if (((v).value == value)) {
             str__builder_append(ctx, b, (v).name);
             return;
@@ -8426,9 +8428,9 @@ static void fmt__put(prelude__Context *ctx, str__Builder* b, rawptr p, prelude__
     {
       i64 tag = fmt__read_int(ctx, ((rawptr)((&(rt_nonnull(bytes, "std/fmt.sabk:370:34"))[((*slice__prelude__TypeField__at((rt_nonnull(t, "std/fmt.sabk:370:37"))->fields, ((isize)0LL), "std/fmt.sabk:370:43"))).offset]))), (rt_nonnull(t, "std/fmt.sabk:370:58"))->elem);
       {
-        slice__prelude__TypeVariant seq__161 = (rt_nonnull(t, "std/fmt.sabk:371:21"))->variants;
-        for (isize i__162 = 0; i__162 < seq__161.len; i__162++) {
-          prelude__TypeVariant v = seq__161.ptr[i__162];
+        slice__prelude__TypeVariant seq__163 = (rt_nonnull(t, "std/fmt.sabk:371:21"))->variants;
+        for (isize i__164 = 0; i__164 < seq__163.len; i__164++) {
+          prelude__TypeVariant v = seq__163.ptr[i__164];
           if (((v).value != tag)) {
             continue;
           }
@@ -8461,8 +8463,8 @@ static void fmt__put(prelude__Context *ctx, str__Builder* b, rawptr p, prelude__
 static tuple__1 fmt__as_text(prelude__Context *ctx, rawptr p, prelude__TypeInfo* t) {
   prelude__TypeInfo* byte = (&ti__8);
   {
-    prelude__TypeKind switch__163 = (rt_nonnull(t, "std/fmt.sabk:399:15"))->kind;
-    switch (switch__163) {
+    prelude__TypeKind switch__165 = (rt_nonnull(t, "std/fmt.sabk:399:15"))->kind;
+    switch (switch__165) {
     case ((prelude__TypeKind)9LL):
     {
       return ((tuple__1){._0 = (*rt_nonnull((((slice__u8*)(p))), "std/fmt.sabk:401:31")), ._1 = true});
@@ -8516,9 +8518,9 @@ static void fmt__put_error(prelude__Context *ctx, str__Builder* b, prelude__Erro
   str__builder_append(ctx, b, (rt_nonnull(t, "std/fmt.sabk:430:25"))->name);
   i64 value = prelude__error_value(ctx, ((prelude__Error)(e)));
   {
-    slice__prelude__TypeVariant seq__164 = (rt_nonnull(t, "std/fmt.sabk:432:17"))->variants;
-    for (isize i__165 = 0; i__165 < seq__164.len; i__165++) {
-      prelude__TypeVariant v = seq__164.ptr[i__165];
+    slice__prelude__TypeVariant seq__166 = (rt_nonnull(t, "std/fmt.sabk:432:17"))->variants;
+    for (isize i__167 = 0; i__167 < seq__166.len; i__167++) {
+      prelude__TypeVariant v = seq__166.ptr[i__167];
       if (((v).value == value)) {
         str__builder_append_char(ctx, b, ((u8)46LL));
         str__builder_append(ctx, b, (v).name);
@@ -8534,8 +8536,8 @@ static void fmt__put_error(prelude__Context *ctx, str__Builder* b, prelude__Erro
 static i64 fmt__read_int(prelude__Context *ctx, rawptr p, prelude__TypeInfo* t) {
   if ((rt_nonnull(t, "std/fmt.sabk:445:11"))->is_signed) {
     {
-      isize switch__166 = (rt_nonnull(t, "std/fmt.sabk:446:19"))->size;
-      switch (switch__166) {
+      isize switch__168 = (rt_nonnull(t, "std/fmt.sabk:446:19"))->size;
+      switch (switch__168) {
       case ((isize)1LL):
       {
         return ((i64)((*rt_nonnull((((i8*)(p))), "std/fmt.sabk:447:35"))));
@@ -8560,8 +8562,8 @@ static i64 fmt__read_int(prelude__Context *ctx, rawptr p, prelude__TypeInfo* t) 
     }
   }
   {
-    isize switch__167 = (rt_nonnull(t, "std/fmt.sabk:453:15"))->size;
-    switch (switch__167) {
+    isize switch__169 = (rt_nonnull(t, "std/fmt.sabk:453:15"))->size;
+    switch (switch__169) {
     case ((isize)1LL):
     {
       return ((i64)((*rt_nonnull((((u8*)(p))), "std/fmt.sabk:454:31"))));
@@ -8588,8 +8590,8 @@ static i64 fmt__read_int(prelude__Context *ctx, rawptr p, prelude__TypeInfo* t) 
 
 static void fmt__put_int(prelude__Context *ctx, str__Builder* b, i64 value, bool signed_, fmt__FormatSpec* spec) {
   {
-    u8 switch__168 = (rt_nonnull(spec, "std/fmt.sabk:462:18"))->kind;
-    switch (switch__168) {
+    u8 switch__170 = (rt_nonnull(spec, "std/fmt.sabk:462:18"))->kind;
+    switch (switch__170) {
     case ((u8)99LL):
     {
       str__builder_append_char(ctx, b, ((u8)(value)));
@@ -8626,8 +8628,8 @@ static void fmt__put_int(prelude__Context *ctx, str__Builder* b, i64 value, bool
   u64 base = ((u64)10LL);
   slice__u8 digits = fmt__HEX_DIGITS;
   {
-    u8 switch__169 = (rt_nonnull(spec, "std/fmt.sabk:484:18"))->kind;
-    switch (switch__169) {
+    u8 switch__171 = (rt_nonnull(spec, "std/fmt.sabk:484:18"))->kind;
+    switch (switch__171) {
     case ((u8)120LL):
     {
       base = ((u64)16LL);
@@ -8658,9 +8660,9 @@ static void fmt__put_int(prelude__Context *ctx, str__Builder* b, i64 value, bool
   arr64__u8 text = {0};
   isize n = ((isize)0LL);
   while (true) {
-    (text).data[rt_index(n, 64, "std/fmt.sabk:496:13")] = (*slice__u8__at(digits, ({ u64 a__170 = magnitude, b__171 = base; if (b__171 == 0) rt_panic("std/fmt.sabk:496:36", "division by zero"); (u64)(a__170 % b__171); }), "std/fmt.sabk:496:25"));
+    (text).data[rt_index(n, 64, "std/fmt.sabk:496:13")] = (*slice__u8__at(digits, ({ u64 a__172 = magnitude, b__173 = base; if (b__173 == 0) rt_panic("std/fmt.sabk:496:36", "division by zero"); (u64)(a__172 % b__173); }), "std/fmt.sabk:496:25"));
     n++;
-    ({ u64 *target__172 = &magnitude; *target__172 = ({ u64 a__173 = *target__172, b__174 = base; if (b__174 == 0) rt_panic("std/fmt.sabk:498:19", "division by zero"); (u64)(a__173 / b__174); }); });
+    ({ u64 *target__174 = &magnitude; *target__174 = ({ u64 a__175 = *target__174, b__176 = base; if (b__176 == 0) rt_panic("std/fmt.sabk:498:19", "division by zero"); (u64)(a__175 / b__176); }); });
     if ((magnitude == ((u64)0LL))) {
       break;
     }
@@ -8696,8 +8698,8 @@ static void fmt__put_float(prelude__Context *ctx, str__Builder* b, f64 f, bool s
     return;
   }
   {
-    isize end__175 = ((isize)18LL);
-    for (isize precision = ((isize)1LL); precision < end__175; precision++) {
+    isize end__177 = ((isize)18LL);
+    for (isize precision = ((isize)1LL); precision < end__177; precision++) {
       i32 len = snprintf((&(text).data[((isize)0LL)]), ((usize)400LL), ((u8*)"%.*g"), ((i32)(precision)), f);
       f64 back = strtod((&(text).data[((isize)0LL)]), ((u8**)0));
       bool same = (back == f);
@@ -8734,8 +8736,8 @@ static void fmt__put_address(prelude__Context *ctx, str__Builder* b, usize addre
 static void fmt__put_items(prelude__Context *ctx, str__Builder* b, u8* base, isize count, prelude__TypeInfo* elem, fmt__FormatSpec* spec) {
   str__builder_append_char(ctx, b, ((u8)91LL));
   {
-    isize end__176 = count;
-    for (isize i = ((isize)0LL); i < end__176; i++) {
+    isize end__178 = count;
+    for (isize i = ((isize)0LL); i < end__178; i++) {
       if ((i > ((isize)0LL))) {
         str__builder_append(ctx, b, ((slice__u8){(u8*)", ", 2}));
       }
@@ -8748,8 +8750,8 @@ static void fmt__put_items(prelude__Context *ctx, str__Builder* b, u8* base, isi
 static void fmt__put_fields(prelude__Context *ctx, str__Builder* b, u8* base, slice__prelude__TypeField fields, u8 open, u8 close, fmt__FormatSpec* spec) {
   str__builder_append_char(ctx, b, open);
   {
-    isize end__177 = (fields).len;
-    for (isize i = ((isize)0LL); i < end__177; i++) {
+    isize end__179 = (fields).len;
+    for (isize i = ((isize)0LL); i < end__179; i++) {
       if ((i > ((isize)0LL))) {
         str__builder_append(ctx, b, ((slice__u8){(u8*)", ", 2}));
       }
@@ -8771,12 +8773,12 @@ static void fmt__put_string(prelude__Context *ctx, str__Builder* b, slice__u8 s,
   }
   str__builder_append_char(ctx, b, ((u8)34LL));
   {
-    slice__u8 seq__178 = s;
-    for (isize i__179 = 0; i__179 < seq__178.len; i__179++) {
-      u8 c = seq__178.ptr[i__179];
+    slice__u8 seq__180 = s;
+    for (isize i__181 = 0; i__181 < seq__180.len; i__181++) {
+      u8 c = seq__180.ptr[i__181];
       {
-        u8 switch__180 = c;
-        switch (switch__180) {
+        u8 switch__182 = c;
+        switch (switch__182) {
         case ((u8)34LL):
         {
           str__builder_append(ctx, b, ((slice__u8){(u8*)"\\\"", 2}));
@@ -8826,8 +8828,8 @@ static bool fmt__is_digit(prelude__Context *ctx, u8 c) {
 
 static void fmt__repeat_char(prelude__Context *ctx, str__Builder* b, u8 c, isize count) {
   {
-    isize end__181 = count;
-    for (isize i = ((isize)0LL); i < end__181; i++) {
+    isize end__183 = count;
+    for (isize i = ((isize)0LL); i < end__183; i++) {
       str__builder_append_char(ctx, b, c);
     }
   }
@@ -8836,9 +8838,9 @@ static void fmt__repeat_char(prelude__Context *ctx, str__Builder* b, u8 c, isize
 static isize fmt__count_chars(prelude__Context *ctx, slice__u8 s) {
   isize n = ((isize)0LL);
   {
-    slice__u8 seq__182 = s;
-    for (isize i__183 = 0; i__183 < seq__182.len; i__183++) {
-      u8 c = seq__182.ptr[i__183];
+    slice__u8 seq__184 = s;
+    for (isize i__185 = 0; i__185 < seq__184.len; i__185++) {
+      u8 c = seq__184.ptr[i__185];
       if (((((u8)(c & ((u8)192LL)))) != ((u8)128LL))) {
         n++;
       }
@@ -8850,8 +8852,8 @@ static isize fmt__count_chars(prelude__Context *ctx, slice__u8 s) {
 static isize fmt__char_offset(prelude__Context *ctx, slice__u8 s, isize n) {
   isize seen = ((isize)0LL);
   {
-    isize end__184 = (s).len;
-    for (isize i = ((isize)0LL); i < end__184; i++) {
+    isize end__186 = (s).len;
+    for (isize i = ((isize)0LL); i < end__186; i++) {
       if (((((u8)((*slice__u8__at(s, i, "std/fmt.sabk:641:15")) & ((u8)192LL)))) != ((u8)128LL))) {
         if ((seen == n)) {
           return i;
@@ -8865,40 +8867,38 @@ static isize fmt__char_offset(prelude__Context *ctx, slice__u8 s, isize n) {
 
 static void fmt__append_decimal(prelude__Context *ctx, str__Builder* b, i64 n) {
   arr24__u8 digits = {0};
-  ({ str__Builder* v__185 = b; slice__u8 v__186 = str__format_int(ctx, n, (&digits)); str__builder_append(ctx, v__185, v__186); });
+  ({ str__Builder* v__187 = b; slice__u8 v__188 = str__format_int(ctx, n, (&digits)); str__builder_append(ctx, v__187, v__188); });
+}
+
+static u64 reflect__hash_memory(prelude__Context *ctx, rawptr memory, isize size) {
+  u64 h = ((u64)14695981039346656037ULL);
+  {
+    slice__u8 seq__189 = slice__u8__sub((((u8*)(memory))), PTRDIFF_MAX, ((isize)0LL), size, "std/reflect.sabk:35:30");
+    for (isize i__190 = 0; i__190 < seq__189.len; i__190++) {
+      u8 b = seq__189.ptr[i__190];
+      h ^= ((u64)(b));
+      h *= ((u64)1099511628211LL);
+    }
+  }
+  return h;
+}
+
+static u64 reflect__combine_hashes(prelude__Context *ctx, u64 h, u64 more) {
+  return ((u64)(h ^ (((u64)(((u64)(((u64)(more + ((u64)11400714819323198485ULL))) + (((u64)(h << ((u32)6LL)))))) + (((u64)(h >> ((u32)2LL)))))))));
 }
 
 static bool fs__is_dir(prelude__Context *ctx, slice__u8 path) {
   u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
   rawptr dir = opendir(c_path);
   if ((dir == ((rawptr)0))) {
-    bool ret__187 = false;
+    bool ret__191 = false;
     {
       mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
     }
-    return ret__187;
+    return ret__191;
   }
   closedir(dir);
-  bool ret__188 = true;
-  {
-    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
-  }
-  return ret__188;
-  {
-    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
-  }
-}
-
-static io__IoError fs__remove_dir(prelude__Context *ctx, slice__u8 path) {
-  u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
-  if ((rmdir(c_path) != ((i32)0LL))) {
-    io__IoError ret__189 = ({ io__IoError v__190 = io__last_io_error(ctx); slice__u8 v__191 = path; io__log_io_error(ctx, v__190, ((slice__u8){(u8*)"remove the directory", 20}), v__191); });
-    {
-      mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
-    }
-    return ret__189;
-  }
-  io__IoError ret__192 = ((io__IoError)0LL);
+  bool ret__192 = true;
   {
     mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
   }
@@ -8908,18 +8908,37 @@ static io__IoError fs__remove_dir(prelude__Context *ctx, slice__u8 path) {
   }
 }
 
+static io__IoError fs__remove_dir(prelude__Context *ctx, slice__u8 path) {
+  u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
+  if ((rmdir(c_path) != ((i32)0LL))) {
+    io__IoError ret__193 = ({ io__IoError v__194 = io__last_io_error(ctx); slice__u8 v__195 = path; io__log_io_error(ctx, v__194, ((slice__u8){(u8*)"remove the directory", 20}), v__195); });
+    {
+      mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
+    }
+    return ret__193;
+  }
+  io__IoError ret__196 = ((io__IoError)0LL);
+  {
+    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
+  }
+  return ret__196;
+  {
+    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
+  }
+}
+
 static tuple__2 fs__make_temp_dir(prelude__Context *ctx, slice__u8 prefix, prelude__Allocator a) {
   grow__u8 template = {0};
   (template).allocator = a;
-  ({ grow__u8* v__193 = (&template); slice__u8 v__196 = ({
-    tuple__1 result__194 = os__get_env(ctx, ((slice__u8){(u8*)"TMPDIR", 6}));
-    slice__u8 value__195;
-    if (!result__194._1)
-      value__195 = ((slice__u8){(u8*)"/tmp", 4});
+  ({ grow__u8* v__197 = (&template); slice__u8 v__200 = ({
+    tuple__1 result__198 = os__get_env(ctx, ((slice__u8){(u8*)"TMPDIR", 6}));
+    slice__u8 value__199;
+    if (!result__198._1)
+      value__199 = ((slice__u8){(u8*)"/tmp", 4});
     else
-      value__195 = result__194._0;
-    value__195;
-  }); str__append_string(ctx, v__193, v__196); });
+      value__199 = result__198._0;
+    value__199;
+  }); str__append_string(ctx, v__197, v__200); });
   if (((*slice__u8__at(grow__u8__view(template), ((isize)((template).len - ((isize)1LL))), "std/fs.sabk:57:17")) != ((u8)47LL))) {
     array__array_add__u8(ctx, (&template), ((u8)47LL));
   }
@@ -8927,7 +8946,7 @@ static tuple__2 fs__make_temp_dir(prelude__Context *ctx, slice__u8 prefix, prelu
   str__append_string(ctx, (&template), ((slice__u8){(u8*)"-XXXXXX", 7}));
   array__array_add__u8(ctx, (&template), ((u8)0LL));
   if ((mkdtemp((template).ptr) == ((u8*)0))) {
-    io__IoError err = ({ io__IoError v__197 = io__last_io_error(ctx); slice__u8 v__198 = slice__u8__slice(grow__u8__view(template), 0, ((isize)((template).len - ((isize)1LL))), "std/fs.sabk:63:79"); io__log_io_error(ctx, v__197, ((slice__u8){(u8*)"make the directory", 18}), v__198); });
+    io__IoError err = ({ io__IoError v__201 = io__last_io_error(ctx); slice__u8 v__202 = slice__u8__slice(grow__u8__view(template), 0, ((isize)((template).len - ((isize)1LL))), "std/fs.sabk:63:79"); io__log_io_error(ctx, v__201, ((slice__u8){(u8*)"make the directory", 18}), v__202); });
     array__array_free__u8(ctx, (&template));
     return ((tuple__2){._0 = ((slice__u8){(u8*)"", 0}), ._1 = err});
   }
@@ -8959,7 +8978,7 @@ static void io__write_formatted(prelude__Context *ctx, rawptr file, slice__u8 fm
   }
   str__Builder b = str__make_builder(ctx, ((*ctx)).allocator);
   fmt__format_into(ctx, (&b), fmt, args);
-  ({ rawptr v__199 = file; slice__u8 v__200 = str__builder_string(ctx, (&b)); io__write_text(ctx, v__199, v__200); });
+  ({ rawptr v__203 = file; slice__u8 v__204 = str__builder_string(ctx, (&b)); io__write_text(ctx, v__203, v__204); });
   str__builder_free(ctx, (&b));
 }
 
@@ -8971,109 +8990,109 @@ static void io__write_text(prelude__Context *ctx, rawptr file, slice__u8 s) {
 
 static slice__u8 io__io_error_message(prelude__Context *ctx, io__IoError e) {
   return ({
-    slice__u8 value__201;
+    slice__u8 value__205;
     {
-      io__IoError switch__202 = e;
-      switch (switch__202) {
+      io__IoError switch__206 = e;
+      switch (switch__206) {
       case ((io__IoError)0LL):
       {
-        value__201 = ((slice__u8){(u8*)"no error", 8});
+        value__205 = ((slice__u8){(u8*)"no error", 8});
       }
       break;
       case ((io__IoError)1LL):
       {
-        value__201 = ((slice__u8){(u8*)"no such file or directory", 25});
+        value__205 = ((slice__u8){(u8*)"no such file or directory", 25});
       }
       break;
       case ((io__IoError)2LL):
       {
-        value__201 = ((slice__u8){(u8*)"permission denied", 17});
+        value__205 = ((slice__u8){(u8*)"permission denied", 17});
       }
       break;
       case ((io__IoError)3LL):
       {
-        value__201 = ((slice__u8){(u8*)"is a directory", 14});
+        value__205 = ((slice__u8){(u8*)"is a directory", 14});
       }
       break;
       case ((io__IoError)4LL):
       {
-        value__201 = ((slice__u8){(u8*)"not a directory", 15});
+        value__205 = ((slice__u8){(u8*)"not a directory", 15});
       }
       break;
       case ((io__IoError)5LL):
       {
-        value__201 = ((slice__u8){(u8*)"already exists", 14});
+        value__205 = ((slice__u8){(u8*)"already exists", 14});
       }
       break;
       case ((io__IoError)6LL):
       {
-        value__201 = ((slice__u8){(u8*)"no space left on the device", 27});
+        value__205 = ((slice__u8){(u8*)"no space left on the device", 27});
       }
       break;
       case ((io__IoError)7LL):
       {
-        value__201 = ((slice__u8){(u8*)"input/output error", 18});
+        value__205 = ((slice__u8){(u8*)"input/output error", 18});
       }
       break;
       default: rt_panic("std/io.sabk:98:12", "the switch value isn't one of its enum's variants");
       }
     }
-    value__201;
+    value__205;
   });
 }
 
 static io__IoError io__log_io_error(prelude__Context *ctx, io__IoError err, slice__u8 doing, slice__u8 path) {
-  prelude__Any items__203[3];
+  prelude__Any items__207[3];
   slice__u8 why = ((err == ((io__IoError)7LL)) ? str__from_cstring(ctx, strerror(sabk_errno())) : io__io_error_message(ctx, err));
-  logging__log(ctx, ((prelude__LogLevel)3LL), ((slice__u8){(u8*)"can't % %: %", 12}), ((slice__prelude__Any){(items__203[0] = ((prelude__Any){.value = (slice__u8[1]){doing}, .info = (&ti__1)}), items__203[1] = ((prelude__Any){.value = (slice__u8[1]){path}, .info = (&ti__1)}), items__203[2] = ((prelude__Any){.value = (slice__u8[1]){why}, .info = (&ti__1)}), items__203), 3}));
+  logging__log(ctx, ((prelude__LogLevel)3LL), ((slice__u8){(u8*)"can't % %: %", 12}), ((slice__prelude__Any){(items__207[0] = ((prelude__Any){.value = (slice__u8[1]){doing}, .info = (&ti__1)}), items__207[1] = ((prelude__Any){.value = (slice__u8[1]){path}, .info = (&ti__1)}), items__207[2] = ((prelude__Any){.value = (slice__u8[1]){why}, .info = (&ti__1)}), items__207), 3}));
   return err;
 }
 
 static io__IoError io__last_io_error(prelude__Context *ctx) {
   return ({
-    io__IoError value__204;
+    io__IoError value__208;
     {
-      i32 switch__205 = sabk_errno();
-      switch (switch__205) {
+      i32 switch__209 = sabk_errno();
+      switch (switch__209) {
       case ((i32)2LL):
       {
-        value__204 = ((io__IoError)1LL);
+        value__208 = ((io__IoError)1LL);
       }
       break;
       case ((i32)1LL):
       case ((i32)13LL):
       {
-        value__204 = ((io__IoError)2LL);
+        value__208 = ((io__IoError)2LL);
       }
       break;
       case ((i32)21LL):
       {
-        value__204 = ((io__IoError)3LL);
+        value__208 = ((io__IoError)3LL);
       }
       break;
       case ((i32)20LL):
       {
-        value__204 = ((io__IoError)4LL);
+        value__208 = ((io__IoError)4LL);
       }
       break;
       case ((i32)17LL):
       {
-        value__204 = ((io__IoError)5LL);
+        value__208 = ((io__IoError)5LL);
       }
       break;
       case ((i32)28LL):
       {
-        value__204 = ((io__IoError)6LL);
+        value__208 = ((io__IoError)6LL);
       }
       break;
       default:
       {
-        value__204 = ((io__IoError)7LL);
+        value__208 = ((io__IoError)7LL);
       }
       break;
       }
     }
-    value__204;
+    value__208;
   });
 }
 
@@ -9081,11 +9100,11 @@ static tuple__2 io__read_file(prelude__Context *ctx, slice__u8 path, prelude__Al
   u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
   rawptr file = fopen(c_path, ((u8*)"rb"));
   if ((file == ((rawptr)0))) {
-    tuple__2 ret__206 = ({ slice__u8 v__207 = ((slice__u8){0}); io__IoError v__210 = ({ io__IoError v__208 = io__last_io_error(ctx); slice__u8 v__209 = path; io__log_io_error(ctx, v__208, ((slice__u8){(u8*)"read", 4}), v__209); }); ((tuple__2){._0 = v__207, ._1 = v__210}); });
+    tuple__2 ret__210 = ({ slice__u8 v__211 = ((slice__u8){0}); io__IoError v__214 = ({ io__IoError v__212 = io__last_io_error(ctx); slice__u8 v__213 = path; io__log_io_error(ctx, v__212, ((slice__u8){(u8*)"read", 4}), v__213); }); ((tuple__2){._0 = v__211, ._1 = v__214}); });
     {
       mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
     }
-    return ret__206;
+    return ret__210;
   }
   slice__u8 data = slice__u8__make(ctx, a, ((isize)4096LL), "std/io.sabk:144:16");
   isize len = ((isize)0LL);
@@ -9094,14 +9113,14 @@ static tuple__2 io__read_file(prelude__Context *ctx, slice__u8 path, prelude__Al
       u8* bigger = ((u8*)(mem__resize(ctx, ((rawptr)((data).ptr)), (data).len, ((isize)((data).len * ((isize)2LL))), ((isize)16LL), a)));
       if ((bigger == ((u8*)0))) {
         mem__free(ctx, ((rawptr)((data).ptr)), a);
-        tuple__2 ret__211 = ({ slice__u8 v__212 = ((slice__u8){0}); io__IoError v__213 = io__log_io_error(ctx, ((io__IoError)6LL), ((slice__u8){(u8*)"read", 4}), path); ((tuple__2){._0 = v__212, ._1 = v__213}); });
+        tuple__2 ret__215 = ({ slice__u8 v__216 = ((slice__u8){0}); io__IoError v__217 = io__log_io_error(ctx, ((io__IoError)6LL), ((slice__u8){(u8*)"read", 4}), path); ((tuple__2){._0 = v__216, ._1 = v__217}); });
         {
           fclose(file);
         }
         {
           mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
         }
-        return ret__211;
+        return ret__215;
       }
       data = slice__u8__sub(bigger, PTRDIFF_MAX, ((isize)0LL), ((isize)((data).len * ((isize)2LL))), "std/io.sabk:153:26");
     }
@@ -9110,28 +9129,28 @@ static tuple__2 io__read_file(prelude__Context *ctx, slice__u8 path, prelude__Al
     len += got;
     if ((got < room)) {
       if ((ferror(file) != ((i32)0LL))) {
-        io__IoError err = ({ io__IoError v__214 = io__last_io_error(ctx); slice__u8 v__215 = path; io__log_io_error(ctx, v__214, ((slice__u8){(u8*)"read", 4}), v__215); });
+        io__IoError err = ({ io__IoError v__218 = io__last_io_error(ctx); slice__u8 v__219 = path; io__log_io_error(ctx, v__218, ((slice__u8){(u8*)"read", 4}), v__219); });
         mem__free(ctx, ((rawptr)((data).ptr)), a);
-        tuple__2 ret__216 = ((tuple__2){._0 = ((slice__u8){0}), ._1 = err});
+        tuple__2 ret__220 = ((tuple__2){._0 = ((slice__u8){0}), ._1 = err});
         {
           fclose(file);
         }
         {
           mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
         }
-        return ret__216;
+        return ret__220;
       }
       break;
     }
   }
-  tuple__2 ret__217 = ((tuple__2){._0 = slice__u8__slice(data, 0, len, "std/io.sabk:167:16"), ._1 = ((io__IoError)0LL)});
+  tuple__2 ret__221 = ((tuple__2){._0 = slice__u8__slice(data, 0, len, "std/io.sabk:167:16"), ._1 = ((io__IoError)0LL)});
   {
     fclose(file);
   }
   {
     mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
   }
-  return ret__217;
+  return ret__221;
   {
     fclose(file);
   }
@@ -9148,43 +9167,24 @@ static io__IoError io__put_file(prelude__Context *ctx, slice__u8 path, slice__u8
   u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
   rawptr file = fopen(c_path, mode);
   if ((file == ((rawptr)0))) {
-    io__IoError ret__218 = ({ io__IoError v__219 = io__last_io_error(ctx); slice__u8 v__220 = path; io__log_io_error(ctx, v__219, ((slice__u8){(u8*)"write", 5}), v__220); });
+    io__IoError ret__222 = ({ io__IoError v__223 = io__last_io_error(ctx); slice__u8 v__224 = path; io__log_io_error(ctx, v__223, ((slice__u8){(u8*)"write", 5}), v__224); });
     {
       mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
     }
-    return ret__218;
+    return ret__222;
   }
   usize size = ((usize)((data).len));
-  if (({ usize v__221 = fwrite(((rawptr)((data).ptr)), ((usize)1LL), size, file); usize v__222 = size; (v__221 != v__222); })) {
-    io__IoError err = ({ io__IoError v__223 = io__last_io_error(ctx); slice__u8 v__224 = path; io__log_io_error(ctx, v__223, ((slice__u8){(u8*)"write", 5}), v__224); });
+  if (({ usize v__225 = fwrite(((rawptr)((data).ptr)), ((usize)1LL), size, file); usize v__226 = size; (v__225 != v__226); })) {
+    io__IoError err = ({ io__IoError v__227 = io__last_io_error(ctx); slice__u8 v__228 = path; io__log_io_error(ctx, v__227, ((slice__u8){(u8*)"write", 5}), v__228); });
     fclose(file);
-    io__IoError ret__225 = err;
+    io__IoError ret__229 = err;
     {
       mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
     }
-    return ret__225;
+    return ret__229;
   }
   if ((fclose(file) != ((i32)0LL))) {
-    io__IoError ret__226 = ({ io__IoError v__227 = io__last_io_error(ctx); slice__u8 v__228 = path; io__log_io_error(ctx, v__227, ((slice__u8){(u8*)"write", 5}), v__228); });
-    {
-      mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
-    }
-    return ret__226;
-  }
-  io__IoError ret__229 = ((io__IoError)0LL);
-  {
-    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
-  }
-  return ret__229;
-  {
-    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
-  }
-}
-
-static io__IoError io__delete_file(prelude__Context *ctx, slice__u8 path) {
-  u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
-  if ((remove(c_path) != ((i32)0LL))) {
-    io__IoError ret__230 = ({ io__IoError v__231 = io__last_io_error(ctx); slice__u8 v__232 = path; io__log_io_error(ctx, v__231, ((slice__u8){(u8*)"delete", 6}), v__232); });
+    io__IoError ret__230 = ({ io__IoError v__231 = io__last_io_error(ctx); slice__u8 v__232 = path; io__log_io_error(ctx, v__231, ((slice__u8){(u8*)"write", 5}), v__232); });
     {
       mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
     }
@@ -9200,35 +9200,35 @@ static io__IoError io__delete_file(prelude__Context *ctx, slice__u8 path) {
   }
 }
 
+static io__IoError io__delete_file(prelude__Context *ctx, slice__u8 path) {
+  u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
+  if ((remove(c_path) != ((i32)0LL))) {
+    io__IoError ret__234 = ({ io__IoError v__235 = io__last_io_error(ctx); slice__u8 v__236 = path; io__log_io_error(ctx, v__235, ((slice__u8){(u8*)"delete", 6}), v__236); });
+    {
+      mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
+    }
+    return ret__234;
+  }
+  io__IoError ret__237 = ((io__IoError)0LL);
+  {
+    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
+  }
+  return ret__237;
+  {
+    mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
+  }
+}
+
 static bool io__file_exists(prelude__Context *ctx, slice__u8 path) {
   u8* c_path = str__to_cstring(ctx, path, ((*ctx)).allocator);
-  bool ret__234 = (access(c_path, ((i32)0LL)) == ((i32)0LL));
+  bool ret__238 = (access(c_path, ((i32)0LL)) == ((i32)0LL));
   {
     mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
   }
-  return ret__234;
+  return ret__238;
   {
     mem__free(ctx, ((rawptr)(c_path)), ((*ctx)).allocator);
   }
-}
-
-static void logging__log(prelude__Context *ctx, prelude__LogLevel level, slice__u8 fmt, slice__prelude__Any args) {
-  if (((((u8)(level))) < (((u8)(((*ctx)).log_level))))) {
-    return;
-  }
-  str__Builder b = str__make_builder(ctx, ((*ctx)).allocator);
-  fmt__format_into(ctx, (&b), fmt, args);
-  ({ fn__11 v__235 = (((*ctx)).logger).procedure; rawptr v__236 = (((*ctx)).logger).data; prelude__LogLevel v__237 = level; slice__u8 v__238 = str__builder_string(ctx, (&b)); (v__235)(ctx, v__236, v__237, v__238); });
-  {
-    str__builder_free(ctx, (&b));
-  }
-}
-
-static prelude__Logger logging__silent_logger(prelude__Context *ctx) {
-  return ((prelude__Logger){.procedure = logging__drop});
-}
-
-static void logging__drop(prelude__Context *ctx, rawptr data, prelude__LogLevel level, slice__u8 message) {
 }
 
 static slice__u8 path__path_dir(prelude__Context *ctx, slice__u8 p) {

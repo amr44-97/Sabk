@@ -11,22 +11,33 @@ parse "-45": -45
 parse "+6": 6
 parse "9223372036854775807": 9223372036854775807
 parse "-9223372036854775808": -9223372036854775808
+warning: "9223372036854775808" is out of range for an integer
 parse "9223372036854775808": OutOfRange
+warning: "12a" isn't an integer
 parse "12a": Invalid
+warning: an empty string isn't an integer
 parse "-": Empty
+warning: an empty string isn't an integer
 parse "": Empty
 uint "18446744073709551615": 18446744073709551615 None
+warning: "18446744073709551616" is out of range for an unsigned integer
 uint "18446744073709551616": 0 OutOfRange
+warning: "-1" isn't an unsigned integer
 uint "-1": 0 Invalid
 float "1.5": 1.5 None
 float "-2e3": -2e+03 None
 float "inf": inf None
+warning: "1e999" is out of range for a number
 float "1e999": 0 OutOfRange
+warning: "1.5x" isn't a number
 float "1.5x": 0 Invalid
+warning: " 1" isn't a number
 float " 1": 0 Invalid
+warning: an empty string isn't a number
 float "": 0 Empty
 bool "true": true None
 bool "false": false None
+warning: "yes" isn't `true` or `false`
 bool "yes": false Invalid
 cut: [name] [sabk] true
 cut: [no separator] [] false

@@ -1,4 +1,6 @@
+warning: "x" isn't an integer
 {port = 9} None: fine
+warning: "x" isn't an integer
 {port = 80} ParseError.Invalid: not a number
 {port = 80} ConfigError.BadLine: a line without =
 {port = 80} ConfigError.UnknownKey: something else
@@ -13,5 +15,6 @@ true 3 true
 {what = "read", err = IoError.IsDirectory} None IoError.IsDirectory
 {port = 1}
 ParseError.Invalid Own.Bad true 7 not a number (at compile time)
+warning: "x" isn't an integer
 ParseError.Invalid Own.Bad true 7 not a number (at run time)
 [exit 0]
