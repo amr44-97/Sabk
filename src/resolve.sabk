@@ -920,6 +920,12 @@ fn resolve_fn(r: *Resolver, n: *Node) {
             declare(r, top_scope(r), param.tok.text, param);
     if (f.result != null)
         resolve_type(r, f.result);
+    // a result's default is used inside the function (by `return x;`,
+    // `or_return` and its end), so it sees the parameters
+    if (n.kind is .Fn{result_defaults})
+        for (d in result_defaults)
+            if (d != null)
+                resolve_expr(r, d);
 
     // the body shares the parameters' scope, so `let a` can't redeclare
     // the parameter a

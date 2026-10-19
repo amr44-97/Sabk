@@ -20,7 +20,7 @@ fn misuse(e: Error, s: Shape, n: NoZero) -> (i64, Error) {
     return 0, .None;
 }
 
-fn several() -> (i64, Error) {             // only `-> Error` may fall off its end
+fn several() -> (i64, Error) {             // no defaults: it can't fall off its end
     if (true) return 1, .None;
 }
 

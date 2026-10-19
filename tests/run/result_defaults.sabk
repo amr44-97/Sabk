@@ -1,0 +1,103 @@
+// a result's default: `return x;` leaves out the results after it that
+// have one, `or_return` fills the others with theirs, and a function whose
+// results all have one may end without a `return`
+import "std/io";
+import "std/str";
+
+enum LookupError: Error { Missing, Empty }
+
+fn digit(c: u8) -> (i64, ParseError = .None) {
+    if (c < '0' || c > '9') return 0, .Invalid;
+    return (c - '0') as i64;                       // the failure: None
+}
+
+fn digits(s: string) -> i64, ParseError = .None {  // no parentheses
+    let n: i64 = 0;
+    for c in s { n = n * 10 + digit(c) or_return; }
+    return n;
+}
+
+// or_return fills the first result with -1, not 0
+fn index_of_digit(s: string, d: u8) -> (isize = -1, ParseError = .None) {
+    for c, i in s {
+        let v = digit(c) or_return;
+        if (v == (d - '0') as i64) return i;
+    }
+    return -1, .Invalid;
+}
+
+// all defaults: `return;`, and the end
+fn lookup(names: []string, name: string) -> (string = "nobody", LookupError = .None) {
+    if (names.len == 0) return "", .Empty;
+    for n in names {
+        if (n == name) return n;
+    }
+    return; // "nobody", None
+}
+
+fn check(n: i64) -> Error = .None {
+    if (n < 0) return LookupError.Missing;
+}                                                  // the end: success
+
+fn both(n: i64) -> (i64 = 7, Error = .None) {
+    if (n > 0) return n;
+}
+
+// a default can use the parameters: it's worked out where it's used
+fn or_name(s: string) -> (string = s, bool = true) {
+    if (s.len == 0) return "empty", false;
+}
+
+fn passed_on(c: u8) -> (i64, ParseError = .None) {
+    return square(c);                              // one value from a call
+}
+fn square(c: u8) -> i64 { return (c as i64) * (c as i64); }
+
+fn find(xs: []$T, x: T) -> (isize = -1, bool = false) {
+    for v, i in xs {
+        if (v == x) return i, true;
+    }
+}
+
+// with T = void the void result is left out of the type, and `return r;`
+// leaves its void value out with it: the failure takes its default
+fn run_twice(f: fn() -> ($T, IoError)) -> (T, IoError = .None) {
+    let r, err = f();
+    if (err != .None) return r, err;
+    r, err = f();
+    if (err != .None) return r, err;
+    return r;
+}
+fn flush() -> IoError { return .None; }
+fn text() -> (string, IoError) { return "hi", .None; }
+fn missing() -> IoError { return .NotFound; }
+
+const SEVEN = #run digits("7");
+
+fn main() {
+    let n, err = digits("123");
+    println("digits: % %", n, err);
+    let m, bad = digits("12x");
+    println("digits: % %", m, bad);
+    let i, e1 = index_of_digit("4a7", 7);
+    println("index: % %", i, e1);
+    let names = string.["ada", "bob"];
+    let who, e2 = lookup(names, "bob");
+    let nobody, e3 = lookup(names, "cy");
+    println("lookup: % % % %", who, e2, nobody, e3);
+    println("check: % %", check(1), check(-1));
+    let a, ea = both(3);
+    let b, eb = both(-3);
+    println("both: % % % %", a, ea, b, eb);
+    let s, ok = or_name("x");
+    let t, ok2 = or_name("");
+    println("or_name: % % % %", s, ok, t, ok2);
+    let p, ep = passed_on(3);
+    println("passed_on: % %", p, ep);
+    let at, found = find(i64.[5, 6, 7], 7);
+    let none, found2 = find(i64.[5, 6, 7], 9);
+    println("find: % % % %", at, found, none, found2);
+    println("run: %", SEVEN);
+    let txt, et = run_twice(text);
+    println("run_twice: % % % %", txt, et, run_twice(flush), run_twice(missing));
+}

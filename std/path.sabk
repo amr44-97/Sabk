@@ -113,26 +113,26 @@ pub fn path_normalize(p: string, alloc: Allocator = context.allocator) -> string
 }
 
 // the path from the root, normalized; the file needn't exist
-pub fn path_absolute(p: string, alloc: Allocator = context.allocator) -> (string, IoError) {
+pub fn path_absolute(p: string, alloc: Allocator = context.allocator) -> (string, IoError = .None) {
     if (path_is_absolute(p))
-        return path_normalize(p, alloc), .None;
+        return path_normalize(p, alloc);
     let buffer: [PATH_MAX]u8 = ---;
     if (getcwd(buffer.ptr, buffer.len as usize) == null)
         return "", last_io_error();
     let joined = path_join(from_cstring(buffer.ptr), p);
     defer free(joined.ptr);
-    return path_normalize(joined, alloc), .None;
+    return path_normalize(joined, alloc);
 }
 
 // the file's own path: absolute, with links followed and `.` and `..`
 // resolved; the file has to exist
-pub fn path_real(p: string, alloc: Allocator = context.allocator) -> (string, IoError) {
+pub fn path_real(p: string, alloc: Allocator = context.allocator) -> (string, IoError = .None) {
     let c_path = to_cstring(p);
     defer free(c_path);
     let buffer: [PATH_MAX]u8 = ---;
     if (realpath(c_path, buffer.ptr) == null)
         return "", last_io_error();
-    return copy_string(from_cstring(buffer.ptr), alloc), .None;
+    return copy_string(from_cstring(buffer.ptr), alloc);
 }
 
 fn last_slash(p: string) -> isize { return index_of_last(p, '/'); }

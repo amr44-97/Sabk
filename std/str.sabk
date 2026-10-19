@@ -204,7 +204,7 @@ pub enum ParseError: Error {
 }
 
 // an optionally signed decimal integer: "42", "-7", "+3"
-pub fn parse_int(s: string) -> (i64, ParseError) {
+pub fn parse_int(s: string) -> (i64, ParseError = .None) {
     let negative = s.len > 0 && s[0] == '-';
     let digits = s;
     if (negative || (s.len > 0 && s[0] == '+'))
@@ -216,16 +216,16 @@ pub fn parse_int(s: string) -> (i64, ParseError) {
     if (err != .None)
         return 0, err;
     if (negative)
-        return -(value as i64), .None; // the minimum negates to itself
-    return value as i64, .None;
+        return -(value as i64); // the minimum negates to itself
+    return value as i64;
 }
 
 // a decimal integer without a sign: "42"
-pub fn parse_uint(s: string) -> (u64, ParseError) {
+pub fn parse_uint(s: string) -> (u64, ParseError = .None) {
     return parse_digits(s, 18446744073709551615);
 }
 
-fn parse_digits(s: string, limit: u64) -> (u64, ParseError) {
+fn parse_digits(s: string, limit: u64) -> (u64, ParseError = .None) {
     if (s.len == 0)
         return 0, .Empty;
     let value: u64 = 0;
@@ -237,12 +237,12 @@ fn parse_digits(s: string, limit: u64) -> (u64, ParseError) {
             return 0, .OutOfRange;
         value = value * 10 + digit;
     }
-    return value, .None;
+    return value;
 }
 
 // a decimal or scientific number, as C's strtod reads it: "1.5", "-2e10",
 // "inf", "nan"
-pub fn parse_float(s: string) -> (f64, ParseError) {
+pub fn parse_float(s: string) -> (f64, ParseError = .None) {
     if (s.len == 0)
         return 0, .Empty;
     if (s[0] == ' ' || s[0] == '\t' || s[0] == '\n') // strtod would skip them
@@ -257,14 +257,14 @@ pub fn parse_float(s: string) -> (f64, ParseError) {
     if ((value > huge || value < -huge) && index_of_char(s, 'i') < 0 &&
         index_of_char(s, 'I') < 0)
         return 0, .OutOfRange; // too big, but not written as infinity
-    return value, .None;
+    return value;
 }
 
 // "true" or "false"
-pub fn parse_bool(s: string) -> (bool, ParseError) {
+pub fn parse_bool(s: string) -> (bool, ParseError = .None) {
     switch (s) {
-    case "true":  return true, .None;
-    case "false": return false, .None;
+    case "true":  return true;
+    case "false": return false;
     case "":      return false, .Empty;
     default:      return false, .Invalid;
     }

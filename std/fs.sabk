@@ -34,25 +34,23 @@ pub fn is_dir(path: string) -> bool {
 }
 
 // readable, writable and searchable by everyone the umask lets through
-pub fn make_dir(path: string) -> IoError {
+pub fn make_dir(path: string) -> IoError = .None {
     let c_path = to_cstring(path);
     defer free(c_path);
     if (mkdir(c_path, 0x1ff) != 0) // 0777
         return last_io_error();
-    return .None;
 }
 
-pub fn remove_dir(path: string) -> IoError {
+pub fn remove_dir(path: string) -> IoError = .None {
     let c_path = to_cstring(path);
     defer free(c_path);
     if (rmdir(c_path) != 0)
         return last_io_error();
-    return .None;
 }
 
 // a new, empty directory only this user can use, named `prefix` and six
 // random characters, in $TMPDIR (or /tmp)
-pub fn make_temp_dir(prefix: string = "sabk", a: Allocator = context.allocator) -> (string, IoError) {
+pub fn make_temp_dir(prefix: string = "sabk", a: Allocator = context.allocator) -> (string, IoError = .None) {
     let template: [..]u8;
     template.allocator = a;
     append_string(&template, get_env("TMPDIR") or_else "/tmp");
@@ -66,15 +64,15 @@ pub fn make_temp_dir(prefix: string = "sabk", a: Allocator = context.allocator) 
         array_free(&template);
         return "", err;
     }
-    return template[..template.len - 1] as string, .None;
+    return template[..template.len - 1] as string;
 }
 
-pub fn current_dir(a: Allocator = context.allocator) -> (string, IoError) {
+pub fn current_dir(a: Allocator = context.allocator) -> (string, IoError = .None) {
     let size: isize = 256;
     while (true) {
         let buffer = new([]u8, size, a);
         if (getcwd(buffer.ptr, size as usize) != null)
-            return from_cstring(buffer.ptr), .None;
+            return from_cstring(buffer.ptr);
         let err = last_io_error();
         free(buffer.ptr, a);
         if (sabk_errno() != 34) // ERANGE: too small

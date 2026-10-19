@@ -1,0 +1,23 @@
+// mistakes with result defaults
+import "std/str";
+
+fn wrong_type() -> (i64, ParseError = 5) {        // 5 isn't a ParseError
+    return 1;
+}
+
+fn no_default(c: u8) -> (i64, ParseError) {
+    return 1;                                     // the failure has no default
+}
+
+fn first_only() -> (i64 = 0, bool) {
+    return;                                       // `bool` has none
+}
+
+fn some_defaults(n: i64) -> (i64, Error = .None) { // `i64` has none, so the end needs a return
+    if (n > 0) return n;
+}
+
+fn plain() -> Error {                             // no default: needs its return
+}
+
+fn main() {}

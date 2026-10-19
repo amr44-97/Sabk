@@ -19,7 +19,8 @@ switch to them at the bootstrap.
 - [ ] **Types as values:** `#insert` in struct and enum bodies, value parameters on structs (section 3)
 - [x] **Tagged enums:** `!is`, checked variant access `x.Variant`, narrowing (section 4)
 - [x] **Error enums:** `enum IoError: Error { ... }`; plain enums go back to being plain (section 5)
-- [ ] **Failures:** the reason logged, `context.log_level`, result defaults (`-> (i64, ParseError = .None)`), results taken from the left, `or_return .Replacement` (section 5)
+- [x] **Result defaults and taking results:** `-> (i64, ParseError = .None)`, results taken from the left, a call's first value in an expression (section 5)
+- [ ] **Failures, the rest:** the reason logged by std, `context.log_level`, `or_return .Replacement` (section 5)
 - [ ] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
 - [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
@@ -382,6 +383,76 @@ parse_int(s);                         // a statement: all dropped
   failure an error, wherever it's dropped. `_` still counts as taking it.
 - The failure was logged where it happened, so a dropped one still shows
   in the log, with where and when.
+
+### Edge cases met building defaults and taking results (built Oct 19, 2026; to review)
+
+1. **`return f();` can't be counted before it's checked**: a call may
+   give several values. A written value is filled from defaults before
+   checking (`return x;`, `return;`, `return a, b;`); a call is checked
+   first, and when it gives one value the rest come from defaults then.
+
+   ```
+   fn passed_on(c: u8) -> (i64, ParseError = .None) {
+       return square(c);              // square gives one value: + None
+   }
+   ```
+
+2. **A default is copied, as written, for each place that uses it**
+   (every `return` that leaves it out, and the function's end), and each
+   copy is checked there; `or_return` uses the checked original. So a
+   default is worked out where it's used, and it can use the parameters,
+   with their values at that point:
+
+   ```
+   fn or_name(s: string) -> (string = s, bool = true) {
+       if (s.len == 0) return "empty", false;
+   }                                  // the end: s, true
+   ```
+
+3. **A wrong default is reported once**, at the default: the copies the
+   returns take are marked as already failed.
+
+   ```
+   fn wrong_type() -> (i64, ParseError = 5) {   // one error here
+       return 1;                                // and none here
+   }
+   ```
+
+4. **`.None {` after results without parentheses** would read as a
+   variant's fields (`.Let{ ... }`): the default is read like a condition
+   without parentheses, so the `{` is the body's.
+
+   ```
+   fn digits(s: string) -> i64, ParseError = .None { ... }
+   ```
+
+5. **A void result left out of the type** takes its default with it, and
+   a `return` that writes a void value for it drops that value first:
+
+   ```
+   fn run_twice(f: fn() -> ($T, IoError)) -> (T, IoError = .None) {
+       ...
+       return r;                      // T = void: r goes, the IoError is None
+   }
+   ```
+
+6. **A call's first value in an expression**: the checker turns the call
+   node, in place, into a `FirstValue` node holding a copy of the call
+   (`._0` in C; offset 0 in the VM). `#run parse_int("3")` gives 3.
+   Several values written out (`let x = 1, 2;`) are still an error, and
+   so is `let u, v = divide(7, 2) + 1;` (one value for two names).
+
+7. **`#nodiscard` counts partial takes as dropping**: `let n = f();`,
+   `let a, b = three();`, `x, y = three();` and `f() + 1` are errors for a
+   `#nodiscard` f; `_` still takes a value.
+
+8. **`-> Error` without a default can't fall off its end any more** (the
+   special case is gone); the error suggests `-> Error = .None`. A hint
+   about defaults is given only for several results or a failure type
+   (`-> i32` with `return;` gets none).
+
+9. **The bootstrap**: std couldn't use `= .None` until the seed knew
+   it, so the feature landed first, then the seed, then std.
 
 ### Handling one
 

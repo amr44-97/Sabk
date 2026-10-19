@@ -486,8 +486,6 @@ fn emit_fn_body(g: *CodeGen, fun: *Node) {
         line(g, cat(c_type(g, g.c.context_type), " *ctx = &ctx__default;"));
     }
     emit_scope(g, block_list(b), .Block);
-    if (fun.ty.ret.is_failure)
-        line(g, "return 0;"); // its end: success
     g.scopes.len = 0;
 
     g.indent = 0;
@@ -1339,6 +1337,9 @@ fn expr_inner(g: *CodeGen, n: *Node) -> string {
     case .OrReturn:
         return gen_or_return(g, n);
 
+    case .FirstValue{value}: // f()'s first result: _0
+        return cat("(", expr(g, value), ")._0");
+
     case .OrElse:
         return gen_or_else(g, n);
 
@@ -1517,8 +1518,11 @@ fn gen_or_return(g: *CodeGen, n: *Node) -> string {
     let value = flag;
     if (ret.is_tuple) {
         let fields = "";
+        let defaults = result_defaults(g.c, g.current_fn);
         for (i in 0..ret.fields.len - 1)
-            if (has_defaults(g.c, ret.fields[i].ty))
+            if (i < defaults.len && defaults[i] != null)
+                fields = cat(fields, "._", num(i), " = ", expr(g, defaults[i]), ", ");
+            else if (has_defaults(g.c, ret.fields[i].ty))
                 fields = cat(fields, "._", num(i), " = ", default_value(g, ret.fields[i].ty), ", ");
         value = compound(g, ret, cat(fields, "._", num(ret.fields.len - 1), " = ", flag));
     }

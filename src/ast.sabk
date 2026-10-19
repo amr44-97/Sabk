@@ -61,7 +61,9 @@ pub enum NodeKind {
     Fn(params: []*Node, result: *Node, body: *Node, is_pub: bool,
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
        nodiscard: bool, no_bounds_check: bool,
-       type_params: []*Node = .[]),          // the $Ts in params' types
+       type_params: []*Node = .[],           // the $Ts in params' types
+       result_defaults: []*Node = .[]),      // -> (i64, ParseError = .None): one per
+                                             // written result, null where there's none
     Param(declared: *Node, value: *Node, is_type: bool, variadic: bool),
     Struct(fields: []*Node, type_params: []*Node, is_union: bool, is_pub: bool),
     Field(declared: *Node, value: *Node),
@@ -120,6 +122,8 @@ pub enum NodeKind {
     Values(items: []*Node),                  // a, b; tok: the first's
     OrReturn(value: *Node),
     OrElse(value: *Node, fallback: *Node),
+    FirstValue(value: *Node),                // a call's first result where one value is
+                                             // expected (the checker makes it); tok: the call's
     // new(T, ...), new([]T, n, ...), new(value, ...): the resolver tells
     // what `first` and `second` are
     New(declared: *Node, value: *Node, first: *Node, second: *Node),
@@ -330,6 +334,7 @@ pub fn old_shape(n: *Node) -> OldShape {
     case .Values{items}: s.tag = "VALUES"; s.list = items;
     case .OrReturn{value}: s.tag = "OR_RETURN"; s.lhs = value;
     case .OrElse{value, fallback}: s.tag = "OR_ELSE"; s.lhs = value; s.rhs = fallback;
+    case .FirstValue{value}: s.tag = "FIRST_VALUE"; s.lhs = value;
     case .New(nw):
         s.tag = "NEW"; s.declared = nw.declared; s.lhs = nw.first; s.rhs = nw.second;
         s.extra = nw.value;

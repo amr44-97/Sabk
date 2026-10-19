@@ -10,3 +10,15 @@
 [error]: `save` is `#nodiscard`, and this drops its `SaveError`; use it, or drop it on purpose with `_ = save(...);` at [tests/errors/nodiscard.sabk:14:11]
     14 |     defer save();                        // in a defer
        |           ^
+[error]: `counts` is `#nodiscard`, and this takes 1 of its 2 results, dropping the rest; take them all (with `_` for those you don't want) at [tests/errors/nodiscard.sabk:19:13]
+    19 |     let n = counts();                    // takes the first, drops the bool
+       |             ^
+[error]: `counts` is `#nodiscard`, and this takes 1 of its 2 results, dropping the rest; take them all (with `_` for those you don't want) at [tests/errors/nodiscard.sabk:20:17]
+    20 |     let total = counts() + 1;            // the same, in an expression
+       |                 ^
+[error]: `three` is `#nodiscard`, and this takes 2 of its 3 results, dropping the rest; take them all (with `_` for those you don't want) at [tests/errors/nodiscard.sabk:28:16]
+    28 |     let a, b = three();                  // takes two of three
+       |                ^
+[error]: `three` is `#nodiscard`, and this takes 2 of its 3 results, dropping the rest; take them all (with `_` for those you don't want) at [tests/errors/nodiscard.sabk:31:12]
+    31 |     x, y = three();                      // the same, assigned
+       |            ^

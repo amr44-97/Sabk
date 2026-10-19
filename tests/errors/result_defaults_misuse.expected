@@ -1,0 +1,15 @@
+[error]: expected `ParseError`, found `untyped int` at [tests/errors/result_defaults_misuse.sabk:4:39]
+     4 | fn wrong_type() -> (i64, ParseError = 5) {        // 5 isn't a ParseError
+       |                                       ^
+[error]: `no_default` returns 2 values, `(i64, ParseError)`, found one value; to leave results out, give them defaults: `-> (i64, ParseError = .None)` at [tests/errors/result_defaults_misuse.sabk:9:12]
+     9 |     return 1;                                     // the failure has no default
+       |            ^
+[error]: `first_only` must return a value of type `(i64, bool)`; to leave results out, give them defaults: `-> (i64, ParseError = .None)` at [tests/errors/result_defaults_misuse.sabk:13:5]
+    13 |     return;                                       // `bool` has none
+       |     ^
+[error]: `some_defaults` returns `(i64, Error)` but can reach the end of its body without returning a value at [tests/errors/result_defaults_misuse.sabk:16:4]
+    16 | fn some_defaults(n: i64) -> (i64, Error = .None) { // `i64` has none, so the end needs a return
+       |    ^
+[error]: `plain` returns `Error` but can reach the end of its body without returning a value; to end in success, give it a default: `-> Error = .None` at [tests/errors/result_defaults_misuse.sabk:20:4]
+    20 | fn plain() -> Error {                             // no default: needs its return
+       |    ^

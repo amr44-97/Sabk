@@ -5,7 +5,7 @@ import "std/io";
 import "std/mem";
 import "std/str";
 
-fn main() -> Error {
+fn main() -> Error = .None {
     defer println("main's defer ran");
     let n = parse_int("42") or_return;              // a ParseError
     println("parsed %", n);

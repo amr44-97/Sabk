@@ -1,0 +1,12 @@
+digits: 123 None
+digits: 0 Invalid
+index: -1 Invalid
+lookup: bob None nobody None
+check: None LookupError.Missing
+both: 3 None 7 None
+or_name: x true empty false
+passed_on: 9 None
+find: 2 true -1 false
+run: 7
+run_twice: hi None None NotFound
+[exit 0]

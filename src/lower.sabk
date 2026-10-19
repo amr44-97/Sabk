@@ -1390,6 +1390,9 @@ fn inner(l: *Lower, n: *Node) -> u32 {
     case .OrReturn:
         return lower_or_return(l, n);
 
+    case .FirstValue{value}: // f()'s first result, at offset 0
+        return expr(l, value);
+
     case .OrElse{value: e, fallback}:
         // the value, or the fallback (only evaluated then)
         let from = type_of(l, e);
@@ -1548,6 +1551,10 @@ fn lower_or_return(l: *Lower, n: *Node) -> u32 {
     }
     if (ret.is_tuple) {
         let r = default_value(l, ret);
+        let defaults = result_defaults(l.c, l.f.decl);
+        for (i in 0..ret.fields.len - 1)
+            if (i < defaults.len && defaults[i] != null)
+                move(l, r + ret.fields[i].offset as u32, expr(l, defaults[i]), vm_size_of(l.vm, ret.fields[i].ty));
         move(l, r + ret.fields[ret.fields.len - 1].offset as u32, flag, flag_size);
         move(l, l.f.ret_offset, r, l.f.ret_size);
     } else {

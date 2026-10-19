@@ -387,6 +387,8 @@ pub fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
 
     case .OrReturn:
         t = check_or_return(c, n);
+    case .FirstValue{value}: // checked before
+        t = value.ty.fields[0].ty;
     case .OrElse:
         t = check_or_else(c, n);
     case .Run:
@@ -581,6 +583,15 @@ pub fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
 
     default:
     }
+    if (t.is_tuple && !several_ok && (n.kind.tag == .Call || n.kind.tag == .OrReturn)) {
+        // a call's several results where one value is expected: its first,
+        // as in Jai (`total += parse_int(s);`); the others are dropped
+        check_dropped(c, n, t, 1);
+        let whole = new(n.*);
+        whole.ty = t;
+        n.kind = .FirstValue(whole);
+        t = t.fields[0].ty;
+    }
     if (t.is_tuple && !several_ok) {
         if (n.kind is .Values{items})
             error(c, items[1].tok, tformat("% where one is expected", count_values(items.len)));
@@ -725,7 +736,7 @@ fn check_or_return(c: *Checker, n: *Node) -> *Type {
     // what failed (not where a module's own `Error` hides the prelude's)
     let any_type_hint = "";
     if (flag.kind != .Bool && !map_has(&c.mod.scope, ScopeKey.{ .name = "Error" })) {
-        any_type_hint = if (is_main) "; to pass failures of any type on, make it `fn main() -> Error`"
+        any_type_hint = if (is_main) "; to pass failures of any type on, make it `fn main() -> Error = .None`"
                         else tformat("; to pass failures of any type on, make % `Error`",
                                      if (ret.is_tuple) "its last result" else "it");
     }

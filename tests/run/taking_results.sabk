@@ -1,0 +1,37 @@
+// a call with several results, taken from the left: what isn't taken is dropped
+import "std/io";
+import "std/str";
+
+fn parse_prefix(s: string) -> (i64, isize, ParseError) {
+    let n: i64 = 0;
+    let i: isize = 0;
+    while (i < s.len && s[i] >= '0' && s[i] <= '9') {
+        n = n * 10 + (s[i] - '0') as i64;
+        i += 1;
+    }
+    if (i == 0) return 0, 0, .Invalid;
+    return n, i, .None;
+}
+
+fn twice(x: i64) -> i64 { return x * 2; }
+
+fn main() {
+    let total: i64 = 0;
+    total += parse_int("40");
+    total += parse_int("oops");          // 0: the failure is dropped
+    println("total: %", total);
+    println("twice: %", twice(parse_int("21")));
+    let n = parse_prefix("123abc");
+    let m, used = parse_prefix("77x");
+    println("% % %", n, m, used);
+    let a: i64 = 0;
+    let b: isize = 0;
+    a, b = parse_prefix("9");
+    a = parse_int("5");
+    println("% %", a, b);
+    let x = parse_int("8") + parse_int("2");
+    println("x: %", x);
+    let r = #run parse_int("3");
+    const K = #run parse_int("6") + 1;
+    println("run: % %", r, K);
+}

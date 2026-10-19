@@ -321,19 +321,9 @@ fn fn_decl(p: *Parser) -> *Node {
     expect(p, .RParen, "`)` to close the parameter list");
 
     let result: *Node = null;
-    if (eat(p, .Arrow)) {
-        let grouped = at(p, .LParen);
-        result = result_type(p);
-        // -> i64, bool { ... }: a declaration's results don't need
-        // parentheses, since its body or `;` ends them
-        if (!grouped && at(p, .Comma)) {
-            let items: [..]*Node;
-            array_add(&items, result);
-            while (eat(p, .Comma))
-                array_add(&items, type_(p));
-            result = new_node(items[0].tok, .TypeTuple(items));
-        }
-    }
+    let defaults: [..]*Node;
+    if (eat(p, .Arrow))
+        result = declared_results(p, &defaults);
 
     // fn name(...) #expand { ... } is a macro
     // fn print(fmt: string, args: ..Any) #format: calls get their format
@@ -390,8 +380,40 @@ fn fn_decl(p: *Parser) -> *Node {
     } else {
         fail(p, peek(p), tformat("expected a function body `{`, found % (only `extern` functions can omit the body)", describe(peek(p))));
     }
-    return new_node(name, .Fn(params, result, body, false, is_extern, is_macro,
-                              variadic, format, nodiscard, no_bounds_check));
+    let fun = new_node(name, .Fn(params, result, body, false, is_extern, is_macro,
+                                 variadic, format, nodiscard, no_bounds_check));
+    for (d in defaults) {
+        if (d == null)
+            continue;
+        if (is_extern || is_macro)
+            fail(p, d.tok, tformat("a result's default is for a function with a body that returns; % can't have one",
+                                   if (is_extern) "an `extern` function" else "an `#expand` function"));
+        if (fun.kind is .Fn{result_defaults: &list})
+            list.* = defaults;
+        break;
+    }
+    return fun;
+}
+
+// what follows a declaration's `->`: one type or several, each with an
+// optional default, `-> (i64, ParseError = .None)`. The parentheses are
+// optional (`-> i64, bool {`): the body or `;` ends the list.
+fn declared_results(p: *Parser, defaults: *[..]*Node) -> *Node {
+    let open = peek(p);
+    let grouped = eat(p, .LParen);
+    let items: [..]*Node;
+    while (true) {
+        array_add(&items, type_(p));
+        // `.None {` is the default and then the body, not a variant's fields
+        array_add(defaults, if (eat(p, .Equal)) bare_expr(p) else null);
+        if (!eat(p, .Comma))
+            break;
+    }
+    if (grouped)
+        expect(p, .RParen, "`,` or `)` after the result types");
+    if (items.len == 1)
+        return items[0];
+    return new_node(if (grouped) open else items[0].tok, .TypeTuple(items));
 }
 
 // a generic declaration's ($A, $B)

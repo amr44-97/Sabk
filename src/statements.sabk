@@ -8,6 +8,7 @@ import "std/str";
 import "ast";
 import "const";
 import "resolve";
+import "token";
 import "types";
 import "check";
 import "patterns";
@@ -174,7 +175,7 @@ fn check_step(c: *Checker, n: *Node, target: *Node) {
         error(c, n.tok, tformat("% needs a number or a pointer, found %", q(n.tok.text), qt(t)));
 }
 
-fn check_return(c: *Checker, n: *Node) {
+pub fn check_return(c: *Checker, n: *Node) {
     // the resolver set decl to the macro expansion this returns from
     let ret = if (n.decl != null) n.decl.ty else c.current_fn.ty.ret;
     let name = q(if (n.decl != null) n.decl.decl.tok.text else c.current_fn.tok.text);
@@ -185,6 +186,23 @@ fn check_return(c: *Checker, n: *Node) {
         leave_out_void(c, n, ret);
         if (n.kind is .Return{value: v})
             value = v;
+    }
+    // the results left out take their defaults: `return x;`, `return;`
+    // (a call may give several; that's known once it's checked, below)
+    let fun: *Node = if (n.decl == null) c.current_fn else null;
+    let want: isize = if (ret.is_tuple) ret.fields.len else if (ret.kind == .Void) 0 else 1;
+    if (value != null && !gives_several(value)) {
+        value = drop_void_values(c, fun, value, want);
+        set_return_value(n, value);
+    }
+    let given: isize = if (value == null) 0 else if (value.kind is .Values{items}) items.len
+                       else if (gives_several(value)) want else 1;
+    if (given < want) {
+        let rest, ok = default_copies(c, fun, given, want);
+        if (ok) {
+            value = with_values(value, rest, n.tok);
+            set_return_value(n, value);
+        }
     }
     if (value != null && !check_result_count(c, value, ret, name))
         return;
@@ -203,13 +221,96 @@ fn check_return(c: *Checker, n: *Node) {
             if (t.kind != .Void && t.kind != .Error)
                 error(c, value.tok, tformat("% doesn't return a value", name));
         } else if (ret.is_tuple && !t.is_tuple && t.kind != .Error) {
-            error(c, value.tok, tformat("% returns %, %, found one value", name,
-                                        count_values(ret.fields.len), qt(ret)));
+            // `return f();` with f giving one value: the rest from defaults
+            let rest, ok = default_copies(c, fun, 1, want);
+            if (!ok) {
+                error(c, value.tok, tformat("% returns %, %, found one value%", name,
+                                            count_values(ret.fields.len), qt(ret), defaults_hint(fun, ret)));
+                return;
+            }
+            coerce(c, value, ret.fields[0].ty);
+            for (i in 0..rest.len) {
+                check_expr(c, rest[i], ret.fields[i + 1].ty);
+                coerce(c, rest[i], ret.fields[i + 1].ty);
+            }
+            let all = with_values(value, rest, n.tok);
+            all.ty = ret;
+            set_return_value(n, all);
         } else {
             coerce(c, value, ret);
         }
     } else if (ret.kind != .Void && ret.kind != .Error) {
-        error(c, n.tok, tformat("% must return a value of type %", name, qt(ret)));
+        error(c, n.tok, tformat("% must return a value of type %{}%", name, qt(ret), defaults_hint(fun, ret)));
+    }
+}
+
+// for "found one value": results can be left out once they have defaults
+fn defaults_hint(fun: *Node, ret: *Type) -> string {
+    if (fun == null)
+        return "";
+    if (ret.is_tuple)
+        return "; to leave results out, give them defaults: `-> (i64, ParseError = .None)`";
+    if (ret.is_failure || ret.is_error_enum)
+        return tformat("; to return success with `return;`, give it a default: `-> % = .None`", type_name(ret));
+    return "";
+}
+
+// `return r;` in `-> (T, IoError = .None)` with T = void: the void
+// result is left out of the type, so the values written for void results
+// go too (only `.{}` and plain names and fields, as in leave_out_void),
+// and the rest come from defaults
+fn drop_void_values(c: *Checker, fun: *Node, value: *Node, want: isize) -> *Node {
+    let spelled: [..]*Type;
+    let result: *Node = null;
+    if (fun != null && fun.kind is .Fn{result: r})
+        result = r;
+    if (result == null || result.kind.tag != .TypeTuple)
+        return value;
+    if (result.kind is .TypeTuple{items})
+        for (e in items)
+            array_add(&spelled, type_from_node(c, e));
+    let written: []*Node = if (value.kind is .Values{items}) items else .[value];
+    if (spelled.len <= want || written.len >= spelled.len)
+        return value;
+    let kept: [..]*Node;
+    for (i in 0..written.len) {
+        let item = written[i];
+        if (spelled[i].kind == .Void &&
+            (is_unit_literal(item) || (is_plain(item) && check_expr(c, item, null).kind == .Void)))
+            continue;
+        array_add(&kept, item);
+    }
+    if (kept.len == written.len)
+        return value;
+    return with_values(null, kept, value.tok);
+}
+
+// can this give several values? A call can, so how many it gives is
+// known once it's checked
+fn gives_several(n: *Node) -> bool {
+    let e = ungroup(n);
+    return e.kind.tag == .Call || e.kind.tag == .OrReturn;
+}
+
+// `value` (none, one, or `a, b`) followed by `rest`
+fn with_values(value: *Node, rest: []*Node, at: Token) -> *Node {
+    if (value == null && rest.len == 0)
+        return null;
+    let items: [..]*Node;
+    if (value != null && value.kind is .Values{items: given})
+        array_append(&items, given);
+    else if (value != null)
+        array_add(&items, value);
+    array_append(&items, rest);
+    if (items.len == 1)
+        return items[0];
+    return new_node(if (value != null) value.tok else at, .Values(items));
+}
+
+fn set_return_value(n: *Node, value: *Node) {
+    switch (n.kind) {
+    case .Return{value: &slot}: slot.* = value;
+    default:
     }
 }
 
@@ -309,8 +410,12 @@ fn nth(i: isize) -> string {
 }
 
 // `f();` as a statement, where f is #nodiscard: its result can't be
-// dropped without saying so
-pub fn check_dropped(c: *Checker, call: *Node, t: *Type) {
+// dropped without saying so. `taken`: how many of its results are taken
+// (`let n = f();`, `let a, b = f();`), the rest dropped
+pub fn check_dropped(c: *Checker, call: *Node, t: *Type, taken: isize = 0) {
+    let count: isize = if (t.is_tuple) t.fields.len else 1;
+    if (taken >= count)
+        return;
     let fun: *Node = null;
     let name = "";
     let at = call.tok;
@@ -328,6 +433,11 @@ pub fn check_dropped(c: *Checker, call: *Node, t: *Type) {
     }
     if (fun == null || !(fun.kind is .Fn{nodiscard: true}))
         return;
+    if (taken > 0) {
+        error(c, at, tformat("% is `#nodiscard`, and this takes % of its % results, dropping the rest; take them all (with `_` for those you don't want)",
+                             q(name), taken, count));
+        return;
+    }
     let it = if (t.is_tuple) "them" else "it";
     let what = if (t.is_tuple) "its results" else tformat("its %", qt(t));
     error(c, at, tformat("% is `#nodiscard`, and this drops %; use %, or drop % on purpose with `_ = %(...);`",
@@ -460,7 +570,9 @@ fn check_let_values(c: *Checker, n: *Node) {
         }
         return;
     }
-    if (count != names.len) {
+    if (count > names.len)
+        check_dropped(c, v, t, names.len); // let n, used = parse_prefix(s): the rest dropped
+    if (count < names.len) {
         let shown = if (t.is_tuple) tformat(", %", qt(t)) else "";
         error(c, call_site(v), tformat("% names, but % gives %{}%", names.len, callee_name(v),
                                        count_values(count), shown));
@@ -542,7 +654,9 @@ fn check_assign_values(c: *Checker, n: *Node) {
     for (s in slots)
         if (s >= 0)
             taking++;
-    if (taking != count) {
+    if (taking < count)
+        check_dropped(c, v, t, taking); // a, b = parse_prefix(s): the rest dropped
+    if (taking > count) {
         let shown = if (t.is_tuple) tformat(", %", qt(t)) else "";
         error(c, call_site(v), tformat("% targets, but % gives %{}%", targets.len, callee_name(v),
                                        count_values(count), shown));

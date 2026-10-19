@@ -23,8 +23,6 @@ extern fn c_side() -> (i32, i32);         // C returns one value
 fn void_result() -> (i32, void) { return 1, 2; }
 
 fn main() {
-    let a = divide(7, 2);                 // two values for one name
-    take(divide(7, 2));                   // passed as one argument
     let q, r, s = divide(7, 2);           // three names
     let x, y = 1, 2, 3;                   // three values
     let z = 1, 2;                         // one name

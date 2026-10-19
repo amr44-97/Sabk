@@ -28,7 +28,7 @@ fn load(text: string) -> (Config, Error) {
 }
 
 // only an Error: it may fall off its end, meaning success
-fn check_file(path: string) -> Error {
+fn check_file(path: string) -> Error = .None {
     defer println("  check_file's defer");
     let text = read_file(path) or_return;
     free(text.ptr);
@@ -61,7 +61,7 @@ fn at_compile_time() -> string {
 
 const BAKED = #run at_compile_time();
 
-fn main() -> Error {
+fn main() -> Error = .None {
     for (text in string.["port = 9\n", "port = x\n", "nope\n", "colour = red\n"]) {
         let config, err = load(text);
         println("% %: %", config, err, describe(err));

@@ -190,7 +190,8 @@ fn_directive = "#format"                             // its format is checked
              | "#no_bounds_check" ;                  // its indexing isn't checked
 params      = param { "," param } [ "," "..." ]
             | "..." ;
-results     = type | "(" type { "," type } ")" ;     // several: (i64, bool)
+results     = result | "(" result { "," result } ")" ; // several: (i64, bool)
+result      = type [ "=" expr ] ;                    // a default: ParseError = .None
 param       = IDENT ":" type [ "=" expr ]
             | IDENT ":" ".." type                     // any number: a []type
             | "$" IDENT ":" "Type" ;                  // takes a type: generics
@@ -1761,8 +1762,9 @@ let x, y = 0, 1;                   // several expressions
 q, r = r, q;                       // several targets: a swap
 ```
 
-- `return` gives one value per result. `return g();` passes on the results
-  of a function that has the same ones.
+- `return` gives one value per result, from the left; results at the end
+  that have a default can be left out (below). `return g();` passes on
+  the results of a function that has the same ones.
 - `let a, b = ...` declares a name per value, typed by its value. The
   values are one call with that many results, or that many expressions.
   To give names a type instead, `let a, b, c: *Node;` (in a function)
@@ -1798,10 +1800,52 @@ q, r = r, q;                       // several targets: a swap
   `return` leaves out `.{}` and plain void values (names, fields, `p.*`);
   a void call isn't left out, since it has to run: call it before the
   `return`.
-- **Several values aren't one value.** A call with several results can't
-  be an argument, an operand or the value of `let x =`: take them apart
-  first. Used as a statement, `f();`, its results are dropped like any
-  call's.
+- **Results are taken from the left**, as in Jai, and what isn't taken is
+  dropped:
+
+  ```
+  fn parse_prefix(s: string) -> (i64, isize, ParseError)
+
+  let n, used, err = parse_prefix(s);   // all three
+  let n, used = parse_prefix(s);        // the failure is dropped
+  let n = parse_prefix(s);              // just the number
+  let _, _, err = parse_prefix(s);      // `_` to reach a later one
+  total += parse_int(s);                // in an expression: its first value
+  parse_int(s);                         // a statement: all dropped
+  ```
+
+  A call with several results used as one value (an operand, an
+  argument, `let x =`) is its first value. A `#nodiscard` function's
+  results can't be dropped this way (see
+  [Handling errors](#handling-errors)). `a, b` written out is still two
+  values: `let x = 1, 2;` is an error.
+- **A result can have a default**, as in Jai: `return` can leave out the
+  results at the end that have one, and a function whose results all
+  have one may reach its end without a `return`, which returns them.
+
+  ```
+  fn parse_digit(c: u8) -> (i64, ParseError = .None) {
+      if (c < '0' || c > '9') return 0, .Invalid;   // a failure, written in full
+      return (c - '0') as i64;                       // the failure: its default
+  }
+
+  fn find(xs: []$T, x: T) -> (isize = -1, bool = false) {
+      for v, i in xs {
+          if (v == x) return i, true;
+      }
+  }                                                  // the end: -1, false
+  ```
+
+  - Only results at the end can be left out, since values go from the
+    left: in `-> (*User = null, LookupError = .None)`, a failure is
+    `return null, .NotLoaded;`.
+  - `or_return` fills the function's other results with their defaults
+    (`-> (isize = -1, ParseError = .None)` returns -1 with the failure).
+  - A default is worked out where it's used, so it can use the
+    parameters: `-> (string = s, bool = true)`.
+  - `return g();` where g gives one value takes the rest from defaults.
+  - A function type can't have them (`fn() -> (i64, bool)`), nor can an
+    `extern` or `#expand` function.
 - In C the results are a struct, which `return` makes and the caller takes
   apart, so several results cost what returning a struct does. An `extern`
   function (C returns one value) and an `#expand` function return one value
@@ -1865,12 +1909,11 @@ there, it gives back all of `s` and `""`.
 ### `or_return`: pass the failure on
 
 ```
-fn copy_file(from: string, to: string) -> IoError {
+fn copy_file(from: string, to: string) -> IoError = .None {
     let data = read_file(from) or_return;    // an error: return it
     defer free(data.ptr);
     write_file(to, data) or_return;          // only a failure: no value
-    return .None;
-}
+}                                            // the end: None
 
 fn average(texts: []string) -> (i64, bool) {
     let total = sum_numbers(texts) or_return;  // a bool: returns false
@@ -1880,8 +1923,9 @@ fn average(texts: []string) -> (i64, bool) {
 
 - **`f() or_return`** is f's values without the last. When the last says
   f failed, the function it's in returns right away: that value as its
-  last result, and its other results as `let x: T;` starts them (zeros, or
-  field defaults). Defers run, as for `return`.
+  last result, and its other results their defaults, or as `let x: T;`
+  starts them (zeros, or field defaults) where they have none. Defers
+  run, as for `return`.
 - The function's last result must have the failure's type, or be
   `Error`: a `ParseError` passes on from a function returning a
   `ParseError` or an `Error`, a `bool` from one returning a `bool`. A
@@ -1929,12 +1973,12 @@ converts to, so a function returning `Error` can pass on failures of any
 enum, without knowing which ones its callees use, and `main` can too:
 
 ```
-fn main() -> Error {
+fn main() -> Error = .None {
     let content = read_file("src/main.sabk") or_return;          // an IoError becomes an Error
     defer free(content.ptr);
     let jobs = parse_int(get_env("JOBS") or_else "1") or_return;   // so does a ParseError
     ...
-}                                     // the end of a `-> Error` function: success
+}                                     // the end: its default, success
 ```
 
 ```
@@ -2011,12 +2055,13 @@ default:                   "something else";  // an Error can be any enum's
 - **Precise enums stay.** std's functions return `IoError` and
   `ParseError`, so a caller that handles every case still gets an
   exhaustive `switch`. `Error` is for code that combines them.
-- **`fn main() -> Error`.** When it returns a failure, the program prints
+- **`fn main() -> Error = .None`.** When it returns a failure, the program prints
   `error: IoError.NotFound` (the enum and the variant) to stderr and exits
   with 1. That happens after `main` has returned, so its defers have run.
-- **A `-> Error` function may fall off its end**, which means success:
-  `return .None;` is written for you. Only `Error`: a function returning
-  `(T, Error)`, or a plain enum, still needs its `return`.
+- **`-> Error = .None` may fall off its end**, which means success, as
+  any function whose results all have defaults can (see
+  [Several results](#several-results)). Without the default, it needs its
+  `return`.
 - **Underneath** an `Error` is one 64-bit integer: a number the compiler
   gives each enum that becomes one, and the variant's value. It has no
   order and isn't a number (`<` and `+` are errors), a statement `switch`
@@ -2108,7 +2153,9 @@ _ = save(path, data);        // fine: dropped on purpose
 - `#nodiscard` goes after the result type, with the other directives in
   any order (`-> i64 #nodiscard #no_bounds_check`). A macro can have it
   too; a function that returns nothing can't.
-- It's checked where a call is a statement on its own, `defer` included.
+- It's checked where a call is a statement on its own, `defer` included,
+  and where only some of its results are taken: `let n = counts();`,
+  `let a, b = three();` and `counts() + 1` drop the rest.
   A call through a function value (`let f = save; f();`) isn't checked,
   since the value's type doesn't say.
 

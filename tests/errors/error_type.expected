@@ -29,11 +29,11 @@
     19 |     let big: Error = Big.Huge;             // doesn't fit
        |                          ^
 [error]: `several` returns `(i64, Error)` but can reach the end of its body without returning a value at [tests/errors/error_type.sabk:23:4]
-    23 | fn several() -> (i64, Error) {             // only `-> Error` may fall off its end
+    23 | fn several() -> (i64, Error) {             // no defaults: it can't fall off its end
        |    ^
 [error]: `or_return` returns `IoError` from `other`, but `other`'s result is `ParseError`; to pass failures of any type on, make it `Error` at [tests/errors/error_type.sabk:28:28]
     28 |     let t = read_file("x") or_return;      // IoError isn't ParseError
        |                            ^
-[error]: `or_return` returns `IoError` from `main`, but `main` doesn't return anything; to pass failures of any type on, make it `fn main() -> Error` at [tests/errors/error_type.sabk:33:28]
+[error]: `or_return` returns `IoError` from `main`, but `main` doesn't return anything; to pass failures of any type on, make it `fn main() -> Error = .None` at [tests/errors/error_type.sabk:33:28]
     33 |     let t = read_file("x") or_return;      // main returns nothing
        |                            ^

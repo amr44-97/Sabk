@@ -102,6 +102,9 @@ pub struct Checker {
     defaults_known: Map(*Type, i32);
     // the type so far of a labeled block or switch expression's value
     value_types: Map(*Node, *Type);
+    // a function's result defaults as written, before checking: what
+    // `return x;` and the function's end copy (see default_copies)
+    default_templates: Map(*Node, []*Node);
     warned: Map(string, bool);  // a warning is given once per place
 
     // narrowing: what the checker knows a place's variant to be where it
@@ -904,6 +907,68 @@ pub fn block_list(b: *Node) -> []*Node {
     return .[];
 }
 
+// a function's result defaults, one per result in its type (null where
+// there's none), or none at all: `-> (i64, ParseError = .None)`. A void
+// result left out of the type takes its default with it.
+pub fn result_defaults(c: *Checker, fun: *Node) -> []*Node {
+    let written: []*Node;
+    let result: *Node = null;
+    if (fun == null)
+        return .[];
+    if (fun.kind is .Fn{result_defaults: d, result: r})
+        written, result = d, r;
+    let ret = fun.ty.ret;
+    let count: isize = if (ret.is_tuple) ret.fields.len else if (ret.kind == .Void) 0 else 1;
+    if (written.len == 0 || written.len == count || result.kind.tag != .TypeTuple)
+        return written;
+    let kept: [..]*Node;
+    if (result.kind is .TypeTuple{items})
+        for (i in 0..items.len)
+            if (type_from_node(c, items[i]).kind != .Void)
+                array_add(&kept, written[i]);
+    return kept;
+}
+
+// each default against its result's type, once per function (and per
+// generic instance), after keeping a copy of it as written
+fn check_result_defaults(c: *Checker, fun: *Node) {
+    let defaults = result_defaults(c, fun);
+    if (defaults.len == 0)
+        return;
+    let ret = fun.ty.ret;
+    let templates = new([]*Node, defaults.len);
+    for (i in 0..defaults.len) {
+        let d = defaults[i];
+        if (d == null)
+            continue;
+        templates[i] = clone_node(d, -1);
+        let want = if (ret.is_tuple) ret.fields[i].ty else ret;
+        if (check_expr(c, d, want).kind == .Error || !coerce(c, d, want)) {
+            // reported once: the copies `return` takes are already checked
+            templates[i].is_baked = true;
+            templates[i].ty = c.types.error;
+        }
+    }
+    map_put(&c.default_templates, fun, templates);
+}
+
+// copies of a function's result defaults, from result `from` up to
+// `count`: what `return x;` leaves out. False when one has none.
+pub fn default_copies(c: *Checker, fun: *Node, from: isize, count: isize) -> ([..]*Node, bool) {
+    let out: [..]*Node;
+    if (fun == null)
+        return out, false;
+    let templates, found = map_get(&c.default_templates, fun);
+    if (!found || templates.len != count)
+        return out, false;
+    for (i in from..count) {
+        if (templates[i] == null)
+            return out, false;
+        array_add(&out, clone_node(templates[i], -1));
+    }
+    return out, true;
+}
+
 pub fn check_fn_body(c: *Checker, fun: *Node) {
     let body = fn_body(fun);
     if (body == null || (map_get(&c.body_state, fun) or_else 0) != 0)
@@ -916,14 +981,32 @@ pub fn check_fn_body(c: *Checker, fun: *Node) {
     let no_unstable: Map(*Node, bool);
     c.facts, c.unstable = no_facts, no_unstable;
     find_unstable(c, body);
+    check_result_defaults(c, fun);
     for (stmt in block_list(body))
         check_stmt(c, stmt);
     c.facts, c.unstable = saved_facts, saved_unstable;
 
-    // a function returning only an Error may fall off its end: success
-    if (fun.ty.ret.kind != .Void && !fun.ty.ret.is_failure && !always_returns(body, null))
-        error(c, fun.tok, tformat("% returns % but can reach the end of its body without returning a value",
-                                 q(fun.tok.text), qt(fun.ty.ret)));
+    // reaching the end returns the results' defaults, when they all have
+    // one: `-> Error = .None` may fall off its end, which is success
+    let ret = fun.ty.ret;
+    if (ret.kind != .Void && !always_returns(body, null)) {
+        let end = new_node(fun.tok, .Return(null));
+        let count: isize = if (ret.is_tuple) ret.fields.len else 1;
+        let _, all = default_copies(c, fun, 0, count);
+        if (all) {
+            check_return(c, end);
+            if (body.kind is .Block{stmts: &list}) {
+                let more: [..]*Node;
+                array_append(&more, list.*);
+                array_add(&more, end);
+                list.* = more;
+            }
+        } else {
+            let hint = if (ret.is_failure) tformat("; to end in success, give it a default: `-> % = .None`", type_name(ret)) else "";
+            error(c, fun.tok, tformat("% returns % but can reach the end of its body without returning a value%",
+                                      q(fun.tok.text), qt(ret), hint));
+        }
+    }
     c.current_fn = null;
     if (c.error_count == errors) {
         check_escapes(c, fun);

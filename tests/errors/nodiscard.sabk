@@ -16,4 +16,17 @@ fn main() {
     _ = save();                          // fine
     let f = save;
     f();                                 // through a value: not checked
+    let n = counts();                    // takes the first, drops the bool
+    let total = counts() + 1;            // the same, in an expression
+    let m, ok = counts();                // fine: takes both
+    let k, _ = counts();                 // fine: `_` takes it
+}
+
+fn three() -> (i64, isize, SaveError) #nodiscard { return 1, 2, .None; }
+
+fn more() {
+    let a, b = three();                  // takes two of three
+    let x: i64;
+    let y: isize;
+    x, y = three();                      // the same, assigned
 }
