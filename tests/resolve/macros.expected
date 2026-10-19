@@ -1,4 +1,4 @@
-MODULE tests/resolve/macros.smelt
+MODULE tests/resolve/macros.sabk
 ROOT
   MACRO_DECL `add_to_total`
     rhs: BLOCK
@@ -20,8 +20,8 @@ ROOT
       VAR_DECL `tmp`
         lhs: NUMBER_LITERAL `10`
       EXPR_STMT `add_to_total`
-        lhs: MACRO_EXPANSION `add_to_total` [expansion 1] -> MACRO_DECL `add_to_total` tests/resolve/macros.smelt:2:4
-          lhs: IDENTIFIER `add_to_total` -> MACRO_DECL `add_to_total` tests/resolve/macros.smelt:2:4
+        lhs: MACRO_EXPANSION `add_to_total` [expansion 1] -> MACRO_DECL `add_to_total` tests/resolve/macros.sabk:2:4
+          lhs: IDENTIFIER `add_to_total` -> MACRO_DECL `add_to_total` tests/resolve/macros.sabk:2:4
           VAR_DECL `n` [macro 1]
             type: TYPE_NAME `i32` [macro 1] -> builtin
             lhs: IDENTIFIER `tmp` -> VAR_DECL `tmp` 10:9

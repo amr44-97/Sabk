@@ -1,66 +1,66 @@
-[error]: this returns memory that's gone once `literal` returns at [tests/errors/escaping_memory.smelt:10:12]
+[error]: this returns memory that's gone once `literal` returns at [tests/errors/escaping_memory.sabk:10:12]
     10 |     return .[1, 2, 3];                    // the elements are this function's
        |            ^
-[note]: this slice literal's elements only live until `literal` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:10:12]
+[note]: this slice literal's elements only live until `literal` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:10:12]
     10 |     return .[1, 2, 3];                    // the elements are this function's
        |            ^
-[error]: this returns memory that's gone once `address` returns at [tests/errors/escaping_memory.smelt:15:12]
+[error]: this returns memory that's gone once `address` returns at [tests/errors/escaping_memory.sabk:15:12]
     15 |     return &p;
        |            ^
-[note]: `p` is a local, which only lives until `address` returns; to keep the value, allocate it: `new(T)` or `new(value)` at [tests/errors/escaping_memory.smelt:15:12]
+[note]: `p` is a local, which only lives until `address` returns; to keep the value, allocate it: `new(T)` or `new(value)` at [tests/errors/escaping_memory.sabk:15:12]
     15 |     return &p;
        |            ^
-[error]: this returns memory that's gone once `through_a_local` returns at [tests/errors/escaping_memory.smelt:21:12]
+[error]: this returns memory that's gone once `through_a_local` returns at [tests/errors/escaping_memory.sabk:21:12]
     21 |     return same;                          // followed through locals
        |            ^
-[note]: this slice literal's elements only live until `through_a_local` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:19:26]
+[note]: this slice literal's elements only live until `through_a_local` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:19:26]
     19 |     let tags: []string = .["a", "b"];
        |                          ^
-[error]: this returns memory that's gone once `inside_a_struct` returns at [tests/errors/escaping_memory.smelt:26:12]
+[error]: this returns memory that's gone once `inside_a_struct` returns at [tests/errors/escaping_memory.sabk:26:12]
     26 |     return .{ .name = "r", .tags = .["x"], .at = &origin };
        |            ^
-[note]: this slice literal's elements only live until `inside_a_struct` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:26:36]
+[note]: this slice literal's elements only live until `inside_a_struct` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:26:36]
     26 |     return .{ .name = "r", .tags = .["x"], .at = &origin };
        |                                    ^
-[error]: this returns memory that's gone once `local_array` returns at [tests/errors/escaping_memory.smelt:31:19]
+[error]: this returns memory that's gone once `local_array` returns at [tests/errors/escaping_memory.sabk:31:19]
     31 |     return numbers[..];
        |                   ^
-[note]: `numbers` is a local array, which only lives until `local_array` returns; to keep its elements, copy them: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:31:19]
+[note]: `numbers` is a local array, which only lives until `local_array` returns; to keep its elements, copy them: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:31:19]
     31 |     return numbers[..];
        |                   ^
-[error]: this stores memory that's gone once `into_a_global` returns into the global `keep` at [tests/errors/escaping_memory.smelt:35:12]
+[error]: this stores memory that's gone once `into_a_global` returns into the global `keep` at [tests/errors/escaping_memory.sabk:35:12]
     35 |     keep = .[4, 5];
        |            ^
-[note]: this slice literal's elements only live until `into_a_global` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:35:12]
+[note]: this slice literal's elements only live until `into_a_global` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:35:12]
     35 |     keep = .[4, 5];
        |            ^
-[error]: this stores memory that's gone once `into_the_caller` returns into what the parameter `out` points at, which outlives it at [tests/errors/escaping_memory.smelt:40:16]
+[error]: this stores memory that's gone once `into_the_caller` returns into what the parameter `out` points at, which outlives it at [tests/errors/escaping_memory.sabk:40:16]
     40 |     out.tags = .["y"];                    // where `out` points
        |                ^
-[note]: this slice literal's elements only live until `into_the_caller` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:40:16]
+[note]: this slice literal's elements only live until `into_the_caller` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:40:16]
     40 |     out.tags = .["y"];                    // where `out` points
        |                ^
-[error]: this stores memory that's gone once `into_the_caller` returns into what the parameter `items` points at, which outlives it at [tests/errors/escaping_memory.smelt:41:16]
+[error]: this stores memory that's gone once `into_the_caller` returns into what the parameter `items` points at, which outlives it at [tests/errors/escaping_memory.sabk:41:16]
     41 |     items[0] = &p;
        |                ^
-[note]: `p` is a local, which only lives until `into_the_caller` returns; to keep the value, allocate it: `new(T)` or `new(value)` at [tests/errors/escaping_memory.smelt:41:16]
+[note]: `p` is a local, which only lives until `into_the_caller` returns; to keep the value, allocate it: `new(T)` or `new(value)` at [tests/errors/escaping_memory.sabk:41:16]
     41 |     items[0] = &p;
        |                ^
-[error]: this returns memory that's gone once `as_any` returns at [tests/errors/escaping_memory.smelt:46:12]
+[error]: this returns memory that's gone once `as_any` returns at [tests/errors/escaping_memory.sabk:46:12]
     46 |     return n;                             // an Any points at a copy here
        |            ^
-[note]: the copy of this value made for an `Any` only lives until `as_any` returns at [tests/errors/escaping_memory.smelt:46:12]
+[note]: the copy of this value made for an `Any` only lives until `as_any` returns at [tests/errors/escaping_memory.sabk:46:12]
     46 |     return n;                             // an Any points at a copy here
        |            ^
-[error]: this returns memory that's gone once `pair` returns at [tests/errors/escaping_memory.smelt:51:12]
+[error]: this returns memory that's gone once `pair` returns at [tests/errors/escaping_memory.sabk:51:12]
     51 |     return .[1, 2], true;                 // the first result
        |            ^
-[note]: this slice literal's elements only live until `pair` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:51:12]
+[note]: this slice literal's elements only live until `pair` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:51:12]
     51 |     return .[1, 2], true;                 // the first result
        |            ^
-[error]: this stores memory that's gone once `swap_out` returns into what the parameter `out` points at, which outlives it at [tests/errors/escaping_memory.smelt:57:13]
+[error]: this stores memory that's gone once `swap_out` returns into what the parameter `out` points at, which outlives it at [tests/errors/escaping_memory.sabk:57:13]
     57 |     out.* = x;                            // ...and stored for the caller
        |             ^
-[note]: this slice literal's elements only live until `swap_out` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.smelt:56:13]
+[note]: this slice literal's elements only live until `swap_out` returns; to keep them, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_memory.sabk:56:13]
     56 |     x, ok = .[1], true;                   // held by x...
        |             ^

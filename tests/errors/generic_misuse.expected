@@ -1,15 +1,15 @@
-[error]: `List` is generic: give its types, `List(T)` at [tests/errors/generic_misuse.smelt:6:12]
+[error]: `List` is generic: give its types, `List(T)` at [tests/errors/generic_misuse.sabk:6:12]
      6 |     let a: List;
        |            ^
-[error]: `Vec2` isn't generic, so it takes no types at [tests/errors/generic_misuse.smelt:7:12]
+[error]: `Vec2` isn't generic, so it takes no types at [tests/errors/generic_misuse.sabk:7:12]
      7 |     let b: Vec2(i32);
        |            ^
-[error]: `List` takes 1 type, got 2 at [tests/errors/generic_misuse.smelt:8:12]
+[error]: `List` takes 1 type, got 2 at [tests/errors/generic_misuse.sabk:8:12]
      8 |     let c: List(i32, u8);
        |            ^
-[error]: `T` takes a type here, like `i32` or `[]u8` at [tests/errors/generic_misuse.smelt:9:20]
+[error]: `T` takes a type here, like `i32` or `[]u8` at [tests/errors/generic_misuse.sabk:9:20]
      9 |     let e = make(1 + 2);
        |                    ^
-[error]: a type can't be used as a value here; types are only passed to `$T: Type` parameters at [tests/errors/generic_misuse.smelt:10:13]
+[error]: a type can't be used as a value here; types are only passed to `$T: Type` parameters at [tests/errors/generic_misuse.sabk:10:13]
     10 |     let t = []u8;
        |             ^

@@ -1,6 +1,6 @@
-[error]: a char literal must hold exactly one character, 'ab' holds 2 at [tests/errors/type_char_literal.smelt:1:11]
+[error]: a char literal must hold exactly one character, 'ab' holds 2 at [tests/errors/type_char_literal.sabk:1:11]
      1 | const A = 'ab';
        |           ^
-[error]: invalid escape `\q` in char literal at [tests/errors/type_char_literal.smelt:2:11]
+[error]: invalid escape `\q` in char literal at [tests/errors/type_char_literal.sabk:2:11]
      2 | const B = '\q';
        |           ^

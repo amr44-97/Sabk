@@ -1,0 +1,84 @@
+// Modules: one per source file, with its tokens, its syntax tree and its
+// top-level names; and the prelude, the module every other one sees.
+
+import "std/array";
+import "std/fmt";
+import "std/io";
+import "std/map";
+import "std/os";
+import "std/str";
+import "ast";
+import "source";
+import "token";
+
+// a name in a scope, with the color of the code that declared it (see
+// Resolver), so a macro's names and its caller's never meet
+pub struct ScopeKey {
+    name: string;
+    color: i32;
+}
+
+pub struct Module {
+    path: string;       // as reached from the root file; messages show it
+    src: Source;
+    tokens: []Token;
+    root: *Node;        // a Root
+
+    // top-level names: declarations and import bindings
+    scope: Map(ScopeKey, *Node);
+    // plain imports (no `as`), whose pub names are usable without a prefix
+    flat_imports: [..]*Node;
+    // declarations in branches of top-level `#if`s that weren't taken: code
+    // in such branches still has its names checked against them (a typo is
+    // an error on every platform), but nothing else can use them
+    untaken: [..]*Node;
+    untaken_scope: Map(string, *Node);
+    // code made by `#insert` (its declarations belong to the module with
+    // the #insert): the #insert
+    inserted_by: *Node;
+}
+
+// The prelude's text, with the target's names in it: the compiler builds
+// for the machine it runs on, so its own OS and ARCH say which. Read from
+// src/prelude.sabk while the compiler is compiled.
+const PRELUDE = #run prelude_text();
+
+fn prelude_text() -> string {
+    let text, err = read_file("src/prelude.sabk");
+    if (err != .None)
+        panic(tformat("can't read src/prelude.sabk (build from the repository's top): %",
+                      io_error_message(err)));
+    let with_os = replace_all(text, "@OS@", tformat("%", OS));
+    return replace_all(with_os, "@ARCH@", tformat("%", ARCH));
+}
+
+pub fn prelude_source() -> string { return PRELUDE; }
+
+fn replace_all(s: string, what: string, with: string) -> string {
+    let out: [..]u8;
+    let i: isize = 0;
+    while (i < s.len) {
+        if (starts_with(s[i..], what)) {
+            append_string(&out, with);
+            i += what.len;
+        } else {
+            array_add(&out, s[i]);
+            i++;
+        }
+    }
+    return out as string;
+}
+
+// what C's perror says about a file that couldn't be read
+pub fn system_error_text(err: IoError) -> string {
+    return switch (err) {
+    case .None:             "Success";
+    case .NotFound:         "No such file or directory";
+    case .PermissionDenied: "Permission denied";
+    case .IsDirectory:      "Is a directory";
+    case .NotDirectory:     "Not a directory";
+    case .AlreadyExists:    "File exists";
+    case .NoSpace:          "No space left on device";
+    case .Other:            "Input/output error";
+    };
+}

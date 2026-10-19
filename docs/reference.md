@@ -1,6 +1,6 @@
-# Smelt language reference
+# Sabk language reference
 
-Smelt is a C-like language with file modules, an implicit allocator context,
+Sabk is a C-like language with file modules, an implicit allocator context,
 macros and generics.
 Declarations start with a keyword (`fn`, `let`, `const`, `struct`, ...) and
 put the type after the name, so the grammar is context-free: the parser never
@@ -86,15 +86,15 @@ pub fn main() -> i32 {
 ```
 
 ```
-$ ./smelt --run example.smelt          # build and run; see Compiling and running
+$ ./sabk --run example.sabk          # build and run; see Compiling and running
 ```
 
 ## Coming from C
 
-Most C code reads the same in Smelt. These are the differences that
+Most C code reads the same in Sabk. These are the differences that
 matter day to day, each with its section:
 
-| C | Smelt | |
+| C | Sabk | |
 |---|---|---|
 | `int x = 5;` | `let x: i32 = 5;` or `let x = 5;` (an `isize`) | [Declarations](#declarations) |
 | `int f(int a)` | `fn f(a: i32) -> i32` | [Declarations](#declarations) |
@@ -109,7 +109,7 @@ matter day to day, each with its section:
 | `-1` for "not found" | several results: `let n, err = parse_int(s);` | [Handling errors](#handling-errors) |
 | macros in `#define` | `#expand` functions, `#run`, `#insert` | [Macros](#macros) |
 
-And what C leaves open, Smelt decides:
+And what C leaves open, Sabk decides:
 
 - **No silent narrowing.** `let b: u8 = n;` with `n: i64` is an error;
   write `n as u8`. See [implicit conversions](#type-checking).
@@ -152,8 +152,8 @@ import_decl = "import" STRING [ "as" IDENT ] ";" ;
     the qualified forms (`left.shared` or `right.shared`).
   - **Imports don't pass through:** importing `std/str` doesn't give you the
     names `str` itself imports.
-- Source files end in `.smelt`, and the extension is optional in imports:
-  `import "util";` loads `util.smelt`.
+- Source files end in `.sabk`, and the extension is optional in imports:
+  `import "util";` loads `util.sabk`.
 - `std/...` paths resolve to the standard library directory (`std` next to
   the compiler, or `--std <dir>`). Every other path is relative to the
   importing file.
@@ -971,7 +971,7 @@ checked at that point, and every violation is reported, not just the first.
 ## Type checking
 
 **Prelude.** `Allocator`, `AllocatorMode`, `AllocatorProc` and `Context` are
-declared in a built-in prelude module (`src/prelude.smelt`) that every file can see.
+declared in a built-in prelude module (`src/prelude.sabk`) that every file can see.
 Only its `pub` declarations are visible; the rest is the runtime's
 implementation. A module's own declarations shadow it.
 
@@ -1794,7 +1794,7 @@ A function that can fail returns its failure as its last result; see
 
 ## Handling errors
 
-Two kinds of things go wrong, and Smelt handles them differently:
+Two kinds of things go wrong, and Sabk handles them differently:
 
 - **Failures** are what a correct program expects to happen sometimes: a
   file that isn't there, a number that doesn't parse, a key that isn't in
@@ -1912,7 +1912,7 @@ enum, without knowing which ones its callees use, and `main` can too:
 
 ```
 fn main() -> Error {
-    let content = read_file("src/main.smelt") or_return;          // an IoError becomes an Error
+    let content = read_file("src/main.sabk") or_return;          // an IoError becomes an Error
     defer free(content.ptr);
     let jobs = parse_int(get_env("JOBS") or_else "1") or_return;   // so does a ParseError
     ...
@@ -1920,7 +1920,7 @@ fn main() -> Error {
 ```
 
 ```
-$ ./smelt --run main.smelt
+$ ./sabk --run main.sabk
 error: IoError.NotFound
 $ echo $?
 1
@@ -2100,8 +2100,8 @@ _ = save(path, data);        // fine: dropped on purpose
 the location:
 
 ```
-assert(i < xs.len);             // file.smelt:6:12: assertion failed: i < xs.len
-panic(tformat("no user %", name));   // file.smelt:9:5: panic: no user ada
+assert(i < xs.len);             // file.sabk:6:12: assertion failed: i < xs.len
+panic(tformat("no user %", name));   // file.sabk:9:5: panic: no user ada
 ```
 
 - Both call `context.panic_handler`, which by default prints the message
@@ -2110,8 +2110,8 @@ panic(tformat("no user %", name));   // file.smelt:9:5: panic: no user ada
 - The runtime's own checks stop the program the same way:
 
   ```
-  xs[3]      // file.smelt:6:20: panic: index 3 is out of bounds for length 3
-  a / 0      // file.smelt:7:9: panic: division by zero
+  xs[3]      // file.sabk:6:20: panic: index 3 is out of bounds for length 3
+  a / 0      // file.sabk:7:9: panic: division by zero
   ```
 
   as does a `switch` with no case for its value (a value made with `as`,
@@ -2146,7 +2146,7 @@ defer get() or_return;
 
 ## Memory and ownership
 
-Smelt manages memory as C does: nothing is freed on its own, and nothing
+Sabk manages memory as C does: nothing is freed on its own, and nothing
 is allocated without a call. Every value is one of three kinds:
 
 | Kind | Types | Copying it |
@@ -2217,7 +2217,7 @@ The check doesn't follow values into other functions, or know when heap
 memory is freed; the traps below are what it misses.
 
 **Finding the rest.** C's AddressSanitizer catches most of them while the
-program runs, and reports them with Smelt's files and lines. Turn it on
+program runs, and reports them with Sabk's files and lines. Turn it on
 with a build step:
 
 ```
@@ -2229,13 +2229,13 @@ import "std/build";
 ==64251==ERROR: AddressSanitizer: stack-use-after-scope on address 0x7b104a9f00d0
 READ of size 8 at 0x7b104a9f00d0 thread T0
     ...
-    #8 0x55c04287f025 in main__main /home/ada/main.smelt:12
+    #8 0x55c04287f025 in main__main /home/ada/main.sabk:12
 ```
 
 ### Memory traps
 
 These compile, and read memory that was reused, freed or moved, or give
-wrong values without a crash. They come from three choices Smelt shares
+wrong values without a crash. They come from three choices Sabk shares
 with C, Zig, Odin and Jai: temporary memory lives on the stack, a slice or
 pointer is a bare view with no lifetime in its type, and nothing follows a
 view into the functions it's passed to. (Go avoids them with a garbage
@@ -2246,7 +2246,7 @@ The compiler warns about the ones a function's own code shows (the
 **Caught** column): a warning says what the memory is and how long it
 lives, and doesn't stop the build. The rest only show while the program
 runs: build it with **`--sanitize`** (AddressSanitizer), and a use of freed
-or reused memory stops it with a report at the Smelt line that used it and
+or reused memory stops it with a report at the Sabk line that used it and
 the one that freed it. That covers the temp allocator and arenas too:
 memory they take back is poisoned until they hand it out again.
 
@@ -2654,10 +2654,10 @@ one comes with the call written right:
 ```
 println("% and %", 1);       // error: this `%` has no value
 println("%x", "text");       // error: `%x` prints an integer, but `"text"` is a `string`; for text write `%s`
-println("%d items", count);  // error: `%d` isn't a directive: Smelt's `%` prints a number as it is
+println("%d items", count);  // error: `%d` isn't a directive: Sabk's `%` prints a number as it is
                              //   note: write: println("% items", count)
                              //   note: the directives: ...
-println("%5.2f", width);     // error: ... Smelt's options go in braces: `%{5.2f}`
+println("%5.2f", width);     // error: ... Sabk's options go in braces: `%{5.2f}`
 println("%px", left);        // error: `%p` isn't a directive; for a value followed by `px`, write `%{}px`
 ```
 
@@ -2681,7 +2681,7 @@ fn log(level: string, fmt: string, args: ..Any) #format {
 log("info", "% %", 1);       // error: this `%` has no value
 ```
 
-The formatter is ordinary Smelt code in `std/fmt`, built on the next three
+The formatter is ordinary Sabk code in `std/fmt`, built on the next three
 features.
 
 **`..` parameters.** A function's last parameter can take any number of
@@ -2740,16 +2740,16 @@ inspect types the same way, and produces the same text.
 ## Compiling and running
 
 ```
-./smelt prog.smelt            build an executable named `prog`
-./smelt prog.smelt -o out     ... named `out`
-./smelt --run prog.smelt      build, run, and exit with the program's exit code
-./smelt --release prog.smelt  build optimized (-O2), without debug info
-./smelt --sanitize prog.smelt build with AddressSanitizer (see Memory traps)
-./smelt --bounds-checks off prog.smelt   no index or slice checks (on, off, always)
-./smelt --run prog.smelt -- a b   run it with the arguments a and b
-./smelt --emit-c prog.smelt   print the generated C (--lines: with #line)
-./smelt --check prog.smelt    only check for errors
-./smelt --stats ...         also print phase times and generic instances
+./sabk prog.sabk            build an executable named `prog`
+./sabk prog.sabk -o out     ... named `out`
+./sabk --run prog.sabk      build, run, and exit with the program's exit code
+./sabk --release prog.sabk  build optimized (-O2), without debug info
+./sabk --sanitize prog.sabk build with AddressSanitizer (see Memory traps)
+./sabk --bounds-checks off prog.sabk   no index or slice checks (on, off, always)
+./sabk --run prog.sabk -- a b   run it with the arguments a and b
+./sabk --emit-c prog.sabk   print the generated C (--lines: with #line)
+./sabk --check prog.sabk    only check for errors
+./sabk --stats ...         also print phase times and generic instances
 ```
 
 The compiler writes one C11 file for the whole program and builds it with
@@ -2766,11 +2766,11 @@ isn't in the program at all. `--stats` shows how many functions were
 written out.
 
 **Debugging.** The C has `#line` directives mapping each line back to the
-Smelt that made it, so gdb, lldb and sanitizers speak Smelt: `break
-main.smelt:12` stops there, a backtrace shows Smelt files and lines, and
-stepping walks the Smelt source. Code from a macro maps to the macro's own
+Sabk that made it, so gdb, lldb and sanitizers speak Sabk: `break
+main.sabk:12` stops there, a backtrace shows Sabk files and lines, and
+stepping walks the Sabk source. Code from a macro maps to the macro's own
 lines; code made by `#insert` maps to the `#insert`. Variables have their
-Smelt names (globals and functions get their module's prefix, as in
+Sabk names (globals and functions get their module's prefix, as in
 `main__count`). `--emit-c` leaves the directives out, since there you're
 reading the C itself; `--emit-c --lines` keeps them.
 
@@ -2786,7 +2786,7 @@ linkers). Bounds checks and the other safety checks stay in both.
 [Handling errors](#handling-errors)).
 The program's arguments come from `args()` (std/os): its path, then the
 arguments, as views of C's `argv`. With `--run`, what follows `--` on
-smelt's command line is passed to the program. While compiling (`#run`
+sabk's command line is passed to the program. While compiling (`#run`
 code, build scripts), `args()` returns the program's name and those same
 arguments, so a build script can take options.
 
@@ -3102,7 +3102,7 @@ billion steps (an endless loop). A function can't `#run` itself while it's
 being checked.
 
 **How it works.** The checked syntax tree is compiled to a bytecode for a
-small interpreter (`src/vm.smelt`), function by function as they're first
+small interpreter (`src/vm.sabk`), function by function as they're first
 called. A `#run` runs as soon as the checker reaches it, so the functions it
 calls are checked first, wherever they are. After an error has been
 reported, later `#run`s are skipped, since the code they'd run may be
@@ -3144,7 +3144,7 @@ written there. Inside a macro it belongs to the macro, with the same
 hygiene as the macro's own code: a backtick reaches the caller.
 
 **Errors** in generated code point into that code, at a path like
-`main.smelt:12:5 #insert:1:9` (line 1, column 9 of the code the `#insert`
+`main.sabk:12:5 #insert:1:9` (line 1, column 9 of the code the `#insert`
 at 12:5 made), with a note at the `#insert`. So do panics at run time.
 
 **Order.** The code an `#insert` runs is checked and run while names are
@@ -3208,8 +3208,8 @@ fn configure() {
 ## Compile-time reflection
 
 `type_info(T)` works in `#run` code too, so code can be written from a
-type's description and compiled with `#insert`. This is how Smelt does what
-other languages do with `derive` or code generators, in ordinary Smelt.
+type's description and compiled with `#insert`. This is how Sabk does what
+other languages do with `derive` or code generators, in ordinary Sabk.
 
 At the top level it makes declarations:
 

@@ -1,3 +1,3 @@
-[error]: the program needs a `fn main()` in tests/errors/codegen_no_main.smelt at [tests/errors/codegen_no_main.smelt:1:1]
+[error]: the program needs a `fn main()` in tests/errors/codegen_no_main.sabk at [tests/errors/codegen_no_main.sabk:1:1]
      1 | fn helper() {}
        | ^

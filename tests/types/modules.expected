@@ -1,43 +1,43 @@
-MODULE tests/types/modules.smelt
+MODULE tests/types/modules.sabk
 ROOT
-  IMPORT `"std/mem"` -> module tests/resolve/std/mem.smelt
-  IMPORT `"../resolve/lib/util"` -> module tests/resolve/lib/util.smelt
+  IMPORT `"std/mem"` -> module tests/resolve/std/mem.sabk
+  IMPORT `"../resolve/lib/util"` -> module tests/resolve/lib/util.sabk
   FUN_DECL `f` : fn() -> i32
     type: TYPE_NAME `i32` -> builtin : i32
     rhs: BLOCK
       VAR_DECL `p` : *void
         lhs: CALL `(` : *void
-          lhs: MEMBER `alloc` -> FUN_DECL `alloc` tests/resolve/std/mem.smelt:5:8 : fn(usize, Allocator) -> *void
+          lhs: MEMBER `alloc` -> FUN_DECL `alloc` tests/resolve/std/mem.sabk:5:8 : fn(usize, Allocator) -> *void
             lhs: IDENTIFIER `mem` -> IMPORT `"std/mem"` 1:8
           NUMBER_LITERAL `16` : usize = 16
       VAR_DECL `pair` : Pair
         lhs: STRUCT_INIT : Pair
-          type: MEMBER `Pair` -> STRUCT `Pair` tests/resolve/std/mem.smelt:4:12 : Pair
+          type: MEMBER `Pair` -> STRUCT `Pair` tests/resolve/std/mem.sabk:4:12 : Pair
             lhs: IDENTIFIER `mem` -> IMPORT `"std/mem"` 1:8
           FIELD_INIT `a`
-            rhs: MEMBER `LIMIT` -> CONST_DECL `LIMIT` tests/resolve/lib/util.smelt:2:11 : i32 = 10
+            rhs: MEMBER `LIMIT` -> CONST_DECL `LIMIT` tests/resolve/lib/util.sabk:2:11 : i32 = 10
               lhs: IDENTIFIER `util` -> IMPORT `"../resolve/lib/util"` 2:8
           FIELD_INIT `b`
             rhs: NUMBER_LITERAL `2` : i32 = 2
       VAR_DECL `c` : Color
-        lhs: MEMBER `Green` -> ENUM_VARIANT `Green` tests/resolve/lib/util.smelt:1:23 : Color = 1
-          lhs: MEMBER `Color` -> ENUM `Color` tests/resolve/lib/util.smelt:1:10 : Color
+        lhs: MEMBER `Green` -> ENUM_VARIANT `Green` tests/resolve/lib/util.sabk:1:23 : Color = 1
+          lhs: MEMBER `Color` -> ENUM `Color` tests/resolve/lib/util.sabk:1:10 : Color
             lhs: IDENTIFIER `util` -> IMPORT `"../resolve/lib/util"` 2:8
       VAR_DECL `arr` : [10]u8
         type: TYPE_ARRAY `[` : [10]u8
           lhs: TYPE_NAME `u8` -> builtin : u8
-          rhs: MEMBER `LIMIT` -> CONST_DECL `LIMIT` tests/resolve/lib/util.smelt:2:11 : untyped int = 10
+          rhs: MEMBER `LIMIT` -> CONST_DECL `LIMIT` tests/resolve/lib/util.sabk:2:11 : untyped int = 10
             lhs: IDENTIFIER `util` -> IMPORT `"../resolve/lib/util"` 2:8
       RETURN
         lhs: ADD `+` : i32
           lhs: CALL `(` : i32
-            lhs: MEMBER `helper` -> FUN_DECL `helper` tests/resolve/lib/util.smelt:3:8 : fn() -> i32
+            lhs: MEMBER `helper` -> FUN_DECL `helper` tests/resolve/lib/util.sabk:3:8 : fn() -> i32
               lhs: IDENTIFIER `util` -> IMPORT `"../resolve/lib/util"` 2:8
           rhs: MEMBER `a` : i32
             lhs: IDENTIFIER `pair` -> VAR_DECL `pair` 6:9 : Pair
-MODULE tests/resolve/std/mem.smelt
+MODULE tests/resolve/std/mem.sabk
 ROOT
-  IMPORT `"std/io"` -> module tests/resolve/std/io.smelt
+  IMPORT `"std/io"` -> module tests/resolve/std/io.sabk
   STRUCT `Arena` [pub] : Arena
     STRUCT_FIELD `data` : *void
       type: TYPE_PTR `*` : *void
@@ -53,7 +53,7 @@ ROOT
     rhs: BLOCK
       EXPR_STMT `io`
         lhs: CALL `(` : void
-          lhs: MEMBER `print` -> FUN_DECL `print` tests/resolve/std/io.smelt:2:8 : fn(string)
+          lhs: MEMBER `print` -> FUN_DECL `print` tests/resolve/std/io.sabk:2:8 : fn(string)
             lhs: IDENTIFIER `io` -> IMPORT `"std/io"` 1:8
           STRING_LITERAL `"alloc\n"` : string
       RETURN
@@ -64,7 +64,7 @@ ROOT
       type: TYPE_NAME `Allocator` -> STRUCT `Allocator` <prelude>:13:12 : Allocator
       lhs: MEMBER `allocator` : Allocator
         lhs: CONTEXT : Context
-MODULE tests/resolve/std/io.smelt
+MODULE tests/resolve/std/io.sabk
 ROOT
   STRUCT `Writer` [pub] : Writer
     STRUCT_FIELD `fd` : i32
@@ -73,9 +73,9 @@ ROOT
     rhs: BLOCK
       EXPR_STMT `write`
         lhs: CALL `(` : void
-          lhs: IDENTIFIER `write` -> FUN_DECL `write` tests/resolve/std/io.smelt:3:4 : fn(Writer, string)
+          lhs: IDENTIFIER `write` -> FUN_DECL `write` tests/resolve/std/io.sabk:3:4 : fn(Writer, string)
           STRUCT_INIT : Writer
-            type: IDENTIFIER `Writer` -> STRUCT `Writer` tests/resolve/std/io.smelt:1:12 : Writer
+            type: IDENTIFIER `Writer` -> STRUCT `Writer` tests/resolve/std/io.sabk:1:12 : Writer
             FIELD_INIT `fd`
               rhs: NUMBER_LITERAL `1` : i32 = 1
           IDENTIFIER `s` -> FUN_PARAM `s` 2:14 : string
@@ -84,10 +84,10 @@ ROOT
   FUN_DECL `write` : fn(Writer, string)
     rhs: BLOCK
     FUN_PARAM `w` : Writer
-      type: TYPE_NAME `Writer` -> STRUCT `Writer` tests/resolve/std/io.smelt:1:12 : Writer
+      type: TYPE_NAME `Writer` -> STRUCT `Writer` tests/resolve/std/io.sabk:1:12 : Writer
     FUN_PARAM `s` : string
       type: TYPE_NAME `string` -> builtin : string
-MODULE tests/resolve/lib/util.smelt
+MODULE tests/resolve/lib/util.sabk
 ROOT
   ENUM `Color` [pub] : Color
     ENUM_VARIANT `Red` : Color = 0
@@ -98,4 +98,4 @@ ROOT
     type: TYPE_NAME `i32` -> builtin : i32
     rhs: BLOCK
       RETURN
-        lhs: IDENTIFIER `LIMIT` -> CONST_DECL `LIMIT` tests/resolve/lib/util.smelt:2:11 : i32 = 10
+        lhs: IDENTIFIER `LIMIT` -> CONST_DECL `LIMIT` tests/resolve/lib/util.sabk:2:11 : i32 = 10

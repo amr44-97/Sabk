@@ -1,3 +1,3 @@
-[error]: Unhandled char `\` at [tests/errors/lex_unhandled_char.smelt:2:7]
+[error]: Unhandled char `\` at [tests/errors/lex_unhandled_char.sabk:2:7]
      2 |   x = \oops;
        |       ^

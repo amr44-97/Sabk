@@ -1,0 +1,139 @@
+// functions with several results; or_return and or_else; the same
+// code run by #run
+import "std/io";
+
+fn divide(a: i64, b: i64) -> (i64, i64) {
+    return a / b, a % b;
+}
+
+fn min_max(xs: []i32) -> (i32, i32, bool) {
+    if (xs.len == 0)
+        return 0, 0, false;
+    let lo = xs[0];
+    let hi = xs[0];
+    for (x in xs) {
+        if (x < lo) lo = x;
+        if (x > hi) hi = x;
+    }
+    return lo, hi, true;
+}
+
+enum CheckError: Error { Negative, TooBig }
+
+fn check(x: i64) -> (i64, CheckError) {
+    if (x < 0) return 0, .Negative;
+    if (x > 100) return 0, .TooBig;
+    return x * 2, .None;
+}
+
+fn twice(x: i64) -> (i64, CheckError) {
+    defer println("  (twice(%) done)", x);
+    let y = check(x) or_return;
+    let z = check(y) or_return;
+    return z, .None;
+}
+
+fn lookup(key: string) -> (string, bool) {
+    if (key == "name") return "sabk", true;
+    return "", false;
+}
+
+fn both(a: string, b: string) -> (string, string, bool) {
+    let x = lookup(a) or_return;
+    let y = lookup(b) or_return;
+    return x, y, true;
+}
+
+fn pass_through(a: i64, b: i64) -> (i64, i64) { return divide(a, b); }
+
+fn ok_only(x: i64) -> CheckError {
+    check(x) or_return;
+    return .None;
+}
+
+fn run_all() -> i64 {
+    let q, r = divide(17, 5);
+    let lo, hi, ok = min_max(.[3, -1, 7]);
+    let a, _ = divide(9, 2);
+    let s: i64 = 0;
+    s = q * 1000 + r * 100 + lo * 10 + hi + a;
+    if (!ok) s = -1;
+    let m: i64 = 1;
+    let n: i64 = 2;
+    m, n = n, m;                     // swapped: 2, 1
+    let small: u8 = 3;
+    let wide: i64;
+    wide, _ = small, 5;              // converted to i64
+    let xs = i64.[0, 0];
+    _, xs[1] = divide(9, 2);
+    return s * 10000 + m * 1000 + n * 100 + wide * 10 + xs[1];
+}
+
+fn main() {
+    let q, r = divide(17, 5);
+    println("17 / 5 = % rem %", q, r);
+    let lo, hi, ok = min_max(.[3, -1, 7, 2]);
+    println("min % max % ok %", lo, hi, ok);
+    let _, _, empty_ok = min_max(.[]);
+    println("empty ok: %", empty_ok);
+
+    let a, b = 1, 2;
+    a, b = b, a;
+    println("swapped: % %", a, b);
+    let xs = i64.[0, 0, 0];
+    xs[0], xs[2] = divide(100, 7);
+    _, xs[1] = divide(100, 7);
+    println("xs: %", xs);
+    let small: u8 = 3;
+    let wide: i64;
+    let n: i32;
+    n, wide = 7, small;
+    println("n % wide %", n, wide);
+
+    for (v in i64.[10, 60, -1]) {
+        let t, err = twice(v);
+        println("twice(%) = % %", v, t, err);
+    }
+    let x, y, found = both("name", "name");
+    println("both: % % %", x, y, found);
+    let _, _, found2 = both("name", "nope");
+    println("both missing: %", found2);
+    println("or_else: %", lookup("nope") or_else "fallback");
+    println("or_else: %", lookup("name") or_else "fallback");
+    println("chain: %", lookup("a") or_else lookup("name") or_else "none");
+    let pq, pr = pass_through(20, 6);
+    println("pass: % %", pq, pr);
+    println("ok_only: % %", ok_only(5), ok_only(500));
+    println("run: % %", run_all(), #run run_all());
+    const T = #run twice_ok();
+    println("compile time: %", T);
+    generic_and_pointers();
+}
+
+fn first(xs: []$T) -> (T, bool) {
+    if (xs.len == 0) {
+        let none: T;
+        return none, false;
+    }
+    return xs[0], true;
+}
+
+fn call_twice(f: fn(i64) -> (i64, CheckError), x: i64) -> (i64, CheckError) {
+    let once = f(x) or_return;
+    return f(once);
+}
+
+fn generic_and_pointers() {
+    println("first: % %", first(string.["a", "b"]) or_else "-",
+            first(f64.[]) or_else 2.5);
+    let v, err = call_twice(twice, 3);
+    println("call_twice: % %", v, err);
+}
+
+fn twice_ok() -> i64 {
+    let a, e = twice(10);
+    let b, e2 = twice(-5);
+    let c = twice(1000) or_else 77;
+    let d = lookup("zzz") or_else "x";
+    return a + b * 1000 + c + (e2 as i64) * 100000 + d.len as i64 + (e as i64);
+}

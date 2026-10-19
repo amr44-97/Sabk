@@ -15,5 +15,5 @@ checks: 30 -7
 swapped: tmp = 2, other = 1
 counted allocations: 2
 [lib] counter + 1
-tests/run/macros.smelt:131:12: assertion failed: sum == 100
+tests/run/macros.sabk:131:12: assertion failed: sum == 100
 [exit 3]

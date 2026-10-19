@@ -1,3 +1,3 @@
-[error]: `x` isn't a function, its type is `isize` at [tests/errors/type_not_a_function.smelt:1:21]
+[error]: `x` isn't a function, its type is `isize` at [tests/errors/type_not_a_function.sabk:1:21]
      1 | fn f() { let x = 1; x(); }
        |                     ^

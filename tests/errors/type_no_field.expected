@@ -1,12 +1,12 @@
-[error]: `V` has no field `y` at [tests/errors/type_no_field.smelt:3:15]
+[error]: `V` has no field `y` at [tests/errors/type_no_field.sabk:3:15]
      3 |     let a = v.y;
        |               ^
-[error]: `V` has no field `z` at [tests/errors/type_no_field.smelt:4:15]
+[error]: `V` has no field `z` at [tests/errors/type_no_field.sabk:4:15]
      4 |     let b = p.z;
        |               ^
-[error]: `[]u8` has no member `cap` at [tests/errors/type_no_field.smelt:5:15]
+[error]: `[]u8` has no member `cap` at [tests/errors/type_no_field.sabk:5:15]
      5 |     let c = s.cap;
        |               ^
-[error]: `V` has no field `w` at [tests/errors/type_no_field.smelt:6:18]
+[error]: `V` has no field `w` at [tests/errors/type_no_field.sabk:6:18]
      6 |     let d = V.{ .w = 1.0 };
        |                  ^

@@ -1,30 +1,30 @@
-[error]: this switch doesn't handle `.Negate(.Negate(_))` of `Expr`; add a case for it, or a `default` at [tests/errors/nested_patterns.smelt:12:12]
+[error]: this switch doesn't handle `.Negate(.Negate(_))` of `Expr`; add a case for it, or a `default` at [tests/errors/nested_patterns.sabk:12:12]
     12 |     return switch (e) {                     // .Negate(.Negate(_)) isn't handled
        |            ^
-[error]: this switch doesn't handle `.Binary{op: .Add}` of `Expr`; add a case for it, or a `default` at [tests/errors/nested_patterns.smelt:23:12]
+[error]: this switch doesn't handle `.Binary{op: .Add}` of `Expr`; add a case for it, or a `default` at [tests/errors/nested_patterns.sabk:23:12]
     23 |     return switch (e) {                     // .Binary{op: .Add} isn't handled
        |            ^
-[error]: this switch doesn't handle `.Number(_)` of `Expr`; add a case for it, or a `default` at [tests/errors/nested_patterns.smelt:31:12]
+[error]: this switch doesn't handle `.Number(_)` of `Expr`; add a case for it, or a `default` at [tests/errors/nested_patterns.sabk:31:12]
     31 |     return switch (e) {                     // a guard doesn't cover .Number
        |            ^
-[error]: this case can't be reached: the cases before it already match everything it does at [tests/errors/nested_patterns.smelt:40:10]
+[error]: this case can't be reached: the cases before it already match everything it does at [tests/errors/nested_patterns.sabk:40:10]
     40 |     case .Number(0): {}                     // can't be reached
        |          ^
-[error]: this case can't be reached: the cases before it already match everything it does at [tests/errors/nested_patterns.smelt:42:10]
+[error]: this case can't be reached: the cases before it already match everything it does at [tests/errors/nested_patterns.sabk:42:10]
     42 |     case .Negate(.Nil): {}                  // can't be reached
        |          ^
-[error]: this case can't be reached: the cases before it already match everything it does at [tests/errors/nested_patterns.smelt:44:10]
+[error]: this case can't be reached: the cases before it already match everything it does at [tests/errors/nested_patterns.sabk:44:10]
     44 |     case .Binary{op: .Mul, lhs: .Nil}: {}   // can't be reached
        |          ^
-[error]: a guard needs a `bool`, found `i64` at [tests/errors/nested_patterns.smelt:51:25]
+[error]: a guard needs a `bool`, found `i64` at [tests/errors/nested_patterns.sabk:51:25]
     51 |     case .Number(n) if (k): {}              // a guard needs a bool
        |                         ^
-[error]: enum `Op` has no variant `Sub` at [tests/errors/nested_patterns.smelt:52:22]
+[error]: enum `Op` has no variant `Sub` at [tests/errors/nested_patterns.sabk:52:22]
     52 |     case .Binary{op: .Sub}: {}              // no such Op
        |                      ^
-[error]: `.Binary` has no field `nope` at [tests/errors/nested_patterns.smelt:53:18]
+[error]: `.Binary` has no field `nope` at [tests/errors/nested_patterns.sabk:53:18]
     53 |     case .Binary{nope: .Mul}: {}            // no such field
        |                  ^
-[error]: expected `i64`, found `untyped string` at [tests/errors/nested_patterns.smelt:54:26]
+[error]: expected `i64`, found `untyped string` at [tests/errors/nested_patterns.sabk:54:26]
     54 |     case .Negate(.Number("x")): {}          // not an i64
        |                          ^

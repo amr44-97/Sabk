@@ -1,0 +1,652 @@
+// Formatting values of any type as text, from their type information.
+//
+//   format("% is %", name, age)        a new string, from context.allocator
+//   tformat("% is %", name, age)       ... from the temp allocator: nothing
+//                                      to free one by one
+//   builder_print(&b, "x = %", x)      appends to a Builder
+//   print_to(&buf, "x = %", x)         appends to a [..]u8
+//   append_value(&b, value)            one value of any type
+//   append_formatted(&b, value, spec)  ... with options (FormatSpec)
+//
+// print and println (std/io) format the same way.
+//
+// `%` is the next argument and `%%` a percent sign. With no arguments the
+// text is used as it is, so print(s) is safe for any s. A `%` with no
+// argument left shows as %(missing); arguments left over are added at the
+// end as %(extra: ...).
+//
+// A letter after `%` says how to show the value:
+//
+//   %s    text: a string, []u8, [N]u8, [..]u8, or a C string (*u8, up to
+//         its 0); bytes otherwise print as numbers
+//   %q    text in quotes, escaped: "a\n"
+//   %w    an error or enum value with its enum: IoError.NotFound
+//   %x %X an integer in hex, HEX;  %b %o  in binary, octal
+//   %e %f a float in scientific, fixed notation
+//   %c    a u8 as the character it is
+//
+// Options go in braces, %{spec}, with one of those letters at the end:
+//
+//   [align][+][0][width][.precision][kind]
+//     align       <  >  ^      left, right, centered in the width (numbers
+//                              go right by default, the rest left)
+//     +           a sign on positive numbers too
+//     0           numbers padded with zeros after their sign: -0042
+//     width       at least this many characters
+//     .precision  floats: digits after the point; strings: at most this
+//                 many characters
+//     kind        a letter from the list above
+//
+//   format("%{8}|%{<8}|%{^8}", 42, "ab", "mid")  "      42|ab      |  mid   "
+//   format("%{08.3} %x %{+} %c", 3.14159, 255, 7, 'A')
+//                                                "0003.142 ff +7 A"
+//
+// `%{}` is a value with no options, for one followed by a letter:
+// format("%{}px", 12) is "12px".
+//
+// Precision and kind reach the numbers inside other values too:
+// format("%{.1}", Point.{ .x = 1, .y = 2.25 }) is "{x = 1.0, y = 2.2}".
+// A spec that doesn't parse shows as %(bad format {spec}), and a letter
+// that isn't one of the above as %(bad format p). The compiler checks the
+// formats it can see, so those only happen with formats made at run time.
+//
+// How values look:
+//   integers; bools; floats in the shortest form that reads back the same
+//   strings as their text, or quoted inside other values: "ada"
+//   pointers, *void and functions as an address, 0x7ffc5e1c, or null
+//   arrays and slices: [1, 2, 3]
+//   structs: {x = 1, y = 2}
+//   enums: Red, or Color(7) for a value made with `as` that's no variant
+//   tagged enums: Number(42), Binary(op = Add, lhs = 0x..., rhs = 0x...), Nil
+//   unions: Name{...}, since which field holds the value isn't known
+//   an Any: the value it holds
+// Pointers aren't followed, so a value that points at itself prints fine.
+
+import "std/mem";
+import "std/str";
+
+extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+extern fn strtod(text: *u8, end: **u8) -> f64;
+
+pub fn format(fmt: string, args: ..Any) -> string #format {
+    let b = make_builder();
+    format_into(&b, fmt, args);
+    return builder_string(&b);
+}
+
+// for text that's only needed for a while: it's freed with the rest of
+// the temp allocator (free_all(context.temp_allocator))
+pub fn tformat(fmt: string, args: ..Any) -> string #format {
+    let b = make_builder(context.temp_allocator);
+    format_into(&b, fmt, args);
+    return builder_string(&b);
+}
+
+pub fn builder_print(b: *Builder, fmt: string, args: ..Any) #format {
+    format_into(b, fmt, args);
+}
+
+// onto the end of a [..]u8, as builder_print does onto a Builder
+pub fn print_to(buf: *[..]u8, fmt: string, args: ..Any) #format {
+    let b = Builder.{ .bytes = buf.* };  // the same bytes, grown in b
+    format_into(&b, fmt, args);
+    buf.* = b.bytes;
+}
+
+pub fn format_into(b: *Builder, fmt: string, args: []Any) {
+    if (args.len == 0) {
+        builder_append(b, fmt);
+        return;
+    }
+    let next = 0;
+    let start = 0;
+    let i = 0;
+    while (i < fmt.len) {
+        if (fmt[i] != '%') {
+            i++;
+            continue;
+        }
+        builder_append(b, fmt[start..i]);
+        if (i + 1 < fmt.len && fmt[i + 1] == '%') {
+            builder_append_char(b, '%');
+            i += 2;
+            start = i;
+            continue;
+        }
+        // %x: a letter that says how to show it
+        if (i + 1 < fmt.len && is_letter(fmt[i + 1])) {
+            let spec: FormatSpec;
+            let letter = fmt[i + 1];
+            if (is_kind(letter)) {
+                spec.kind = letter;
+                if (next < args.len)
+                    append_formatted(b, args[next], spec);
+                else
+                    builder_append(b, "%(missing)");
+            } else {
+                builder_append(b, "%(bad format ");
+                builder_append_char(b, letter);
+                builder_append_char(b, ')');
+            }
+            if (next < args.len)
+                next++;
+            i += 2;
+            start = i;
+            continue;
+        }
+        // %{spec}: its options; a `%{` that's never closed is just text
+        let spec: FormatSpec;
+        let end = i + 1;
+        if (i + 1 < fmt.len && fmt[i + 1] == '{') {
+            let close = i + 2;
+            while (close < fmt.len && fmt[close] != '}')
+                close++;
+            if (close == fmt.len) {
+                builder_append_char(b, '%');
+                i++;
+                start = i;
+                continue;
+            }
+            let text = fmt[i + 2..close];
+            end = close + 1;
+            if (!parse_format_spec(text, &spec)) {
+                builder_append(b, "%(bad format {");
+                builder_append(b, text);
+                builder_append(b, "})");
+                if (next < args.len)
+                    next++;
+                i = end;
+                start = i;
+                continue;
+            }
+        }
+        if (next < args.len) {
+            append_formatted(b, args[next], spec);
+            next++;
+        } else {
+            builder_append(b, "%(missing)");
+        }
+        i = end;
+        start = i;
+    }
+    builder_append(b, fmt[start..]);
+    if (next < args.len) {
+        builder_append(b, " %(extra: ");
+        for (k in next..args.len) {
+            if (k > next)
+                builder_append(b, ", ");
+            append_value(b, args[k]);
+        }
+        builder_append_char(b, ')');
+    }
+}
+
+pub fn append_value(b: *Builder, value: Any) {
+    let plain: FormatSpec;
+    put(b, value.value, value.info, false, &plain);
+}
+
+// how one value is formatted: what %{spec} says
+pub struct FormatSpec {
+    align: u8;              // '<', '>', '^', or 0 for the default
+    plus: bool;
+    zero: bool;
+    width: isize;
+    precision: i32 = -1;    // -1: none
+    kind: u8;               // 's', 'q', 'w', 'x', 'X', 'b', 'o', 'e', 'f', 'c', or 0
+}
+
+// "<+08.2x" and the like; false if it isn't one. The compiler checks
+// format strings it can see by the same rules (parse_spec in src/formats.sabk).
+pub fn parse_format_spec(text: string, spec: *FormatSpec) -> bool {
+    spec.* = .{};
+    let i = 0;
+    if (i < text.len && (text[i] == '<' || text[i] == '>' || text[i] == '^')) {
+        spec.align = text[i];
+        i++;
+    }
+    if (i < text.len && text[i] == '+') {
+        spec.plus = true;
+        i++;
+    }
+    if (i < text.len && text[i] == '0') {
+        spec.zero = true;
+        i++;
+    }
+    while (i < text.len && is_digit(text[i])) {
+        spec.width = spec.width * 10 + (text[i] - '0');
+        i++;
+    }
+    if (i < text.len && text[i] == '.') {
+        i++;
+        if (i == text.len || !is_digit(text[i]))
+            return false;
+        spec.precision = 0;
+        while (i < text.len && is_digit(text[i])) {
+            spec.precision = spec.precision * 10 + (text[i] - '0') as i32;
+            i++;
+        }
+    }
+    if (i < text.len) {
+        if (!is_kind(text[i]))
+            return false;
+        spec.kind = text[i];
+        i++;
+    }
+    return i == text.len;
+}
+
+// the letters that say how to show a value: %s, %{8x}
+pub fn is_format_kind(c: u8) -> bool { return is_kind(c); }
+
+fn is_kind(c: u8) -> bool {
+    switch (c) {
+    case 's', 'q', 'w', 'x', 'X', 'b', 'o', 'e', 'f', 'c': return true;
+    default: return false;
+    }
+}
+
+fn is_letter(c: u8) -> bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+// one value, padded to the spec's width
+pub fn append_formatted(b: *Builder, value: Any, spec: FormatSpec) {
+    if (spec.width == 0) {
+        put(b, value.value, value.info, false, &spec);
+        return;
+    }
+    let made = make_builder();
+    defer builder_free(&made);
+    put(&made, value.value, value.info, false, &spec);
+    let text = builder_string(&made);
+    let length = count_chars(text);
+    if (length >= spec.width) {
+        builder_append(b, text);
+        return;
+    }
+    let padding = spec.width - length;
+    let number = value.info.kind == .Int || value.info.kind == .Float;
+    if (spec.zero && number && spec.kind != 'c') {
+        // after the sign: -0042
+        if (text.len > 0 && (text[0] == '-' || text[0] == '+')) {
+            builder_append_char(b, text[0]);
+            text = text[1..];
+        }
+        repeat_char(b, '0', padding);
+        builder_append(b, text);
+        return;
+    }
+    let align = spec.align;
+    if (align == 0 && number)
+        align = '>';
+    let before = 0;
+    if (align == '>')
+        before = padding;
+    else if (align == '^')
+        before = padding / 2;
+    repeat_char(b, ' ', before);
+    builder_append(b, text);
+    repeat_char(b, ' ', padding - before);
+}
+
+// ---- inside
+
+const HEX_DIGITS: string = "0123456789abcdef";
+
+// a slice of anything: the layout every slice has
+struct RawSlice {
+    ptr: *u8;
+    len: isize;
+}
+
+// `nested`: inside another value, where strings are quoted
+fn put(b: *Builder, p: *void, t: *TypeInfo, nested: bool, spec: *FormatSpec) {
+    if (t == type_info(Any)) {
+        let inner = (p as *Any).*;
+        put(b, inner.value, inner.info, nested, spec);
+        return;
+    }
+    let bytes = p as *u8;
+    if (spec.kind == 's' || spec.kind == 'q') { // text, in quotes for %q
+        let text, is_text = as_text(p, t);
+        if (is_text) {
+            put_string(b, text, nested || spec.kind == 'q', spec);
+            return;
+        }
+    }
+    if (spec.kind == 'w' && (t.kind == .Enum || t.kind == .TaggedEnum) && t != type_info(Error)) {
+        builder_append(b, t.name); // with its enum: Color.Red
+        builder_append_char(b, '.');
+        let plain = spec.*;
+        plain.kind = 0;
+        put(b, p, t, nested, &plain);
+        return;
+    }
+    switch (t.kind) {
+    case .Void:
+        builder_append(b, "void");
+    case .Bool:
+        if ((p as *bool).*)
+            builder_append(b, "true");
+        else
+            builder_append(b, "false");
+    case .Int:
+        put_int(b, read_int(p, t), t.is_signed, spec);
+    case .Float:
+        if (t.size == 4)
+            put_float(b, (p as *f32).*, true, spec);
+        else
+            put_float(b, (p as *f64).*, false, spec);
+    case .Rawptr, .Pointer, .Function:
+        put_address(b, (p as *usize).*);
+    case .Array:
+        put_items(b, bytes, t.count, t.elem, spec);
+    case .Slice, .Growable: // []u8 too: bytes print as numbers, text is a
+        // string; a growable array starts with a slice's two fields
+        let s = (p as *RawSlice).*;
+        put_items(b, s.ptr, s.len, t.elem, spec);
+    case .String:
+        put_string(b, (p as *string).*, nested, spec);
+    case .Struct:
+        put_fields(b, bytes, t.fields, '{', '}', spec);
+    case .Union:
+        builder_append(b, t.name);
+        builder_append(b, "{...}");
+    case .Enum:
+        if (t == type_info(Error)) {
+            put_error(b, (p as *Error).*);
+            return;
+        }
+        let value = read_int(p, t.elem);
+        for (v in t.variants)
+            if (v.value == value) {
+                builder_append(b, v.name);
+                return;
+            }
+        builder_append(b, t.name);
+        builder_append_char(b, '(');
+        append_decimal(b, value);
+        builder_append_char(b, ')');
+    case .TaggedEnum:
+        let tag = read_int(&bytes[t.fields[0].offset], t.elem);
+        for (v in t.variants) {
+            if (v.value != tag)
+                continue;
+            builder_append(b, v.name);
+            if (v.payload == null)
+                return;
+            let payload = &bytes[t.fields[1].offset];
+            // Binary(op: Op, ...) declared its fields: show them as fields
+            if (is_variant_fields(t, v))
+                put_fields(b, payload, v.payload.fields, '(', ')', spec);
+            else {
+                builder_append_char(b, '(');
+                put(b, payload, v.payload, true, spec);
+                builder_append_char(b, ')');
+            }
+            return;
+        }
+        builder_append(b, t.name);
+        builder_append(b, "(tag ");
+        append_decimal(b, tag);
+        builder_append_char(b, ')');
+    }
+}
+
+// the text a value holds, for %s and %q: a string, bytes ([]u8, [N]u8,
+// [..]u8), or a C string (*u8, up to its 0)
+fn as_text(p: *void, t: *TypeInfo) -> (string, bool) {
+    let byte = type_info(u8);
+    switch (t.kind) {
+    case .String:
+        return (p as *string).*, true;
+    case .Slice, .Growable:
+        if (t.elem != byte)
+            return "", false;
+        let s = (p as *RawSlice).*;
+        return s.ptr[0..s.len] as string, true;
+    case .Array:
+        if (t.elem != byte)
+            return "", false;
+        return (p as *u8)[0..t.count] as string, true;
+    case .Pointer:
+        if (t.elem != byte)
+            return "", false;
+        let c = (p as **u8).*;
+        if (c == null)
+            return "null", true;
+        return from_cstring(c), true;
+    default:
+        return "", false;
+    }
+}
+
+// IoError.NotFound: the enum an Error came from, and its variant
+fn put_error(b: *Builder, e: Error) {
+    let t = error_enum(e);
+    if (t == null) {
+        builder_append(b, "None");
+        return;
+    }
+    builder_append(b, t.name);
+    let value = error_value(e);
+    for (v in t.variants)
+        if (v.value == value) {
+            builder_append_char(b, '.');
+            builder_append(b, v.name);
+            return;
+        }
+    builder_append_char(b, '(');
+    append_decimal(b, value);
+    builder_append_char(b, ')');
+}
+
+// an integer of any size, sign- or zero-extended to 64 bits
+fn read_int(p: *void, t: *TypeInfo) -> i64 {
+    if (t.is_signed) {
+        switch (t.size) {
+        case 1: return (p as *i8).*;
+        case 2: return (p as *i16).*;
+        case 4: return (p as *i32).*;
+        default: return (p as *i64).*;
+        }
+    }
+    switch (t.size) {
+    case 1: return (p as *u8).*;
+    case 2: return (p as *u16).*;
+    case 4: return (p as *u32).*;
+    default: return (p as *u64).* as i64;
+    }
+}
+
+fn put_int(b: *Builder, value: i64, signed: bool, spec: *FormatSpec) {
+    switch (spec.kind) {
+    case 'c':
+        builder_append_char(b, value as u8);
+        return;
+    case 'e', 'f':
+        if (signed)
+            put_float(b, value as f64, false, spec);
+        else
+            put_float(b, value as u64 as f64, false, spec);
+        return;
+    default:
+    }
+    let negative = signed && value < 0;
+    let magnitude = value as u64;
+    if (negative) {
+        magnitude = 0 - magnitude;
+        builder_append_char(b, '-');
+    } else if (spec.plus) {
+        builder_append_char(b, '+');
+    }
+    let base: u64 = 10;
+    let digits = HEX_DIGITS;
+    switch (spec.kind) {
+    case 'x': base = 16;
+    case 'X':
+        base = 16;
+        digits = "0123456789ABCDEF";
+    case 'b': base = 2;
+    case 'o': base = 8;
+    default:
+    }
+    let text: [64]u8;
+    let n = 0;
+    while (true) {
+        text[n] = digits[magnitude % base];
+        n++;
+        magnitude /= base;
+        if (magnitude == 0)
+            break;
+    }
+    while (n > 0) {
+        n--;
+        builder_append_char(b, text[n]);
+    }
+}
+
+// by the spec: fixed or scientific, with its precision; otherwise the
+// fewest digits that read back as the same value
+fn put_float(b: *Builder, f: f64, single: bool, spec: *FormatSpec) {
+    if (spec.plus && f >= 0)
+        builder_append_char(b, '+');
+    let text: [400]u8; // 1e308 in fixed notation is 309 digits
+    if (spec.kind == 'e' || spec.kind == 'f' || spec.precision >= 0) {
+        let precision = spec.precision;
+        if (precision < 0)
+            precision = 6;
+        if (precision > 60)
+            precision = 60;
+        let style: *u8 = "%.*f";
+        if (spec.kind == 'e')
+            style = "%.*e";
+        let len = snprintf(&text[0], text.len as usize, style, precision, f);
+        if (len >= text.len)
+            len = (text.len - 1) as i32;
+        builder_append(b, text[..len] as string);
+        return;
+    }
+    for (precision in 1..18) {
+        let len = snprintf(&text[0], text.len as usize, "%.*g", precision as i32, f);
+        let back = strtod(&text[0], null);
+        let same = back == f;
+        if (single)
+            same = back as f32 == f as f32;
+        if (same || precision == 17) {
+            builder_append(b, text[..len] as string);
+            return;
+        }
+    }
+}
+
+fn put_address(b: *Builder, address: usize) {
+    if (address == 0) {
+        builder_append(b, "null");
+        return;
+    }
+    let digits: [16]u8;
+    let n = 0;
+    while (address != 0) {
+        digits[n] = HEX_DIGITS[address & 15];
+        address >>= 4;
+        n++;
+    }
+    builder_append(b, "0x");
+    while (n > 0) {
+        n--;
+        builder_append_char(b, digits[n]);
+    }
+}
+
+fn put_items(b: *Builder, base: *u8, count: isize, elem: *TypeInfo, spec: *FormatSpec) {
+    builder_append_char(b, '[');
+    for (i in 0..count) {
+        if (i > 0)
+            builder_append(b, ", ");
+        put(b, &base[i * elem.size], elem, true, spec);
+    }
+    builder_append_char(b, ']');
+}
+
+fn put_fields(b: *Builder, base: *u8, fields: []TypeField, open: u8, close: u8,
+              spec: *FormatSpec) {
+    builder_append_char(b, open);
+    for (i in 0..fields.len) {
+        if (i > 0)
+            builder_append(b, ", ");
+        builder_append(b, fields[i].name);
+        builder_append(b, " = ");
+        put(b, &base[fields[i].offset], fields[i].info, true, spec);
+    }
+    builder_append_char(b, close);
+}
+
+fn put_string(b: *Builder, s: string, quoted: bool, spec: *FormatSpec) {
+    if (spec.precision >= 0) // at most that many characters
+        s = s[..char_offset(s, spec.precision)];
+    if (!quoted) {
+        builder_append(b, s);
+        return;
+    }
+    builder_append_char(b, '"');
+    for (c in s) {
+        switch (c) {
+        case '"': builder_append(b, "\\\"");
+        case '\\': builder_append(b, "\\\\");
+        case '\n': builder_append(b, "\\n");
+        case '\t': builder_append(b, "\\t");
+        default:
+            if (c < 32 || c == 127) {
+                builder_append(b, "\\x");
+                builder_append_char(b, HEX_DIGITS[c >> 4]);
+                builder_append_char(b, HEX_DIGITS[c & 15]);
+            } else {
+                builder_append_char(b, c);
+            }
+        }
+    }
+    builder_append_char(b, '"');
+}
+
+// is v's payload the struct its declared fields made (Rect(w: f64, h: f64)),
+// named "<enum>.<variant>", rather than a type it holds (Wrap(Point))?
+fn is_variant_fields(t: *TypeInfo, v: TypeVariant) -> bool {
+    let name = v.payload.name;
+    return v.payload.kind == .Struct &&
+           name.len == t.name.len + 1 + v.name.len &&
+           starts_with(name, t.name) && ends_with(name, v.name) &&
+           name[t.name.len] == '.';
+}
+
+fn is_digit(c: u8) -> bool { return c >= '0' && c <= '9'; }
+
+fn repeat_char(b: *Builder, c: u8, count: isize) {
+    for (i in 0..count)
+        builder_append_char(b, c);
+}
+
+// characters, not bytes: a UTF-8 character's later bytes are 10xxxxxx
+fn count_chars(s: string) -> isize {
+    let n = 0;
+    for (c in s)
+        if ((c & 0xc0) != 0x80)
+            n++;
+    return n;
+}
+
+// where character `n` starts, or the end
+fn char_offset(s: string, n: isize) -> isize {
+    let seen = 0;
+    for (i in 0..s.len)
+        if ((s[i] & 0xc0) != 0x80) {
+            if (seen == n)
+                return i;
+            seen++;
+        }
+    return s.len;
+}
+
+fn append_decimal(b: *Builder, n: i64) {
+    let digits: [24]u8;
+    builder_append(b, format_int(n, &digits));
+}

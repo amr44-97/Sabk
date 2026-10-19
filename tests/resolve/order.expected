@@ -1,4 +1,4 @@
-MODULE tests/resolve/order.smelt
+MODULE tests/resolve/order.sabk
 ROOT
   FUN_DECL `area`
     type: TYPE_NAME `f32` -> builtin
@@ -12,21 +12,21 @@ ROOT
             lhs: MEMBER `size`
               lhs: IDENTIFIER `r` -> FUN_PARAM `r` 2:9
     FUN_PARAM `r`
-      type: TYPE_NAME `Rect` -> STRUCT `Rect` tests/resolve/order.smelt:4:8
+      type: TYPE_NAME `Rect` -> STRUCT `Rect` tests/resolve/order.sabk:4:8
   TYPE_ALIAS `Size`
-    type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/resolve/order.smelt:5:8
+    type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/resolve/order.sabk:5:8
   STRUCT `Rect`
     STRUCT_FIELD `pos`
-      type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/resolve/order.smelt:5:8
+      type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/resolve/order.sabk:5:8
     STRUCT_FIELD `size`
-      type: TYPE_NAME `Size` -> TYPE_ALIAS `Size` tests/resolve/order.smelt:3:6
+      type: TYPE_NAME `Size` -> TYPE_ALIAS `Size` tests/resolve/order.sabk:3:6
   STRUCT `Vec2`
     STRUCT_FIELD `x`
       type: TYPE_NAME `f32` -> builtin
     STRUCT_FIELD `y`
       type: TYPE_NAME `f32` -> builtin
   VAR_DECL `origin`
-    type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/resolve/order.smelt:5:8
+    type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/resolve/order.sabk:5:8
   VAR_DECL `ptr`
     type: TYPE_PTR `*`
       lhs: TYPE_ARRAY `[`
@@ -35,5 +35,5 @@ ROOT
   VAR_DECL `cb`
     type: TYPE_FN
       type: TYPE_NAME `f32` -> builtin
-      TYPE_NAME `Rect` -> STRUCT `Rect` tests/resolve/order.smelt:4:8
-    lhs: IDENTIFIER `area` -> FUN_DECL `area` tests/resolve/order.smelt:2:4
+      TYPE_NAME `Rect` -> STRUCT `Rect` tests/resolve/order.sabk:4:8
+    lhs: IDENTIFIER `area` -> FUN_DECL `area` tests/resolve/order.sabk:2:4

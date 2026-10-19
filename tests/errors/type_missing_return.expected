@@ -1,9 +1,9 @@
-[error]: `f` returns `i32` but can reach the end of its body without returning a value at [tests/errors/type_missing_return.smelt:1:4]
+[error]: `f` returns `i32` but can reach the end of its body without returning a value at [tests/errors/type_missing_return.sabk:1:4]
      1 | fn f(x: i32) -> i32 {
        |    ^
-[error]: `g` returns `i32` but can reach the end of its body without returning a value at [tests/errors/type_missing_return.smelt:4:4]
+[error]: `g` returns `i32` but can reach the end of its body without returning a value at [tests/errors/type_missing_return.sabk:4:4]
      4 | fn g() -> i32 { while (true) { break; } }
        |    ^
-[error]: `h` returns `i32` but can reach the end of its body without returning a value at [tests/errors/type_missing_return.smelt:5:4]
+[error]: `h` returns `i32` but can reach the end of its body without returning a value at [tests/errors/type_missing_return.sabk:5:4]
      5 | fn h(x: i32) -> i32 { switch (x) { case 1: return 1; } }
        |    ^

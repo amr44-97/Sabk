@@ -1,0 +1,192 @@
+// Printing, and reading and writing files.
+//
+//   print("% is %\n", name, age)   formatted, to stdout: `%` is the next
+//   println("x = %", x)            value, of any type (see std/fmt)
+//   eprint(...), eprintln(...)     ... to stderr
+//   print(s)                       with no values, s is printed as it is
+//   print("%{.2}", f)              options in braces: two decimals; see
+//                                  std/fmt for the rest
+//   printf(format, ...)            C's printf
+//
+//   let data, err = read_file("notes.txt");   allocated; free(data.ptr)
+//   if (err != .None) println("can't read it: %", io_error_message(err));
+//   let text = read_file(path) or_return;      in a function that returns
+//                                              an IoError last
+//   write_file("out.txt", data)                an IoError, .None when it
+//   append_file("log.txt", line)               worked
+//   delete_file(path), file_exists(path)
+//   last_io_error()                            errno as an IoError, after a
+//                                              C call failed
+//
+// stdout goes through C's buffered stdio, so print and printf output stay
+// in order.
+
+import "std/fmt";
+import "std/mem";
+import "std/str";
+
+pub extern fn printf(format: *u8, ...) -> i32;
+extern fn fopen(path: *u8, mode: *u8) -> *void;
+extern fn fclose(file: *void) -> i32;
+extern fn fread(buffer: *void, size: usize, count: usize, file: *void) -> usize;
+extern fn fwrite(buffer: *void, size: usize, count: usize, file: *void) -> usize;
+extern fn ferror(file: *void) -> i32;
+extern fn remove(path: *u8) -> i32;
+extern fn access(path: *u8, mode: i32) -> i32;
+extern fn sabk_errno() -> i32; // the runtime's
+
+// ---- printing
+
+pub fn print(fmt: string, args: ..Any) #format { write_formatted(stdout, fmt, args); }
+
+pub fn println(fmt: string = "", args: ..Any) #format {
+    write_formatted(stdout, fmt, args);
+    write_text(stdout, "\n");
+}
+
+pub fn eprint(fmt: string, args: ..Any) #format { write_formatted(stderr, fmt, args); }
+
+pub fn eprintln(fmt: string = "", args: ..Any) #format {
+    write_formatted(stderr, fmt, args);
+    write_text(stderr, "\n");
+}
+
+// C's stdout (buffered) and stderr (not)
+extern let stdout: *void;
+extern let stderr: *void;
+
+fn write_formatted(file: *void, fmt: string, args: []Any) {
+    if (args.len == 0) {
+        write_text(file, fmt);
+        return;
+    }
+    let b = make_builder();
+    format_into(&b, fmt, args);
+    write_text(file, builder_string(&b));
+    builder_free(&b);
+}
+
+fn write_text(file: *void, s: string) {
+    if (s.len > 0)
+        fwrite(s.ptr, 1, s.len as usize, file);
+}
+
+// ---- files
+
+// Why a file operation failed; None when it didn't. `%` prints its name,
+// io_error_message(e) a description.
+pub enum IoError: Error {
+    NotFound,         // no such file, or a directory on the way is missing
+    PermissionDenied,
+    IsDirectory,      // where a file was expected
+    NotDirectory,     // a part of the path isn't a directory
+    AlreadyExists,
+    NoSpace,          // the disk is full
+    Other,
+}
+
+pub fn io_error_message(e: IoError) -> string {
+    return switch (e) {
+    case .None:             "no error";
+    case .NotFound:         "no such file or directory";
+    case .PermissionDenied: "permission denied";
+    case .IsDirectory:      "is a directory";
+    case .NotDirectory:     "not a directory";
+    case .AlreadyExists:    "already exists";
+    case .NoSpace:          "no space left on the device";
+    case .Other:            "input/output error";
+    };
+}
+
+// what errno says about the C call that just failed (POSIX numbers, which
+// Linux and macOS share)
+pub fn last_io_error() -> IoError {
+    return switch (sabk_errno()) {
+    case 2:     .NotFound;         // ENOENT
+    case 1, 13: .PermissionDenied; // EPERM, EACCES
+    case 21:    .IsDirectory;      // EISDIR
+    case 20:    .NotDirectory;     // ENOTDIR
+    case 17:    .AlreadyExists;    // EEXIST
+    case 28:    .NoSpace;          // ENOSPC
+    default:    .Other;
+    };
+}
+
+// the whole file, in memory from `a`: free(data.ptr, a) when done with it
+pub fn read_file(path: string, a: Allocator = context.allocator) -> (string, IoError) {
+    let c_path = to_cstring(path);
+    defer free(c_path);
+    let file = fopen(c_path, "rb");
+    if (file == null)
+        return .[], last_io_error();
+    defer fclose(file);
+
+    // in growing chunks, so files whose size isn't known up front (pipes,
+    // /proc) read too
+    let data = new([]u8, 4096, a);
+    let len = 0;
+    while (true) {
+        if (len == data.len) {
+            let bigger = resize(data.ptr, data.len, data.len * 2, 16, a) as *u8;
+            if (bigger == null) {
+                free(data.ptr, a);
+                return .[], .NoSpace;
+            }
+            data = bigger[0..data.len * 2];
+        }
+        let room = data.len - len;
+        let got = fread(&data[len], 1, room as usize, file) as isize;
+        len += got;
+        if (got < room) {
+            if (ferror(file) != 0) { // reading a directory ends up here
+                let err = last_io_error();
+                free(data.ptr, a);
+                return .[], err;
+            }
+            break; // the end of the file
+        }
+    }
+    return data[..len] as string, .None;
+}
+
+// replaces the file's contents with `data`, making the file if it's missing
+pub fn write_file(path: string, data: string) -> IoError {
+    return put_file(path, data, "wb");
+}
+
+// adds `data` at the end of the file, making the file if it's missing
+pub fn append_file(path: string, data: string) -> IoError {
+    return put_file(path, data, "ab");
+}
+
+fn put_file(path: string, data: string, mode: *u8) -> IoError {
+    let c_path = to_cstring(path);
+    defer free(c_path);
+    let file = fopen(c_path, mode);
+    if (file == null)
+        return last_io_error();
+    let size = data.len as usize;
+    if (fwrite(data.ptr, 1, size, file) != size) {
+        let err = last_io_error();
+        fclose(file);
+        return err;
+    }
+    if (fclose(file) != 0) // what was buffered is written now, and can fail
+        return last_io_error();
+    return .None;
+}
+
+pub fn delete_file(path: string) -> IoError {
+    let c_path = to_cstring(path);
+    defer free(c_path);
+    if (remove(c_path) != 0)
+        return last_io_error();
+    return .None;
+}
+
+// is there a file (or directory) at `path`?
+pub fn file_exists(path: string) -> bool {
+    let c_path = to_cstring(path);
+    defer free(c_path);
+    return access(c_path, 0) == 0; // F_OK
+}

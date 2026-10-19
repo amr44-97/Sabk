@@ -1,5 +1,5 @@
-src/main.smelt | dir [src] base [main.smelt] stem [main] ext [.smelt]
-main.smelt | dir [] base [main.smelt] stem [main] ext [.smelt]
+src/main.sabk | dir [src] base [main.sabk] stem [main] ext [.sabk]
+main.sabk | dir [] base [main.sabk] stem [main] ext [.sabk]
 /usr/lib/libc.so.6 | dir [/usr/lib] base [libc.so.6] stem [libc.so] ext [.6]
 /tmp | dir [/] base [tmp] stem [tmp] ext []
 a//b | dir [a] base [b] stem [b] ext []
@@ -7,7 +7,7 @@ dir/ | dir [dir] base [] stem [] ext []
 .bashrc | dir [] base [.bashrc] stem [.bashrc] ext []
 .. | dir [] base [..] stem [..] ext []
  | dir [] base [] stem [] ext []
-src/main.smelt src/x /abs
+src/main.sabk src/x /abs
 [x]
 a/./b/../c -> a/c
 /../x -> /x

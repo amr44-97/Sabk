@@ -1,4 +1,4 @@
 4 [2, 3, 4, 5]
 5
-tests/run/bounds_checks_off.smelt:15:21: panic: division by zero
+tests/run/bounds_checks_off.sabk:15:21: panic: division by zero
 [exit 134]

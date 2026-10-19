@@ -1,4 +1,4 @@
-# checks i128_test.smelt's output against Python's integers
+# checks i128_test.sabk's output against Python's integers
 import sys
 M = 1 << 128
 def w(v):            # two's complement wrap to 128 bits

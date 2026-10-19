@@ -1,0 +1,2560 @@
+// Translates the checked program into a single C11 file (with GNU C's
+// statement expressions, case ranges and range designators).
+//
+// The output is laid out as:
+//   includes and builtin typedefs, runtime core (panics, bounds checks)
+//   forward declarations of every struct-like type and enum typedefs
+//   function pointer typedefs
+//   struct, union, array and slice definitions (by-value dependencies first)
+//   runtime allocator support (needs the prelude's Context and Allocator)
+//   function prototypes, globals, function bodies, and C's main()
+//
+// The runtime's C is in runtime_start.c and runtime_new.c, baked in while
+// the compiler is compiled. They're pieces of the output, not C files of
+// their own.
+
+import "std/array";
+import "std/fmt";
+import "std/io";
+import "std/map";
+import "std/mem";
+import "std/os";
+import "std/path";
+import "std/str";
+import "ast";
+import "const";
+import "module";
+import "resolve";
+import "source";
+import "token";
+import "types";
+import "check";
+import "comptime";
+import "expressions";
+import "generics";
+import "lower";
+import "patterns";
+import "vm";
+
+const C_PRELUDE = #run read_text("src/runtime_start.c");
+const C_RUNTIME = #run read_text("src/runtime_new.c");
+
+fn read_text(path: string) -> string {
+    let text, err = read_file(path);
+    if (err != .None)
+        panic(tformat("can't read % (build from the repository's top): %", path, io_error_message(err)));
+    return text;
+}
+
+// names C (or the generated code) already uses
+const RESERVED = .[
+    "auto", "break", "case", "char", "const", "continue", "default", "do",
+    "double", "else", "enum", "extern", "float", "for", "goto", "if",
+    "inline", "int", "long", "register", "restrict", "return", "short",
+    "signed", "sizeof", "static", "struct", "switch", "typedef", "union",
+    "unsigned", "void", "volatile", "while", "_Bool", "_Alignof", "bool",
+    "true", "false", "NULL", "main", "ctx", "i8", "i16", "i32", "i64",
+    "isize", "u8", "u16", "u32", "u64", "usize", "f32", "f64", "rawptr",
+    "abort", "memset", "dprintf", "fflush",
+];
+
+enum ScopeKind { Fn, Block, Loop, Switch, Macro }
+
+struct Scope {
+    kind: ScopeKind;
+    ctx: string;          // the C name of this scope's `Context *`
+    defers: [..]*Node;
+    // Macro: a macro expansion
+    expansion: i32;
+    result: string;       // the variable holding its value, if it returns one
+    end_label: string;    // where its `return`s jump to
+    owner: *Node;         // Loop, Switch: the loop or switch it's the body of
+}
+
+struct Reached {
+    use: *Node;
+    from: *Node;          // the function or global it was used in
+}
+
+// Sabk evaluates left to right; C leaves the order of arguments and
+// operands open. The C of the parts, in temps declared in `prefix` when
+// the order could matter (wrapped as `({ prefix ...; })`)
+struct Ordered {
+    prefix: string;
+    values: [..]string;
+}
+
+pub struct CodeGen {
+    res: *Resolver;
+    c: *Checker;
+    error_count: isize;
+    // `#line` before each line of a function's C, so debuggers and C errors
+    // show the Sabk file and line; off for --emit-c unless --lines
+    line_directives: bool;
+    functions_total: isize;  // for --stats
+    functions_emitted: isize;
+
+    // output sections, joined at the end
+    fwd: [..]u8;
+    fn_typedefs: [..]u8;
+    defs: [..]u8;
+    helpers: [..]u8;
+    protos: [..]u8;
+    globals: [..]u8;
+    bodies: [..]u8;
+    out: *[..]u8;            // the section statements are written to
+    indent: isize;
+
+    // types
+    type_names: Map(*Type, string);
+    defined: Map(*Type, bool);
+    to_define: [..]*Type;
+    fn_type_count: i32;
+    tuple_count: i32;
+
+    // names
+    module_prefix: Map(*Module, string);
+    tmp_count: i32;
+
+    // per function
+    scopes: [..]Scope;
+    used_labels: Map(string, bool); // macro end labels a return jumps to
+    current_fn: *Node;
+    here: Token;                    // the Sabk code being written, for #line
+    line_paths: Map(*Module, string); // absolute paths for #line
+    static_init: bool;              // a global initializer: C needs
+                                    // constant syntax, no compound literals
+    // storage for the current function's slice literals, declared at its
+    // top: they live until it returns, wherever in it they're written
+    fn_storage: [..]u8;
+    // labeled loops and switches: their C labels' common start, and a
+    // switch's copy of its value (which `continue name = v` replaces)
+    labels: Map(*Node, string);
+    switch_values: Map(*Node, string);
+    // a labeled block's or switch expression's result: what `break name =
+    // v` sets
+    value_vars: Map(*Node, string);
+
+    // only what the program can reach from main is written out: functions
+    // and globals that something reachable uses
+    reachable: Map(*Node, bool);
+    to_scan: [..]*Node;
+    scanning: *Node;                 // the function or global being scanned
+    reached_from: Map(*Node, Reached); // where each was first reached
+
+    // type_info(T) and Any: a static TypeInfo per type, written once every
+    // function is (describing one type can need others)
+    type_info_names: Map(*Type, string);
+    type_info_queue: [..]*Type;
+    type_infos: string;
+}
+
+pub fn make_codegen(r: *Resolver, c: *Checker) -> CodeGen {
+    return .{ .res = r, .c = c, .line_directives = true };
+}
+
+/* ---------------------------------------------------------------- helpers */
+
+// the parts, joined
+fn cat(parts: ..string) -> string {
+    let total: isize = 0;
+    for (p in parts)
+        total += p.len;
+    let out: [..]u8;
+    out.allocator = context.temp_allocator;
+    array_reserve(&out, total);
+    for (p in parts)
+        append_string(&out, p);
+    return out as string;
+}
+
+fn spaces(n: isize) -> string {
+    let out: [..]u8;
+    out.allocator = context.temp_allocator;
+    for (i in 0..n)
+        array_add(&out, ' ');
+    return out as string;
+}
+
+fn num(n: i64) -> string { return tformat("%", n); }
+fn unum(n: u64) -> string { return tformat("%", n); }
+
+fn ts(g: *CodeGen) -> *Types { return &g.c.types; }
+
+// `bytes` as a C string literal
+pub fn c_string(bytes: string) -> string {
+    let s: [..]u8;
+    s.allocator = context.temp_allocator;
+    array_add(&s, '"');
+    for (c in bytes) {
+        // `?` is escaped to avoid trigraphs; everything unusual is octal,
+        // which (unlike \x) never runs into the next character
+        if (c == '"' || c == '\\' || c == '?') {
+            array_add(&s, '\\');
+            array_add(&s, c);
+        } else if (c >= 32 && c < 127) {
+            array_add(&s, c);
+        } else {
+            array_add(&s, '\\');
+            array_add(&s, '0' + (c >> 6));
+            array_add(&s, '0' + ((c >> 3) & 7));
+            array_add(&s, '0' + (c & 7));
+        }
+    }
+    array_add(&s, '"');
+    return s as string;
+}
+
+fn gen_error(g: *CodeGen, t: Token, message: string) {
+    say(g.res, .Error, t, message);
+    g.error_count++;
+}
+
+fn label_node(n: *Node) -> *Node {
+    switch (n.kind) {
+    case .Block{label}: return label;
+    case .While{label}: return label;
+    case .DoWhile{label}: return label;
+    case .For{label}: return label;
+    case .ForIn{label}: return label;
+    case .Switch{label}: return label;
+    default: return null;
+    }
+}
+
+fn is_extern_decl(d: *Node) -> bool {
+    switch (d.kind) {
+    case .Fn{is_extern}: return is_extern;
+    case .Let{is_extern}: return is_extern;
+    default: return false;
+    }
+}
+
+fn is_function(d: *Node) -> bool { return d.kind is .Fn{is_macro: false}; }
+
+fn conv_or_ty(n: *Node) -> *Type { return if (n.conv != null) n.conv else n.ty; }
+
+/* ------------------------------------------------------------------ names */
+
+fn global_name(g: *CodeGen, decl: *Node) -> string {
+    if ((decl.kind.tag == .Fn || decl.kind.tag == .Let) && is_extern_decl(decl))
+        return decl.tok.text; // C's own, under its own name
+    let prefix = map_get(&g.module_prefix, decl.owner) or_else "";
+    let name = if (prefix.len == 0) decl.tok.text else cat(prefix, "__", decl.tok.text);
+    // a generic instance is named after its types: max__i32, List__u8
+    for (arg in decl.instance_args)
+        name = cat(name, "__", type_ident(g, arg));
+    return name;
+}
+
+// user names can't clash with generated ones: those contain `__` and never
+// end in `_`, and a user name that would clash gets a `_` appended
+fn local_name(name: string) -> string {
+    for (r in RESERVED)
+        if (r == name)
+            return cat(name, "_");
+    if (contains(name, "__"))
+        return cat(name, "_");
+    return name;
+}
+
+// a local variable's C name; names from macro expansions get the
+// expansion's color, so a macro's `tmp` and its caller's `tmp` stay apart
+fn var_name(g: *CodeGen, d: *Node) -> string {
+    let name = local_name(d.tok.text);
+    let color = if (d.caller) g.res.expansions[d.color].parent else d.color;
+    return if (color != 0) cat(name, "__m", num(color)) else name;
+}
+
+fn tmp(g: *CodeGen, hint: string) -> string {
+    g.tmp_count++;
+    return format("%__%", hint, g.tmp_count);
+}
+
+fn location(g: *CodeGen, t: Token) -> string {
+    let m = module_of(g.res, t.text.ptr);
+    if (m == null)
+        return c_string("<unknown>");
+    return c_string(tformat("%:%:%", m.path, t.line, t.column));
+}
+
+/* ------------------------------------------------------------------ types */
+
+// an identifier describing `t`, used to name generated types
+fn type_ident(g: *CodeGen, t: *Type) -> string {
+    if (t.is_string) // apart from []u8: max(string) and max([]u8) differ
+        return "string";
+    if (t.kind == .Ptr)
+        return cat("ptr_", type_ident(g, t.elem));
+    return c_type(g, t);
+}
+
+// the C spelling of a function's result: C's void for void
+fn ret_type(g: *CodeGen, t: *Type) -> string {
+    return if (t.kind == .Void) "void" else c_type(g, t);
+}
+
+// the C spelling of `t`, declaring it on first use
+fn c_type(g: *CodeGen, t: *Type) -> string {
+    if (t.is_string) // the same C struct as []u8: converting is free
+        return c_type(g, slice_of(ts(g), ts(g).u8));
+    switch (t.kind) {
+    case .Void: return "sabk_void"; // as a value; a result is ret_type()'s `void`
+    case .Bool, .Int, .Float: return t.name;
+    case .Rawptr: return "rawptr"; // *void: the runtime's typedef of C's void *
+    case .Ptr: return cat(c_type(g, t.elem), "*");
+    case .Null: return "rawptr";
+    case .UntypedInt: return "i64";
+    case .UntypedFloat: return "f64";
+    case .UntypedString: return c_type(g, slice_of(ts(g), ts(g).u8));
+    case .Error:
+        // the checker reports every error before the code generator runs,
+        // so an error type here is a compiler bug, not a mistake in the
+        // program
+        eprint("[internal error]: an unresolved type reached the code generator\n");
+        g.error_count++;
+        return "void";
+    default:
+    }
+
+    let known = map_get(&g.type_names, t) or_else "";
+    if (known.len > 0)
+        return known;
+
+    let name = "";
+    switch (t.kind) {
+    case .Struct, .Union:
+        if (t.is_tuple) { // a function's several results, numbered
+            g.tuple_count++;
+            name = format("tuple__%", g.tuple_count);
+        } else {
+            name = format("%{}%", global_name(g, t.decl), if (t.part.len == 0) "" else cat("__", t.part));
+        }
+        print_to(&g.fwd, "typedef % % %;\n", if (t.kind == .Struct) "struct" else "union", name, name);
+        array_add(&g.to_define, t);
+    case .Array:
+        name = format("arr%__%", t.len, type_ident(g, t.elem));
+        print_to(&g.fwd, "typedef struct % %;\n", name, name);
+        array_add(&g.to_define, t);
+    case .Slice:
+        name = format("slice__%", type_ident(g, t.elem));
+        print_to(&g.fwd, "typedef struct % %;\n", name, name);
+        array_add(&g.to_define, t);
+    case .Growable:
+        name = format("grow__%", type_ident(g, t.elem));
+        print_to(&g.fwd, "typedef struct % %;\n", name, name);
+        array_add(&g.to_define, t);
+    case .Enum:
+        name = format("%{}%", global_name(g, t.decl), if (t.part.len == 0) "" else cat("__", t.part));
+        print_to(&g.fwd, "typedef % %;\n", c_type(g, t.elem), name);
+    case .Fn:
+        g.fn_type_count++;
+        name = format("fn__%", g.fn_type_count);
+        map_put(&g.type_names, t, name); // before the params, in case one mentions t
+        let params = cat(c_type(g, g.c.context_type), "*");
+        for (p in t.params)
+            params = cat(params, ", ", c_type(g, p));
+        print_to(&g.fn_typedefs, "typedef % (*%)(%);\n", ret_type(g, t.ret), name, params);
+    default:
+    }
+    map_put(&g.type_names, t, name);
+    return name;
+}
+
+fn by_value(g: *CodeGen, member: *Type) {
+    switch (member.kind) {
+    case .Struct, .Union, .Array, .Slice, .Growable: define_type(g, member);
+    default:
+    }
+}
+
+// emits the definition of a struct-like type after everything it holds by
+// value; things it only points at just need the forward declaration
+fn define_type(g: *CodeGen, of_type: *Type) {
+    let t = if (of_type.is_string) slice_of(ts(g), ts(g).u8) else of_type; // it's []u8's struct
+    if (map_has(&g.defined, t))
+        return;
+    map_put(&g.defined, t, true);
+    let name = c_type(g, t);
+    switch (t.kind) {
+    case .Struct, .Union:
+        for (f in t.fields)
+            by_value(g, f.ty);
+        print_to(&g.defs, "% % {\n", if (t.kind == .Struct) "struct" else "union", name);
+        for (f in t.fields)
+            print_to(&g.defs, "  % %;\n", c_type(g, f.ty), local_name(f.name));
+        append_string(&g.defs, "};\n\n");
+    case .Array:
+        by_value(g, t.elem);
+        // C has no zero-length arrays; keep at least one element
+        print_to(&g.defs, "struct % { % data[%]; };\n", name, c_type(g, t.elem), if (t.len != 0) t.len else 1);
+    case .Slice:
+        let elem = c_type(g, t.elem);
+        let fun = cat("static inline ", name, " ", name);
+        print_to(&g.defs, "struct % { % *ptr; isize len; };\n", name, elem);
+        // the helpers do pointer arithmetic on the element type, so they
+        // come after every definition: the element may be defined later,
+        // or contain this slice itself
+        // bounds-checked element access, evaluating the slice once
+        append_string(&g.helpers, cat("static inline ", elem, " *", name, "__at(", name,
+                      " s, isize i, const char *where) {\n  return &s.ptr[rt_index(i, s.len, where)];\n}\n"));
+        // x[lo..hi] of memory holding `len` elements, and of another slice
+        append_string(&g.helpers, cat(fun, "__sub(", elem, " *ptr, isize len, isize lo, isize hi, ",
+                      "const char *where) {\n  rt_slice_check(lo, hi, len, where);\n",
+                      "  return (", name, "){ptr + lo, hi - lo};\n}\n"));
+        append_string(&g.helpers, cat(fun, "__slice(", name, " s, isize lo, isize hi, const char ",
+                      "*where) {\n  return ", name, "__sub(s.ptr, s.len, lo, hi, where);\n}\n"));
+        append_string(&g.helpers, cat(fun, "__from(", name, " s, isize lo, const char *where) {\n",
+                      "  return ", name, "__sub(s.ptr, s.len, lo, s.len, where);\n}\n"));
+        // the same, unchecked: #no_bounds_check
+        append_string(&g.helpers, cat(fun, "__part(", elem, " *ptr, isize lo, isize hi) {\n",
+                      "  return (", name, "){ptr + lo, hi - lo};\n}\n"));
+        // new([]T, n): needs the runtime, which comes after the definitions
+        let ctx_type = c_type(g, g.c.context_type);
+        let allocator = c_type(g, g.c.allocator_type);
+        append_string(&g.helpers, cat(fun, "__make(", ctx_type, " *ctx, ", allocator, " a, isize ",
+                      "n, const char *where) {\n  if (n == 0)\n    return (", name,
+                      "){0};\n  return (", name, "){(", elem, " *)rt_new(ctx, ",
+                      "a, sizeof(", elem, ") * n, _Alignof(", elem, "), where), n};\n}\n"));
+    case .Growable:
+        // a []T's two fields first, so a view of the elements is those two
+        by_value(g, g.c.allocator_type);
+        let s = c_type(g, slice_of(ts(g), t.elem));
+        print_to(&g.defs, "struct % { % *ptr; isize len; isize cap; % allocator; };\n", name,
+                 c_type(g, t.elem), c_type(g, g.c.allocator_type));
+        append_string(&g.helpers, cat("static inline ", s, " ", name, "__view(", name,
+                      " g) {\n  return (", s, "){g.ptr, g.len};\n}\n"));
+    default:
+    }
+}
+
+fn define_pending_types(g: *CodeGen) {
+    // defining a type can declare new ones, so loop until nothing is left
+    let i: isize = 0;
+    while (i < g.to_define.len) {
+        define_type(g, g.to_define[i]);
+        i++;
+    }
+}
+
+/* ----------------------------------------------------------- declarations */
+
+fn fn_signature(g: *CodeGen, fun: *Node) -> string {
+    let t = fun.ty;
+    let params: [..]u8;
+    params.allocator = context.temp_allocator;
+    if (!is_extern_decl(fun))
+        print_to(&params, "% *ctx", c_type(g, g.c.context_type));
+    let k = 0; // `$T: Type` parameters aren't passed at run time
+    for (param in fn_params(fun)) {
+        if (is_type_param(param))
+            continue;
+        if (params.len > 0)
+            append_string(&params, ", ");
+        print_to(&params, "% %", c_type(g, t.params[k]), var_name(g, param));
+        k++;
+    }
+    if (fun.kind is .Fn{variadic: true})
+        append_string(&params, if (params.len == 0) "..." else ", ...");
+    if (params.len == 0)
+        append_string(&params, "void");
+    return tformat("% %(%)", ret_type(g, t.ret), global_name(g, fun), params as string);
+}
+
+fn emit_fn_prototype(g: *CodeGen, fun: *Node) {
+    // extern functions with a body are exported for C to call
+    print_to(&g.protos, "%{}%;\n", if (is_extern_decl(fun)) "" else "static ", fn_signature(g, fun));
+}
+
+fn emit_fn_body(g: *CodeGen, fun: *Node) {
+    let b = fn_body(fun);
+    if (b == null)
+        return;
+    g.current_fn = fun;
+    g.here = fun.tok;
+    let body = new([..]u8);
+    g.out = body;
+    g.fn_storage.len = 0;
+    g.indent = 1;
+
+    g.scopes.len = 0;
+    array_add(&g.scopes, Scope.{ .kind = .Fn, .ctx = "ctx" });
+    if (is_extern_decl(fun)) {
+        // called from C, which has no context to pass: start from the
+        // default
+        line(g, cat(c_type(g, g.c.context_type), " ctx__default = ", default_context(g), "(&rt_boot_context);"));
+        line(g, cat(c_type(g, g.c.context_type), " *ctx = &ctx__default;"));
+    }
+    emit_scope(g, block_list(b), .Block);
+    if (fun.ty.ret.is_failure)
+        line(g, "return 0;"); // its end: success
+    g.scopes.len = 0;
+
+    g.indent = 0;
+    g.here = fun.tok;
+    if (g.line_directives)
+        append_string(&g.bodies, line_directive(g));
+    print_to(&g.bodies, "%{}% {\n", if (is_extern_decl(fun)) "" else "static ", fn_signature(g, fun));
+    append_string(&g.bodies, g.fn_storage as string);
+    append_string(&g.bodies, body.* as string);
+    append_string(&g.bodies, "}\n\n");
+    g.out = &g.bodies;
+    g.current_fn = null;
+}
+
+fn emit_global(g: *CodeGen, d: *Node) {
+    if (d.kind.tag == .Const && d.cval.kind != .None)
+        return; // every use is replaced by the value
+    if (is_extern_decl(d)) { // C defines it
+        print_to(&g.globals, "extern % %;\n", c_type(g, d.ty), global_name(g, d));
+        return;
+    }
+    // a constant isn't `const` in C: an array constant can be viewed as a
+    // slice, whose elements aren't const (Sabk itself rejects assignments)
+    let decl = cat("static ", c_type(g, d.ty), " ", global_name(g, d));
+    let value = value_of(d);
+    if (value != null || has_defaults(g.c, d.ty)) {
+        g.static_init = true;
+        decl = cat(decl, " = ", if (value != null) expr(g, value) else default_value(g, d.ty));
+        g.static_init = false;
+    }
+    print_to(&g.globals, "%;\n", decl);
+}
+
+/* ------------------------------------------------------------- statements */
+
+fn line(g: *CodeGen, text: string) {
+    if (g.line_directives && g.current_fn != null)
+        append_string(g.out, line_directive(g));
+    append_string(g.out, spaces(g.indent * 2));
+    append_string(g.out, text);
+    array_add(g.out, '\n');
+}
+
+// `#line N "file"` for the code being written (`here`): code an #insert
+// made maps to the #insert, since there's no file to show
+fn line_directive(g: *CodeGen) -> string {
+    let t = g.here;
+    let m = module_of(g.res, t.text.ptr);
+    while (m != null && m.inserted_by != null) {
+        t = m.inserted_by.tok;
+        m = module_of(g.res, t.text.ptr);
+    }
+    if (m == null)
+        return "";
+    let path = map_get(&g.line_paths, m) or_else "";
+    if (path.len == 0) {
+        if (m == g.res.prelude) {
+            path = m.path;
+        } else {
+            let absolute, _ = path_absolute(m.path);
+            path = absolute;
+        }
+        map_put(&g.line_paths, m, path);
+    }
+    return tformat("#line % %\n", t.line, c_string(path));
+}
+
+fn current_ctx(g: *CodeGen) -> string {
+    let i = g.scopes.len;
+    while (i > 0) {
+        i--;
+        if (g.scopes[i].ctx.len > 0)
+            return g.scopes[i].ctx;
+    }
+    return "ctx";
+}
+
+fn changes_context(target: *Node) -> bool {
+    if (target.kind is .Values{items}) { // a, b = ...
+        for (t in items)
+            if (changes_context(t))
+                return true;
+        return false;
+    }
+    let e = target;
+    while (true) {
+        switch (e.kind) {
+        case .Member{object}: e = object; continue;
+        case .Grouped{inner}: e = inner; continue;
+        case .Index{object}: e = object; continue;
+        default:
+        }
+        break;
+    }
+    return e.kind.tag == .Context;
+}
+
+fn assigns_context(s: *Node) -> bool {
+    if (s.kind is .Assign{target})
+        return changes_context(target);
+    return false;
+}
+
+fn emit_scope(g: *CodeGen, stmts: []*Node, kind: ScopeKind) {
+    emit_scope_with(g, stmts, .{ .kind = kind });
+}
+
+fn emit_scope_with(g: *CodeGen, stmts: []*Node, scope: Scope) {
+    array_add(&g.scopes, scope);
+
+    // a scope that changes `context` works on its own copy; callees get a
+    // pointer to the copy and the parent's context is untouched
+    for (s in stmts) {
+        if (assigns_context(s)) {
+            let name = tmp(g, "ctx");
+            let c_name = c_type(g, g.c.context_type);
+            line(g, cat(c_name, " ", name, "__value = *", current_ctx(g), ";"));
+            line(g, cat(c_name, " *", name, " = &", name, "__value;"));
+            g.scopes[g.scopes.len - 1].ctx = name;
+            break;
+        }
+    }
+
+    for (s in stmts)
+        emit_stmt(g, s);
+    emit_defers_until(g, g.scopes.len - 1);
+    g.scopes.len--;
+}
+
+fn emit_body(g: *CodeGen, s: *Node, kind: ScopeKind, owner: *Node) {
+    let scope = Scope.{ .kind = kind, .owner = owner };
+    if (s.kind is .Block{stmts, gives_value: false})
+        emit_scope_with(g, stmts, scope);
+    else
+        emit_scope_with(g, .[s], scope);
+}
+
+// a labeled loop's, switch's or block's end, where `break name` goes: only
+// written when something goes there, so C doesn't warn of an unused label
+fn break_label(g: *CodeGen, n: *Node) {
+    let name = cat(label_of(g, n), "_break");
+    if (map_has(&g.used_labels, name))
+        line(g, cat(name, ":;"));
+}
+
+// the start of a labeled loop's or switch's C labels: L_break, L_continue
+// (a loop), L_top (a switch)
+fn label_of(g: *CodeGen, n: *Node) -> string {
+    let name = map_get(&g.labels, n) or_else "";
+    if (name.len == 0) {
+        name = tmp(g, label_node(n).tok.text);
+        map_put(&g.labels, n, name);
+    }
+    return name;
+}
+
+fn use_label(g: *CodeGen, name: string) { map_put(&g.used_labels, copy_string(name), true); }
+
+// runs the defers of scopes[from..] innermost first, each with the context
+// of the scope it was registered in
+fn emit_defers_until(g: *CodeGen, from: isize) {
+    let i = g.scopes.len;
+    while (i > from) {
+        i--;
+        let defers = g.scopes[i].defers;
+        let k = defers.len;
+        while (k > 0) {
+            k--;
+            let saved = g.scopes;
+            let working: [..]Scope;
+            array_append(&working, saved[..i + 1]);
+            let none: [..]*Node;
+            working[i].defers = none; // a defer doesn't re-run its siblings
+            g.scopes = working;
+            line(g, "{");
+            g.indent++;
+            emit_body(g, defers[k], .Block, null);
+            g.indent--;
+            line(g, "}");
+            g.scopes = saved;
+        }
+    }
+}
+
+// an assignment or expression statement without the `;`
+fn simple_stmt(g: *CodeGen, n: *Node) -> string {
+    switch (n.kind) {
+    case .Assign{target, value}:
+        if (target.kind is .Values{items: targets}) {
+            // a, b = ...: every value first, then each target in turn
+            let v = tmp(g, "values");
+            let t = value.ty;
+            let s = cat("({ ", c_type(g, t), " ", v, " = ", expr(g, value), "; ");
+            let wanted: [..]*Type; // a void target takes nothing (see result_slots)
+            for (x in targets)
+                array_add(&wanted, if (is_discard(x)) null else x.ty);
+            let slots = result_slots(wanted, if (t.is_tuple) t.fields.len else 1);
+            for (i in 0..targets.len) {
+                let x = targets[i];
+                if (is_discard(x) || slots[i] < 0)
+                    continue;
+                let v_i = if (t.is_tuple) cat(v, "._", num(slots[i])) else v;
+                let from = if (t.is_tuple) t.fields[slots[i]].ty else t;
+                if (i < n.convs.len && n.convs[i] != null)
+                    v_i = convert(g, v_i, from, n.convs[i]);
+                s = cat(s, expr(g, x), " = ", v_i, "; ");
+            }
+            return cat(s, "})");
+        }
+        let op = n.tok.text;
+        let t = target.ty;
+        if (!(op == "/=" || op == "%=") && targets_in_order(g, target, value)) {
+            // where it goes first, then the value: xs[i] = f() reads i first
+            let p = tmp(g, "target");
+            return cat("({ ", c_type(g, t), " *", p, " = &", expr(g, target), "; *", p, " ", op, " ",
+                       expr(g, value), "; })");
+        }
+        if ((op == "/=" || op == "%=") && t.kind == .Int) {
+            // the target once, through a pointer, then the checked division
+            let p = tmp(g, "target");
+            return cat("({ ", c_type(g, t), " *", p, " = &", expr(g, target), "; *", p, " = ",
+                       divide(g, n, t, op == "%=", cat("*", p), expr(g, value), value), "; })");
+        }
+        return cat(expr(g, target), " ", op, " ", expr(g, value));
+    case .Inc{target}:
+        return cat(expr(g, target), "++");
+    case .Dec{target}:
+        return cat(expr(g, target), "--");
+    case .ExprStmt{value, dropped}: // a call on its own: no value to make
+        if (value.kind.tag == .Call)
+            return expr_inner(g, value);
+        if (dropped) // `_ = x;`: a value used for nothing, on purpose
+            return cat("(void)", expr(g, value));
+        return expr(g, value);
+    default:
+        return "";
+    }
+}
+
+fn zero_value(t: *Type) -> string {
+    switch (t.kind) {
+    case .Struct, .Union, .Array, .Slice, .Growable: return "{0}";
+    case .Void: return "{}"; // an empty struct: no element to set
+    default: return "0";
+    }
+}
+
+// the statements of a body, written to a string at the current indent
+fn into_string(g: *CodeGen, target: *[..]u8) -> *[..]u8 {
+    let saved = g.out;
+    g.out = target;
+    return saved;
+}
+
+fn emit_stmt(g: *CodeGen, n: *Node) {
+    if (n.tok.text.ptr != null) // where its C lines come from
+        g.here = n.tok;
+    switch (n.kind) {
+    case .Block{stmts, label, gives_value: false}:
+        line(g, "{");
+        g.indent++;
+        emit_scope_with(g, stmts, .{ .kind = .Block, .owner = n }); // `break name;` finds a labeled one
+        g.indent--;
+        line(g, "}");
+        if (label != null)
+            break_label(g, n);
+
+    case .Const{value}:
+        if (n.cval.kind != .None)
+            return; // every use is replaced by the value
+        line(g, cat(c_type(g, n.ty), " ", var_name(g, n), " = ", expr(g, value), ";"));
+
+    case .Let{value, uninit}:
+        if (uninit) { // `= ---`: C's own uninitialized local
+            line(g, cat(c_type(g, n.ty), " ", var_name(g, n), ";"));
+            return;
+        }
+        line(g, cat(c_type(g, n.ty), " ", var_name(g, n), " = ",
+                    if (value != null) expr(g, value) else default_value(g, n.ty), ";"));
+
+    case .LetValues{names, values}:
+        if (values == null) { // let a, b = x, y: each name has its own value
+            for (d in names) {
+                if (d.tok.text == "_")
+                    line(g, cat("(void)(", expr(g, value_of(d)), ");"));
+                else
+                    emit_stmt(g, d);
+            }
+            return;
+        }
+        // let q, r = divide(a, b): the results, then a variable for each; a
+        // void name takes nothing when the void result is left out
+        let v = tmp(g, "values");
+        let t = values.ty;
+        line(g, cat(c_type(g, t), " ", v, " = ", expr(g, values), ";"));
+        let name_types: [..]*Type;
+        for (d in names)
+            array_add(&name_types, d.ty);
+        let slots = result_slots(name_types, if (t.is_tuple) t.fields.len else 1);
+        for (i in 0..names.len) {
+            let d = names[i];
+            if (d.tok.text == "_")
+                continue;
+            let value = if (slots[i] < 0) "(sabk_void){}" else if (t.is_tuple) cat(v, "._", num(slots[i])) else v;
+            line(g, cat(c_type(g, d.ty), " ", var_name(g, d), " = ", value, ";"));
+        }
+
+    case .ExprStmt{value}:
+        // a macro used as a statement is written out right here, so what
+        // it declares or defers for its caller lives in the caller's block
+        if (value.kind.tag == .MacroExpansion) {
+            emit_expansion(g, value);
+            return;
+        }
+        if (value.kind.tag == .Run)
+            return; // `#run f();` ran while compiling
+        line(g, cat(simple_stmt(g, n), ";"));
+
+    case .Assign, .Inc, .Dec:
+        line(g, cat(simple_stmt(g, n), ";"));
+
+    case .Return{value}:
+        emit_return(g, n, value);
+
+    case .Break{value}:
+        emit_leave(g, n, true, value);
+    case .Continue{value}:
+        emit_leave(g, n, false, value);
+
+    case .Defer{stmt}:
+        if (n.caller) {
+            // `defer: runs when the scope the macro was called from ends
+            let i = g.scopes.len - 1;
+            while (i >= 1) {
+                if (g.scopes[i].kind == .Macro && g.scopes[i].expansion == n.color) {
+                    array_add(&g.scopes[i - 1].defers, stmt);
+                    return;
+                }
+                i--;
+            }
+        }
+        array_add(&g.scopes[g.scopes.len - 1].defers, stmt);
+
+    case .If{cond, then, else_, gives_value: false}:
+        // names bound by `is` in the condition: declared around the if
+        let bindings = bindings_of(g, cond, 1);
+        if (bindings.len > 0) {
+            line(g, "{");
+            append_string(g.out, bindings);
+            g.indent++;
+        }
+        line(g, cat("if (", expr(g, cond), ") {"));
+        g.indent++;
+        emit_body(g, then, .Block, null);
+        g.indent--;
+        if (else_ != null) {
+            line(g, "} else {");
+            g.indent++;
+            emit_body(g, else_, .Block, null);
+            g.indent--;
+        }
+        line(g, "}");
+        if (bindings.len > 0) {
+            g.indent--;
+            line(g, "}");
+        }
+
+    case .StaticIf:
+        // only the branch the checker picked exists in the C
+        let taken = static_if_branch(n);
+        if (taken != null) {
+            line(g, "{");
+            g.indent++;
+            emit_body(g, taken, .Block, null);
+            g.indent--;
+            line(g, "}");
+        }
+
+    case .While{cond, body, label}:
+        // names bound by `is`, for the whole loop
+        let bindings = bindings_of(g, cond, 1);
+        let binds = bindings.len > 0;
+        if (binds) {
+            line(g, "{");
+            append_string(g.out, bindings);
+            g.indent++;
+        }
+        line(g, cat("while (", expr(g, cond), ") {"));
+        g.indent++;
+        emit_body(g, body, .Loop, n);
+        if (label != null)
+            line(g, cat(label_of(g, n), "_continue:;"));
+        g.indent--;
+        line(g, "}");
+        if (label != null)
+            break_label(g, n);
+        if (binds) {
+            g.indent--;
+            line(g, "}");
+        }
+
+    case .DoWhile{body, cond, label}:
+        line(g, "do {");
+        g.indent++;
+        emit_body(g, body, .Loop, n);
+        if (label != null)
+            line(g, cat(label_of(g, n), "_continue:;"));
+        g.indent--;
+        line(g, cat("} while (", expr(g, cond), ");"));
+        if (label != null)
+            break_label(g, n);
+
+    case .For(f):
+        // braces scope the init variable to the loop
+        line(g, "{");
+        g.indent++;
+        if (f.init != null)
+            emit_stmt(g, f.init);
+        line(g, cat("for (; ", if (f.cond != null) expr(g, f.cond) else "", "; ",
+                    if (f.step != null) simple_stmt(g, f.step) else "", ") {"));
+        g.indent++;
+        emit_body(g, f.body, .Loop, n);
+        if (f.label != null)
+            line(g, cat(label_of(g, n), "_continue:;"));
+        g.indent--;
+        line(g, "}");
+        if (f.label != null)
+            break_label(g, n);
+        g.indent--;
+        line(g, "}");
+
+    case .ForIn:
+        emit_for_in(g, n);
+
+    case .Switch{gives_value: false}:
+        emit_switch(g, n, "");
+
+    default:
+    }
+}
+
+fn has_defers(g: *CodeGen) -> bool {
+    for (s in g.scopes)
+        if (s.defers.len > 0)
+            return true;
+    return false;
+}
+
+fn emit_return(g: *CodeGen, n: *Node, value: *Node) {
+    if (n.decl != null) {
+        // returning from a macro: set its value, run its defers, jump to
+        // its end
+        let color: i32 = 0;
+        if (n.decl.kind is .MacroExpansion{expansion})
+            color = expansion;
+        let target = g.scopes.len;
+        while (target > 0) {
+            target--;
+            if (g.scopes[target].kind == .Macro && g.scopes[target].expansion == color)
+                break;
+        }
+        let result, end_label = g.scopes[target].result, g.scopes[target].end_label;
+        if (value != null)
+            line(g, cat(result, " = ", expr(g, value), ";"));
+        emit_defers_until(g, target);
+        line(g, cat("goto ", end_label, ";"));
+        use_label(g, end_label);
+        return;
+    }
+    if (value != null && g.current_fn.ty.ret.kind == .Void) {
+        // return g(); or return .{}; where void is returned: C returns
+        // nothing, so the value is only evaluated
+        line(g, cat(if (value.kind.tag == .Call) expr_inner(g, value) else cat("(void)", expr(g, value)), ";"));
+        emit_defers_until(g, 0);
+        line(g, "return;");
+        return;
+    }
+    if (!has_defers(g)) {
+        line(g, if (value != null) cat("return ", expr(g, value), ";") else "return;");
+        return;
+    }
+    // the value is computed before the defers run
+    let v = "";
+    if (value != null) {
+        v = tmp(g, "ret");
+        line(g, cat(c_type(g, g.current_fn.ty.ret), " ", v, " = ", expr(g, value), ";"));
+    }
+    emit_defers_until(g, 0);
+    line(g, if (value != null) cat("return ", v, ";") else "return;");
+}
+
+fn emit_leave(g: *CodeGen, n: *Node, is_break: bool, value: *Node) {
+    if (n.decl != null) { // labeled: C's break and continue only reach the
+                          // innermost, so this is a goto, after the defers
+        let target = g.scopes.len;
+        while (target > 0) {
+            target--;
+            if (g.scopes[target].owner == n.decl)
+                break;
+        }
+        let name = label_of(g, n.decl);
+        if (!is_break && value != null) {
+            // continue state = value: the value first, then run the switch
+            // again with it
+            let subject: *Node = null;
+            if (n.decl.kind is .Switch{value: s})
+                subject = s;
+            let t = conv_or_ty(subject);
+            let next = tmp(g, "next");
+            line(g, "{");
+            g.indent++;
+            line(g, cat(c_type(g, t), " ", next, " = ", expr(g, value), ";"));
+            emit_defers_until(g, target);
+            line(g, cat(map_get(&g.switch_values, n.decl) or_else "", " = ", next, ";"));
+            line(g, cat("goto ", name, "_top;"));
+            g.indent--;
+            line(g, "}");
+            return;
+        }
+        if (is_break && value != null) {
+            // break name = value: the value first, then the defers
+            let t = conv_or_ty(value);
+            let v = tmp(g, "given");
+            line(g, "{");
+            g.indent++;
+            line(g, cat(c_type(g, t), " ", v, " = ", expr(g, value), ";"));
+            emit_defers_until(g, target);
+            line(g, cat(map_get(&g.value_vars, n.decl) or_else "", " = ", v, ";"));
+            line(g, cat("goto ", name, "_break;"));
+            use_label(g, cat(name, "_break"));
+            g.indent--;
+            line(g, "}");
+            return;
+        }
+        emit_defers_until(g, target);
+        let suffix = if (is_break) "_break" else "_continue";
+        line(g, cat("goto ", name, suffix, ";"));
+        use_label(g, cat(name, suffix));
+        return;
+    }
+    // run the defers of every scope being left
+    let target = g.scopes.len;
+    while (target > 0) {
+        target--;
+        let kind = g.scopes[target].kind;
+        if (kind == .Loop || (kind == .Switch && is_break))
+            break;
+    }
+    emit_defers_until(g, target);
+    line(g, if (is_break) "break;" else "continue;");
+}
+
+fn emit_for_in(g: *CodeGen, n: *Node) {
+    let iterable: *Node = null;
+    let range_end: *Node = null;
+    let body: *Node = null;
+    let label: *Node = null;
+    let index: *Node = null;
+    if (n.kind is .ForIn(f))
+        iterable, range_end, body, label, index = f.iterable, f.range_end, f.body, f.label, f.index;
+    let var = var_name(g, n);
+    let var_type = c_type(g, n.ty);
+    line(g, "{");
+    g.indent++;
+    if (range_end != null) {
+        // for (i in a..b): the end is evaluated once
+        let end = tmp(g, "end");
+        line(g, cat(var_type, " ", end, " = ", expr(g, range_end), ";"));
+        line(g, cat("for (", var_type, " ", var, " = ", expr(g, iterable), "; ", var, " < ", end, "; ", var, "++) {"));
+        g.indent++;
+        emit_body(g, body, .Loop, n);
+        if (label != null)
+            line(g, cat(label_of(g, n), "_continue:;"));
+        g.indent--;
+        line(g, "}");
+    } else {
+        // for (x in xs): xs is evaluated once, x is a copy of each element
+        let t = iterable.ty;
+        let s = tmp(g, "seq");
+        let i = if (index != null) var_name(g, index) else tmp(g, "i"); // the count is the index
+        let elem = "";
+        let len = "";
+        line(g, cat(c_type(g, t), " ", s, " = ", expr(g, iterable), ";"));
+        if (t.kind == .Array) {
+            elem = cat(s, ".data[", i, "]");
+            len = unum(t.len);
+        } else {
+            elem = cat(s, ".ptr[", i, "]");
+            len = cat(s, ".len");
+        }
+        line(g, cat("for (isize ", i, " = 0; ", i, " < ", len, "; ", i, "++) {"));
+        g.indent++;
+        line(g, cat(var_type, " ", var, " = ", elem, ";"));
+        emit_body(g, body, .Loop, n);
+        if (label != null)
+            line(g, cat(label_of(g, n), "_continue:;"));
+        g.indent--;
+        line(g, "}");
+    }
+    if (label != null)
+        break_label(g, n);
+    g.indent--;
+    line(g, "}");
+}
+
+// what declare_bindings writes for `cond`, at the indent plus `deeper`
+fn bindings_of(g: *CodeGen, cond: *Node, deeper: isize) -> string {
+    let bindings = new([..]u8);
+    let saved = into_string(g, bindings);
+    g.indent += deeper;
+    declare_bindings(g, cond);
+    g.indent -= deeper;
+    g.out = saved;
+    return bindings.* as string;
+}
+
+// writes a macro expansion's statements in place and returns the name of
+// the variable holding its value ("" if it has none)
+fn emit_expansion(g: *CodeGen, x: *Node) -> string {
+    let stmts: []*Node;
+    let color: i32 = 0;
+    if (x.kind is .MacroExpansion{stmts: s, expansion: e})
+        stmts, color = s, e;
+    let scope = Scope.{ .kind = .Macro, .expansion = color, .end_label = tmp(g, "macro_end") };
+    if (x.ty.kind != .Void) {
+        scope.result = tmp(g, "result");
+        line(g, cat(c_type(g, x.ty), " ", scope.result, ";"));
+    }
+    let result, end_label = scope.result, scope.end_label;
+    emit_scope_with(g, stmts, scope);
+    if (map_has(&g.used_labels, end_label))
+        line(g, cat(end_label, ":;"));
+    return result;
+}
+
+/* ------------------------------------------------------------ expressions */
+
+fn expr(g: *CodeGen, n: *Node) -> string {
+    if (n.conv != null && n.conv.kind == .Slice && n.ty.kind == .Array)
+        return array_view(g, n);
+    let value = expr_inner(g, n);
+    // a call returning void, used as a value: C's void isn't one, so the
+    // call runs and the value is void's own
+    if (n.kind.tag == .Call && n.ty != null && n.ty.kind == .Void)
+        value = cat("({ ", value, "; (sabk_void){}; })");
+    if (n.conv != null)
+        return convert(g, value, n.ty, n.conv);
+    return value;
+}
+
+// an array where a slice is expected: a view of it, or of a copy of a
+// temporary, kept until the function returns like a slice literal's
+// elements
+fn array_view(g: *CodeGen, n: *Node) -> string {
+    let len = unum(n.ty.len);
+    // at the top level, a temporary is a C compound literal, which lasts
+    // the whole program there
+    if (is_place(n) || g.static_init || g.current_fn == null)
+        return compound(g, n.conv, cat("(", expr_inner(g, n), ").data, ", len));
+    let name = tmp(g, "array");
+    print_to(&g.fn_storage, "  % %;\n", c_type(g, n.ty), name);
+    return cat("(", name, " = ", expr_inner(g, n), ", ", compound(g, n.conv, cat(name, ".data, ", len)), ")");
+}
+
+// writes out one of the checker's implicit conversions
+fn convert(g: *CodeGen, value: string, from: *Type, to: *Type) -> string {
+    if (to == g.c.any_type) // a pointer to a copy of the value, and its type
+        return compound(g, to, cat(".value = (", c_type(g, from), "[1]){", value, "}, .info = ", type_info_ref(g, from)));
+    if (from.kind == .Growable) // [..]T -> []T, and [..]u8 -> string
+        return cat(c_type(g, from), "__view(", value, ")");
+    if (to.is_string) // []u8 as text: the same C struct
+        return value;
+    if (to.kind == .Slice) // *[N]T -> []T
+        return compound(g, to, cat("(", value, ")->data, ", unum(from.elem.len)));
+    if (to.is_failure && from != to) { // a failure enum -> Error (a tagged one by its tag)
+        let id = map_get(&g.c.error_ids, from) or_else 0;
+        let v = if (from.is_tagged) cat("(", value, ").tag") else value;
+        return cat("((", c_type(g, to), ")rt_error(", unum(id as u64), ", (u64)(", v, ")))");
+    }
+    return cat("((", c_type(g, to), ")(", value, "))");
+}
+
+// `(T){body}`, or just `{body}` inside a global initializer
+fn compound(g: *CodeGen, t: *Type, body: string) -> string {
+    if (g.static_init)
+        return cat("{", body, "}");
+    return cat("((", c_type(g, t), "){", body, "})");
+}
+
+extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+
+fn constant(g: *CodeGen, k: Const, t: *Type) -> string {
+    switch (k.kind) {
+    case .Bool:
+        return if (k.i.lo != 0) "true" else "false";
+    case .Int:
+        let lit = "";
+        if (i128_eq(k.i, i128(-9223372036854775807 - 1)))
+            lit = "(-9223372036854775807LL - 1)";
+        else if (i128_fits(k.i, 64, true))
+            lit = cat(i128_to_string(k.i), "LL");
+        else
+            lit = cat(i128_to_string(k.i), "ULL");
+        return cat("((", c_type(g, t), ")", lit, ")");
+    case .Float:
+        // the shortest digits that read back as the same f64
+        let buffer: [64]u8 = ---;
+        snprintf(buffer.ptr, buffer.len as usize, "%.17g", k.f);
+        let lit = copy_string(from_cstring(buffer.ptr));
+        if (lit == "inf" || lit == "-inf" || lit == "nan" || lit == "-nan")
+            lit = if (lit[0] == '-') "(-1.0/0.0)" else if (lit[1] == 'a') "(0.0/0.0)" else "(1.0/0.0)";
+        else if (!contains(lit, ".") && !contains(lit, "e"))
+            lit = cat(lit, ".0");
+        return cat("((", c_type(g, t), ")", lit, ")");
+    default:
+        return "";
+    }
+}
+
+fn string_literal(g: *CodeGen, n: *Node) -> string {
+    let bytes = string_literal_text(n);
+    let lit = cat("(u8*)", c_string(bytes));
+    if (n.ty.kind == .Ptr)
+        return cat("(", lit, ")");
+    return compound(g, slice_of(ts(g), ts(g).u8), cat(lit, ", ", num(bytes.len as i64)));
+}
+
+// a GNU C statement expression around what `write` puts in `body`
+fn statement_expression(g: *CodeGen, body: string, saved_indent: isize) -> string {
+    return cat("({\n", body, spaces(saved_indent * 2), "})");
+}
+
+fn expr_inner(g: *CodeGen, n: *Node) -> string {
+    if (n.cval.kind != .None)
+        return constant(g, n.cval, n.ty);
+
+    switch (n.kind) {
+    case .String:
+        return string_literal(g, n);
+
+    case .Null:
+        if (n.ty.kind == .Slice)
+            return compound(g, n.ty, "0");
+        return cat("((", c_type(g, n.ty), ")0)");
+
+    case .Context:
+        return cat("(*", current_ctx(g), ")");
+
+    case .Identifier, .Member:
+        let d = n.decl;
+        if (d != null) {
+            // a declared name: local, parameter, global or module member
+            if (d.owner != null)
+                return global_name(g, d);
+            return var_name(g, d);
+        }
+        // a field, a slice's len / ptr, or an array's ptr: its data, which
+        // C turns into a pointer to the first element
+        let object: *Node = null;
+        if (n.kind is .Member{object: o})
+            object = o;
+        let base = object.ty;
+        let arrow = if (base.kind == .Ptr) "->" else ".";
+        let held = if (base.kind == .Ptr) nonnull(g, expr(g, object), n.tok) else expr(g, object);
+        if ((if (base.kind == .Ptr) base.elem else base).kind == .Array)
+            return cat("(", held, ")", arrow, "data");
+        return cat("(", held, ")", arrow, local_name(n.tok.text));
+
+    case .Grouped{inner}:
+        return cat("(", expr(g, inner), ")");
+
+    case .Binary{op, lhs, rhs}:
+        switch (op) {
+        case .Lt, .Gt, .LtEq, .GtEq, .EqEq, .NotEq, .And, .Or:
+            if ((op == .EqEq || op == .NotEq) && conv_or_ty(lhs).is_string)
+                return cat(if (op == .NotEq) "!" else "", string_equal(g, expr(g, lhs), expr(g, rhs))); // in order already
+            if (op == .And || op == .Or) // ordered in C
+                return cat("(", expr(g, lhs), " ", n.tok.text, " ", expr(g, rhs), ")");
+            let o = ordered(g, .[lhs, rhs]);
+            return in_order(o, cat("(", o.values[0], " ", n.tok.text, " ", o.values[1], ")"));
+        default:
+            if ((op == .Div || op == .Mod) && n.ty.kind == .Int) {
+                let o = ordered(g, .[lhs, rhs]);
+                return in_order(o, divide(g, n, n.ty, op == .Mod, o.values[0], o.values[1], rhs));
+            }
+            let o = ordered(g, .[lhs, rhs]);
+            let value = cat(o.values[0], " ", n.tok.text, " ", o.values[1]);
+            // C does small integer arithmetic in int; cast back so u8 wraps
+            if (n.ty.kind == .Int)
+                return in_order(o, cat("((", c_type(g, n.ty), ")(", value, "))"));
+            return in_order(o, cat("(", value, ")"));
+        }
+
+    case .Unary{op, operand}:
+        switch (op) {
+        case .Neg, .BitNot:
+            let value = cat(n.tok.text, expr(g, operand));
+            if (n.ty.kind == .Int)
+                return cat("((", c_type(g, n.ty), ")(", value, "))");
+            return cat("(", value, ")");
+        case .Not:
+            return cat("(!", expr(g, operand), ")");
+        case .AddressOf:
+            return cat("(&", expr(g, operand), ")");
+        default:
+            return internal_error(g, n);
+        }
+
+    case .Deref{pointer}:
+        if (pointer.ty.kind == .Rawptr) // a void, read through a *void
+            return cat("(*(sabk_void *)", expr(g, pointer), ")");
+        return cat("(*", nonnull(g, expr(g, pointer), n.tok), ")");
+
+    case .MacroExpansion:
+        // a macro used as a value: a GNU C statement expression, ({ ...; v; })
+        let saved_indent = g.indent;
+        let body = new([..]u8);
+        let saved = into_string(g, body);
+        g.indent++;
+        let result = emit_expansion(g, n);
+        if (result.len > 0)
+            line(g, cat(result, ";"));
+        g.out = saved;
+        g.indent = saved_indent;
+        return statement_expression(g, body.* as string, saved_indent);
+
+    case .Index:
+        return index(g, n);
+    case .Call:
+        return call(g, n);
+    case .StructInit:
+        // `.{...}` can build an array or slice too
+        if (n.ty.kind == .Array || n.ty.kind == .Slice)
+            return array_literal(g, n);
+        return struct_init(g, n);
+
+    case .ArrayLiteral:
+        return array_literal(g, n);
+
+    case .TypeInfo{of}:
+        return type_info_ref(g, of.ty);
+
+    case .Is:
+        return is_test(g, n);
+
+    case .Values: // the results `return a, b;` gives
+        return struct_init(g, n);
+
+    case .OrReturn:
+        return gen_or_return(g, n);
+
+    case .OrElse:
+        return gen_or_else(g, n);
+
+    case .Switch{gives_value: true}:
+        // a GNU C statement expression: the switch sets the result
+        let saved_indent = g.indent;
+        let body = new([..]u8);
+        let saved = into_string(g, body);
+        g.indent++;
+        let result = tmp(g, "value");
+        line(g, cat(c_type(g, n.ty), " ", result, ";"));
+        map_put(&g.value_vars, n, result);
+        emit_switch(g, n, result);
+        line(g, cat(result, ";"));
+        g.out = saved;
+        g.indent = saved_indent;
+        return statement_expression(g, body.* as string, saved_indent);
+
+    case .If{cond, then, else_, gives_value: true}:
+        // C's ?:, with the names `is` binds declared first
+        let bindings = bindings_of(g, cond, 0);
+        let choice = cat("(", expr(g, cond), " ? ", expr(g, then), " : ", expr(g, else_), ")");
+        if (bindings.len == 0)
+            return choice;
+        return cat("({\n", bindings, spaces(g.indent * 2), choice, "; })");
+
+    case .Block{stmts, gives_value: true}:
+        // a GNU C statement expression: `break name = v` sets the result
+        // and leaves
+        let saved_indent = g.indent;
+        let body = new([..]u8);
+        let saved = into_string(g, body);
+        g.indent++;
+        let result = tmp(g, "value");
+        line(g, cat(c_type(g, n.ty), " ", result, ";"));
+        map_put(&g.value_vars, n, result);
+        line(g, "{");
+        g.indent++;
+        emit_scope_with(g, stmts, .{ .kind = .Block, .owner = n });
+        g.indent--;
+        line(g, "}");
+        break_label(g, n);
+        line(g, cat(result, ";"));
+        g.out = saved;
+        g.indent = saved_indent;
+        return statement_expression(g, body.* as string, saved_indent);
+
+    case .VariantValue{payload}:
+        // a tagged enum: the tag, and the value of the variant it names
+        let tag = constant(g, n.decl.cval, n.ty.fields[0].ty);
+        let body = cat(".tag = ", tag);
+        if (payload != null)
+            body = cat(body, ", .payload.", local_name(n.decl.tok.text), " = ", expr(g, payload));
+        return compound(g, n.ty, body);
+
+    case .VariantAccess{object, checked}:
+        return variant_access(g, n, object, checked);
+
+    case .Cast{value}:
+        if (value.ty.kind == .Growable && n.ty.kind == .Slice)
+            return convert(g, expr(g, value), value.ty, n.ty);
+        if (value.ty.kind == .Slice || value.ty == n.ty)
+            return expr(g, value); // a string literal or a no-op
+        return cat("((", c_type(g, n.ty), ")(", expr(g, value), "))");
+
+    case .Slice:
+        return slice(g, n);
+
+    case .New:
+        return new_value(g, n);
+
+    default:
+        return internal_error(g, n);
+    }
+}
+
+// x.Some: the value a variant holds; checked (when bounds are) to be that
+// variant, as a place where it is one, so it can be assigned to
+fn variant_access(g: *CodeGen, n: *Node, object: *Node, checked: bool) -> string {
+    let through = object.ty.kind == .Ptr;
+    let t = if (through) object.ty.elem else object.ty;
+    let field = cat("payload.", local_name(n.decl.tok.text));
+    let check = checked && checks_bounds(g);
+    if (!check) {
+        if (through)
+            return cat("(", nonnull(g, expr(g, object), n.tok), ")->", field);
+        return cat("(", expr(g, object), ").", field);
+    }
+    let tag = constant(g, n.decl.cval, t.fields[0].ty);
+    let v = tmp(g, "variant");
+    let panic = cat("rt_panic(", location(g, n.tok), ", ", c_string(tformat("the value isn't .%", n.decl.tok.text)), ")");
+    if (through || is_place(object)) {
+        let address = if (through) nonnull(g, expr(g, object), n.tok) else cat("&", expr(g, object));
+        return cat("(*({ ", c_type(g, t), " *", v, " = ", address, "; if (", v, "->tag != ", tag, ") ", panic, "; &", v,
+                   "->", field, "; }))");
+    }
+    return cat("({ ", c_type(g, t), " ", v, " = ", expr(g, object), "; if (", v, ".tag != ", tag, ") ", panic, "; ", v,
+               ".", field, "; })");
+}
+
+// every expression the checker accepts is handled; reaching here is a
+// compiler bug, never a silent 0 in the program
+fn internal_error(g: *CodeGen, n: *Node) -> string {
+    eprint(tformat("[internal error]: the code generator can't handle %\n", old_shape(n).tag));
+    g.error_count++;
+    return "0";
+}
+
+fn new_value(g: *CodeGen, n: *Node) -> string {
+    let first: *Node = null;
+    let second: *Node = null;
+    let value: *Node = null;
+    if (n.kind is .New{first: a, second: b, value: v})
+        first, second, value = a, b, v;
+    if (n.ty.kind == .Slice) {
+        let allocator = if (second != null) expr(g, second) else cat("(*", current_ctx(g), ").allocator");
+        let made = cat(c_type(g, n.ty), "__make(", current_ctx(g), ", ", allocator, ", ", expr(g, first), ", ",
+                       location(g, n.tok), ")");
+        if (!has_defaults(g.c, n.ty.elem))
+            return made;
+        // each element starts as its type's defaults
+        let s = tmp(g, "new");
+        return cat("({ ", c_type(g, n.ty), " ", s, " = ", made, "; for (isize i = 0; i < ", s, ".len; i++) ", s,
+                   ".ptr[i] = ", default_value(g, n.ty.elem), "; ", s, "; })");
+    }
+    let of = n.ty.elem;
+    let t = c_type(g, of);
+    let allocator = if (first != null) expr(g, first) else cat("(*", current_ctx(g), ").allocator");
+    let made = cat("((", t, "*)rt_new(", current_ctx(g), ", ", allocator, ", sizeof(", t, "), _Alignof(", t, "), ",
+                   location(g, n.tok), "))");
+    // new(value), or new(T) of a type with defaults: filled in
+    let v = if (value != null) expr(g, value) else if (has_defaults(g.c, of)) default_value(g, of) else "";
+    if (v.len == 0)
+        return made;
+    let p = tmp(g, "new");
+    return cat("({ ", t, " *", p, " = ", made, "; *", p, " = ", v, "; ", p, "; })");
+}
+
+// whether the last value of `values` (C, a tuple or one value of type
+// `t`) says it failed: a false bool, or an enum other than 0
+fn failed(values: string, t: *Type) -> string {
+    let flag = values;
+    let flag_type = t;
+    if (t.is_tuple) {
+        flag = cat(flag, "._", num(t.fields.len - 1));
+        flag_type = t.fields[t.fields.len - 1].ty;
+    }
+    if (flag_type.is_tagged) // a tagged error enum: its tag
+        flag = cat("(", flag, ").tag");
+    return if (flag_type.kind == .Bool) cat("!", flag) else cat(flag, " != 0");
+}
+
+// f() or_return: a GNU C statement expression that returns from the
+// function when f's last value says it failed, and is f's other values
+fn gen_or_return(g: *CodeGen, n: *Node) -> string {
+    let inner: *Node = null;
+    if (n.kind is .OrReturn{value})
+        inner = value;
+    let t = inner.ty;
+    let saved_indent = g.indent;
+    let body = new([..]u8);
+    let saved = into_string(g, body);
+    g.indent++;
+    let v = tmp(g, "result");
+    line(g, cat(c_type(g, t), " ", v, " = ", expr(g, inner), ";"));
+    line(g, cat("if (", failed(v, t), ") {"));
+    g.indent++;
+    // the function's last result is the failure; the others start as
+    // `let x: T;` does
+    let flag = if (t.is_tuple) cat(v, "._", num(t.fields.len - 1)) else v;
+    let ret = g.current_fn.ty.ret;
+    let flag_type = if (t.is_tuple) t.fields[t.fields.len - 1].ty else t;
+    let ret_flag = if (ret.is_tuple) ret.fields[ret.fields.len - 1].ty else ret;
+    if (ret_flag != flag_type) // a failure enum passed on as an Error
+        flag = convert(g, flag, flag_type, ret_flag);
+    let value = flag;
+    if (ret.is_tuple) {
+        let fields = "";
+        for (i in 0..ret.fields.len - 1)
+            if (has_defaults(g.c, ret.fields[i].ty))
+                fields = cat(fields, "._", num(i), " = ", default_value(g, ret.fields[i].ty), ", ");
+        value = compound(g, ret, cat(fields, "._", num(ret.fields.len - 1), " = ", flag));
+    }
+    if (has_defers(g)) {
+        let r = tmp(g, "ret");
+        line(g, cat(c_type(g, ret), " ", r, " = ", value, ";"));
+        emit_defers_until(g, 0);
+        value = r;
+    }
+    line(g, cat("return ", value, ";"));
+    g.indent--;
+    line(g, "}");
+    // what's left: one value, or several
+    if (n.ty.is_tuple) {
+        let fields = "";
+        for (i in 0..n.ty.fields.len)
+            fields = cat(fields, if (i > 0) ", " else "", v, "._", num(i));
+        line(g, cat(compound(g, n.ty, fields), ";"));
+    } else if (n.ty.kind != .Void) {
+        line(g, cat(v, "._0;"));
+    }
+    g.out = saved;
+    g.indent = saved_indent;
+    return statement_expression(g, body.* as string, saved_indent);
+}
+
+// f() or_else fallback: f's value, or the fallback (only evaluated then)
+fn gen_or_else(g: *CodeGen, n: *Node) -> string {
+    let inner: *Node = null;
+    let fallback: *Node = null;
+    if (n.kind is .OrElse{value, fallback: f})
+        inner, fallback = value, f;
+    let t = inner.ty;
+    let saved_indent = g.indent;
+    let body = new([..]u8);
+    let saved = into_string(g, body);
+    g.indent++;
+    let v = tmp(g, "result");
+    let r = tmp(g, "value");
+    line(g, cat(c_type(g, t), " ", v, " = ", expr(g, inner), ";"));
+    line(g, cat(c_type(g, n.ty), " ", r, ";"));
+    // a ?T is None (its tag 0) or holds a value; a pointer is null or not
+    let option = is_option(g.c, t);
+    let pointer = !option && !t.is_tuple;
+    line(g, cat("if (", if (option) cat(v, ".tag == 0") else if (pointer) cat(v, " == 0") else failed(v, t), ")"));
+    line(g, cat("  ", r, " = ", expr(g, fallback), ";"));
+    line(g, "else");
+    line(g, cat("  ", r, " = ", v, if (option) cat(".payload.", local_name("Some")) else if (pointer) "" else "._0", ";"));
+    line(g, cat(r, ";"));
+    g.out = saved;
+    g.indent = saved_indent;
+    return statement_expression(g, body.* as string, saved_indent);
+}
+
+fn array_literal(g: *CodeGen, n: *Node) -> string {
+    let items_nodes = items_of(n);
+    let each: [..]string; // every element's C, made once
+    let items = "";
+    for (item in items_nodes) {
+        let c = expr(g, item);
+        array_add(&each, c);
+        items = cat(items, if (items.len == 0) "" else ", ", c);
+    }
+    if (n.ty.kind == .Slice) {
+        if (items_nodes.len == 0)
+            return compound(g, n.ty, "0");
+        let count = num(items_nodes.len as i64);
+        // at the top level: a C compound literal array, for the whole program
+        if (g.static_init || g.current_fn == null)
+            return compound(g, n.ty, cat("(", c_type(g, n.ty.elem), "[]){", items, "}, ", count));
+        // in a function: an array declared at its top, so the elements live
+        // until it returns (as in the #run interpreter), filled in here
+        let name = tmp(g, "items");
+        print_to(&g.fn_storage, "  % %[%];\n", c_type(g, n.ty.elem), name, count);
+        let fill = "";
+        for (i in 0..items_nodes.len)
+            fill = cat(fill, name, "[", num(i), "] = ", each[i], ", ");
+        return compound(g, n.ty, cat("(", fill, name, "), ", count));
+    }
+    return compound(g, n.ty, cat("{", if (items.len == 0) "0" else items, "}"));
+}
+
+// `n`, a slice or growable array, as a slice
+fn sequence(g: *CodeGen, n: *Node) -> string {
+    if (n.ty.kind == .Growable)
+        return convert(g, expr(g, n), n.ty, slice_of(ts(g), n.ty.elem));
+    return expr(g, n);
+}
+
+// a pointer about to be followed, checked for null where bounds are
+fn nonnull(g: *CodeGen, pointer: string, at: Token) -> string {
+    if (g.static_init || !checks_bounds(g))
+        return pointer;
+    return cat("rt_nonnull(", pointer, ", ", location(g, at), ")");
+}
+
+// are this function's indexing and slicing checked: the build's
+// BoundsChecks, then the function's #no_bounds_check
+fn checks_bounds(g: *CodeGen) -> bool {
+    switch (g.c.build.bounds_checks) {
+    case .Off: return false;
+    case .Always: return true;
+    default: return g.current_fn == null || !(g.current_fn.kind is .Fn{no_bounds_check: true});
+    }
+}
+
+fn index(g: *CodeGen, n: *Node) -> string {
+    let object: *Node = null;
+    let index_node: *Node = null;
+    if (n.kind is .Index{object: o, index: i})
+        object, index_node = o, i;
+    let t = object.ty;
+    if (t.kind == .Growable) // a view of its elements
+        t = slice_of(ts(g), t.elem);
+    let checked = checks_bounds(g);
+    if (!g.static_init && has_call(object) && has_call(index_node) && t.kind != .Array) {
+        // both call something: the slice or pointer first, then the index,
+        // through a pointer so the element can still be assigned to
+        let base = tmp(g, "base");
+        let at = tmp(g, "at");
+        let index_type = c_type(g, conv_or_ty(index_node));
+        let place = "";
+        if (t.kind == .Slice && checked)
+            place = cat(c_type(g, t), "__at(", base, ", ", at, ", ", location(g, n.tok), ")");
+        else if (t.kind == .Slice)
+            place = cat("&", base, ".ptr[", at, "]");
+        else
+            place = cat("&", base, "[", at, "]");
+        return cat("(*({ ", c_type(g, t), " ", base, " = ", sequence(g, object), "; ", index_type, " ", at, " = ",
+                   expr(g, index_node), "; ", place, "; }))");
+    }
+    let i = expr(g, index_node);
+    let known = index_node.cval.kind == .Int; // checked at compile time
+
+    if (t.kind == .Slice && !checked)
+        return cat("(", sequence(g, object), ").ptr[", i, "]");
+    if (t.kind == .Slice)
+        return cat("(*", c_type(g, t), "__at(", sequence(g, object), ", ", i, ", ", location(g, n.tok), "))");
+    if (t.kind == .Array) {
+        if (!known && checked)
+            i = cat("rt_index(", i, ", ", unum(t.len), ", ", location(g, n.tok), ")");
+        return cat("(", expr(g, object), ").data[", i, "]");
+    }
+    return cat("(", nonnull(g, expr(g, object), n.tok), ")[", i, "]"); // not its bounds, only null
+}
+
+// x[lo..hi], through the slice type's bounds-checked helpers
+fn slice(g: *CodeGen, n: *Node) -> string {
+    let object: *Node = null;
+    let lo_node: *Node = null;
+    let hi_node: *Node = null;
+    if (n.kind is .Slice{object: o, lo: a, hi: b})
+        object, lo_node, hi_node = o, a, b;
+    let t = object.ty;
+    let name = c_type(g, n.ty);
+    let lo = if (lo_node != null) expr(g, lo_node) else "0";
+    let where = location(g, n.tok);
+    let checked = checks_bounds(g);
+    if ((t.kind == .Slice || t.kind == .Growable) && !checked) {
+        // the slice once, for its pointer and maybe its length
+        let s = tmp(g, "seq");
+        let hi = if (hi_node != null) expr(g, hi_node) else cat(s, ".len");
+        return cat("({ ", c_type(g, slice_of(ts(g), n.ty.elem)), " ", s, " = ", sequence(g, object), "; ", name,
+                   "__part(", s, ".ptr, ", lo, ", ", hi, "); })");
+    }
+    if (t.kind == .Slice || t.kind == .Growable) {
+        if (hi_node == null)
+            return cat(name, "__from(", sequence(g, object), ", ", lo, ", ", where, ")");
+        return cat(name, "__slice(", sequence(g, object), ", ", lo, ", ", expr(g, hi_node), ", ", where, ")");
+    }
+    let ptr = "";
+    let len = "";
+    if (t.kind == .Array) {
+        ptr = cat("(", expr(g, object), ").data");
+        len = unum(t.len);
+    } else {
+        ptr = expr(g, object);
+        len = "PTRDIFF_MAX"; // a raw pointer: only lo <= hi can be checked
+    }
+    let hi = if (hi_node != null) expr(g, hi_node) else len;
+    if (!checked)
+        return cat(name, "__part(", ptr, ", ", lo, ", ", hi, ")");
+    return cat(name, "__sub(", ptr, ", ", len, ", ", lo, ", ", hi, ", ", where, ")");
+}
+
+fn prelude_decl(g: *CodeGen, name: string) -> *Node {
+    return map_get(&g.res.prelude.scope, ScopeKey.{ .name = name }) or_else null;
+}
+
+fn default_context(g: *CodeGen) -> string { return global_name(g, prelude_decl(g, "default_context")); }
+
+fn call(g: *CodeGen, n: *Node) -> string {
+    let callee: *Node = null;
+    let args: []*Node;
+    if (n.kind is .Call{callee: e, args: a})
+        callee, args = e, a;
+    let t = callee.ty;
+    let fun: *Node = if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl else null;
+    if (n.decl != null)
+        fun = n.decl; // a generic function's instance
+    let is_extern = fun != null && is_extern_decl(fun);
+    let params = if (fun != null) fn_params(fun) else .[];
+
+    // a function value, the arguments, then the defaults (evaluated here,
+    // at the call site): left to right
+    let parts: [..]*Node;
+    if (fun == null)
+        array_add(&parts, callee);
+    let to_double: [..]bool; // C variadics take doubles, not floats
+    for (i in 0..args.len) {
+        if (fun != null && i < params.len && is_type_param(params[i]))
+            continue; // a type argument
+        array_add(&parts, args[i]);
+        array_add(&to_double, i >= t.params.len && args[i].ty == ts(g).f32);
+    }
+    if (fun != null) {
+        for (i in args.len..params.len) {
+            array_add(&parts, value_of(params[i]));
+            array_add(&to_double, false);
+        }
+    }
+    let o = ordered(g, parts);
+
+    let joined = if (is_extern) "" else current_ctx(g);
+    let first = if (fun != null) 0 else 1;
+    for (k in first..o.values.len) {
+        let arg = if (to_double[k - first]) cat("(f64)", o.values[k]) else o.values[k];
+        joined = cat(joined, if (joined.len == 0) "" else ", ", arg);
+    }
+    let name = if (fun != null) global_name(g, fun) else cat("(", o.values[0], ")");
+    return in_order(o, cat(name, "(", joined, ")"));
+}
+
+fn struct_init(g: *CodeGen, n: *Node) -> string {
+    let t = n.ty;
+    if (t.kind == .Void) // .{}: void's one value
+        return "((sabk_void){})";
+    // always designated, so field defaults can fill the gaps; the values
+    // are evaluated in the order they're written
+    let items = items_of(n);
+    let values: [..]*Node;
+    let names: [..]string;
+    for (i in 0..items.len) {
+        let item = items[i];
+        array_add(&values, item_value(item));
+        array_add(&names, if (item.kind.tag == .FieldInit) item.tok.text else t.fields[i].name);
+    }
+    let o = ordered(g, values);
+    let given: Map(string, string);
+    for (i in 0..names.len)
+        map_put(&given, names[i], o.values[i]);
+    let body = "";
+    for (f in t.fields) {
+        let text, found = map_get(&given, f.name);
+        let default_node: *Node = if (f.decl != null) value_of(f.decl) else null;
+        if (!found && t.kind == .Struct && default_node != null)
+            text = expr(g, default_node); // the field's default
+        else if (!found && t.kind == .Struct && has_defaults(g.c, f.ty))
+            text = default_value(g, f.ty); // its type's defaults
+        else if (!found)
+            text = "";
+        if (text.len > 0)
+            body = cat(body, if (body.len == 0) "" else ", ", ".", local_name(f.name), " = ", text);
+    }
+    map_free(&given);
+    return in_order(o, compound(g, t, if (body.len == 0) "0" else body));
+}
+
+/* ---------------------------------------------------------------- program */
+
+fn is_alnum(c: u8) -> bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
+
+// the C source, or "" if errors were reported
+pub fn generate(g: *CodeGen) -> string {
+    g.out = &g.bodies;
+    // module prefixes: the file name, made unique
+    let used: Map(string, i32);
+    map_put(&g.module_prefix, g.res.prelude, "prelude");
+    for (m in g.res.modules) {
+        let stem: [..]u8;
+        for (c in path_stem(m.path))
+            array_add(&stem, if (is_alnum(c)) c else '_');
+        let name = stem as string;
+        if (name.len == 0 || (name[0] >= '0' && name[0] <= '9'))
+            name = cat("m_", name);
+        let n = map_get(&used, name) or_else 0;
+        map_put(&used, name, n + 1);
+        map_put(&g.module_prefix, m, if (n != 0) format("%{}%", name, n) else copy_string(name));
+    }
+
+    // the entry point
+    let root = g.res.modules[0];
+    let main_fn = map_get(&root.scope, ScopeKey.{ .name = "main" }) or_else null;
+    if (main_fn == null || !is_function(main_fn) || is_extern_decl(main_fn)) {
+        gen_error(g, root.tokens[0], tformat("the program needs a `fn main()` in %", root.path));
+        return "";
+    }
+    let ret = main_fn.ty.ret;
+    if (fn_params(main_fn).len > 0 || (ret.kind != .Void && ret != ts(g).i32 && !ret.is_failure)) {
+        gen_error(g, main_fn.tok, "`main` must take no parameters and return `void`, `i32` or `Error`");
+        return "";
+    }
+
+    // the prelude's types are needed by the runtime
+    c_type(g, g.c.context_type);
+
+    let all: [..]*Module;
+    array_add(&all, g.res.prelude);
+    array_append(&all, g.res.modules);
+    // functions: everything declared, minus generic templates, plus the
+    // instances the checker made of them
+    find_reachable(g, main_fn);
+    // std/build's functions are the compiler's: they don't exist at run time
+    for (m in all) {
+        for (d in root_list(m)) {
+            let native = false;
+            if (d.kind is .Fn{is_extern: true, body} && body == null)
+                native = true;
+            if (!native || !map_has(&g.reachable, d) || !is_build_function(d.tok.text))
+                continue;
+            // blame the use outside the module that wraps it:
+            // link_library(), not the declaration in std/build
+            let fun = d;
+            let reached = map_get(&g.reached_from, fun) or_else Reached.{};
+            while (reached.from != null && reached.from.owner == d.owner &&
+                   (map_get(&g.reached_from, reached.from) or_else Reached.{}).use != null) {
+                fun = reached.from;
+                reached = map_get(&g.reached_from, fun) or_else Reached.{};
+            }
+            let at = if (reached.use != null) reached.use else d;
+            gen_error(g, at.tok, tformat("`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it",
+                                         fun.tok.text));
+            return "";
+        }
+    }
+    let functions: [..]*Node;
+    for (m in all) {
+        for (d in root_list(m)) {
+            if (is_function(d) && !is_template(d)) {
+                g.functions_total++;
+                if (map_has(&g.reachable, d))
+                    array_add(&functions, d);
+            } else if ((d.kind.tag == .Let || d.kind.tag == .Const) && map_has(&g.reachable, d)) {
+                emit_global(g, d);
+            }
+        }
+    }
+    for (instance in g.c.instances) {
+        if (instance.kind.tag == .Fn) {
+            g.functions_total++;
+            if (map_has(&g.reachable, instance))
+                array_add(&functions, instance);
+        }
+    }
+    g.functions_emitted = functions.len;
+    for (f in functions)
+        emit_fn_prototype(g, f);
+    for (f in functions)
+        emit_fn_body(g, f);
+
+    // C's main: every line of it is the program's `fn main`, for debuggers
+    g.here = main_fn.tok;
+    mapped(g, "int main(int argc, char **argv) {");
+    mapped(g, "  rt_argc = argc;");
+    mapped(g, "  rt_argv = argv;");
+    mapped(g, cat("  ", c_type(g, g.c.context_type), " ctx = ", default_context(g), "(&rt_boot_context);"));
+    if (ret.kind == .Void) {
+        mapped(g, cat("  ", global_name(g, main_fn), "(&ctx);"));
+        mapped(g, "  return 0;");
+    } else if (ret.is_failure) {
+        // what failed, once main has returned (and its defers have run)
+        mapped(g, cat("  ", c_type(g, ret), " failed = ", global_name(g, main_fn), "(&ctx);"));
+        mapped(g, "  if (failed) {");
+        mapped(g, "    rt_report_error(failed);");
+        mapped(g, "    return 1;");
+        mapped(g, "  }");
+        mapped(g, "  return 0;");
+    } else {
+        mapped(g, cat("  return ", global_name(g, main_fn), "(&ctx);"));
+    }
+    mapped(g, "}");
+
+    let errors = error_table(g, ret.is_failure);
+    define_type_infos(g);
+    define_pending_types(g);
+
+    if (g.error_count > 0)
+        return "";
+    let source: [..]u8;
+    append_string(&source, C_PRELUDE);
+    append_string(&source, "\n/* types */\n");
+    append_string(&source, g.fwd as string);
+    append_string(&source, "\n");
+    append_string(&source, g.fn_typedefs as string);
+    append_string(&source, "\n");
+    append_string(&source, g.defs as string);
+    append_string(&source, C_RUNTIME);
+    append_string(&source, g.helpers as string);
+    append_string(&source, "\n/* functions */\n");
+    append_string(&source, g.protos as string);
+    append_string(&source, "\n/* type info */\n");
+    append_string(&source, g.type_infos);
+    append_string(&source, errors);
+    append_string(&source, "\n/* globals */\n");
+    append_string(&source, g.globals as string);
+    append_string(&source, "\n");
+    append_string(&source, g.bodies as string);
+    return source as string;
+}
+
+fn mapped(g: *CodeGen, text: string) {
+    if (g.line_directives)
+        append_string(&g.bodies, line_directive(g));
+    append_string(&g.bodies, text);
+    array_add(&g.bodies, '\n');
+}
+
+// sabk_error_type(id) (the prelude's): the TypeInfo of each enum that
+// became an Error, by its number; and, for `fn main() -> Error`,
+// rt_report_error
+fn error_table(g: *CodeGen, report: bool) -> string {
+    let decl = prelude_decl(g, "sabk_error_type");
+    let out: [..]u8;
+    print_to(&out, "\n/* the failure enums that became Errors */\n% {\n", fn_signature(g, decl));
+    let info = c_type(g, g.c.type_info_type);
+    let id = var_name(g, fn_params(decl)[0]);
+    let enums = g.c.error_enums;
+    if (enums.len == 0) {
+        print_to(&out, "  (void)%;\n  return 0;\n}\n", id);
+    } else {
+        print_to(&out, "  static % *const enums[] = {", info);
+        for (i in 0..enums.len) {
+            if (i > 0)
+                append_string(&out, ", ");
+            append_string(&out, type_info_ref(g, enums[i]));
+        }
+        print_to(&out, "};\n  return % >= 1 && % <= % ? enums[% - 1] : 0;\n}\n", id, id, enums.len, id);
+    }
+    if (!report)
+        return out as string;
+    // "error: IoError.NotFound", or IoError(7) for a value no variant has
+    append_string(&out, cat("static void rt_report_error(u64 e) {\n",
+                            "  ", info, " *t = sabk_error_type((u32)(e >> 32));\n",
+                            "  i64 v = (i64)(u32)e;\n",
+                            "  fflush(NULL);\n",
+                            "  if (!t) {\n",
+                            "    dprintf(2, (u8 *)\"error: %llu\\n\", (unsigned long long)e);\n",
+                            "    return;\n",
+                            "  }\n",
+                            "  for (isize i = 0; i < t->variants.len; i++)\n",
+                            "    if (t->variants.ptr[i].value == v) {\n",
+                            "      dprintf(2, (u8 *)\"error: %.*s.%.*s\\n\", (int)t->name.len, t->name.ptr,\n",
+                            "              (int)t->variants.ptr[i].name.len, t->variants.ptr[i].name.ptr);\n",
+                            "      return;\n",
+                            "    }\n",
+                            "  dprintf(2, (u8 *)\"error: %.*s(%lld)\\n\", (int)t->name.len, t->name.ptr, (long long)v);\n",
+                            "}\n"));
+    return out as string;
+}
+
+/* -------------------------------------------------------------- type info */
+
+fn type_info_ref(g: *CodeGen, t: *Type) -> string {
+    let name = map_get(&g.type_info_names, t) or_else "";
+    if (name.len == 0) {
+        name = format("ti__%", g.type_info_names.entries.len + 1);
+        map_put(&g.type_info_names, t, name);
+        array_add(&g.type_info_queue, t);
+    }
+    return cat("(&", name, ")");
+}
+
+fn text_value(s: string) -> string {
+    return cat("{(u8*)", c_string(s), ", ", num(s.len as i64), "}");
+}
+
+fn define_type_infos(g: *CodeGen) {
+    let field_type = decl_type(g.c, prelude_decl(g, "TypeField"));
+    let variant_type = decl_type(g.c, prelude_decl(g, "TypeVariant"));
+    let decls: [..]u8;
+    let data: [..]u8;
+    // the queue grows as types refer to more types
+    let i: isize = 0;
+    while (i < g.type_info_queue.len) {
+        let t = g.type_info_queue[i];
+        i++;
+        let name = map_get(&g.type_info_names, t) or_else "";
+        let shape = shape_of(g.c, t);
+        let fields = "{0}";
+        let variants = "{0}";
+        if (shape.fields.len > 0) {
+            let items: [..]u8;
+            for (f in shape.fields)
+                append_string(&items, cat("  {.name = ", text_value(f.name), ", .info = ", type_info_ref(g, f.ty),
+                                          ", .offset = ", unum(f.offset), "},\n"));
+            print_to(&data, "static % %__fields[] = {\n%};\n", c_type(g, field_type), name, items as string);
+            fields = tformat("{%__fields, %}", name, shape.fields.len);
+        }
+        if (shape.variants.len > 0) {
+            let items: [..]u8;
+            for (v in shape.variants)
+                append_string(&items, cat("  {.name = ", text_value(v.name), ", .value = (i64)", unum(v.value as u64),
+                                          "ULL, .payload = ", if (v.payload != null) type_info_ref(g, v.payload) else "0",
+                                          "},\n"));
+            print_to(&data, "static % %__variants[] = {\n%};\n", c_type(g, variant_type), name, items as string);
+            variants = tformat("{%__variants, %}", name, shape.variants.len);
+        }
+        let info = c_type(g, g.c.type_info_type);
+        print_to(&decls, "static % %;\n", info, name);
+        append_string(&data, cat("static ", info, " ", name, " = {.kind = ", num(type_kind_value(g.c, shape.kind)),
+                                 ", .name = ", text_value(type_name(t)), ", .size = ", unum(t.size),
+                                 ", .align = ", unum(t.align), ", .is_signed = ",
+                                 if (t.kind == .Int && t.is_signed) "1" else "0", ", .elem = ",
+                                 if (shape.elem != null) type_info_ref(g, shape.elem) else "0", ", .count = ",
+                                 unum(shape.count), ", .fields = ", fields, ", .variants = ", variants, "};\n"));
+    }
+    append_string(&decls, data as string);
+    g.type_infos = decls as string;
+}
+
+/* ----------------------------------------------------------- reachability */
+
+fn reach(g: *CodeGen, decl: *Node, use: *Node) {
+    if (decl == null || map_has(&g.reachable, decl))
+        return;
+    map_put(&g.reachable, decl, true);
+    array_add(&g.to_scan, decl);
+    map_put(&g.reached_from, decl, Reached.{ .use = use, .from = g.scanning });
+}
+
+// Everything the program can reach from main: the functions it calls or
+// uses as values, and the globals it uses, through every function and
+// global initializer that's reached in turn. Only those are written out.
+fn find_reachable(g: *CodeGen, main_fn: *Node) {
+    reach(g, main_fn, null);
+    reach(g, prelude_decl(g, "default_context"), null); // the C main calls it
+    // `extern fn`s with a body exist to be called from C
+    for (m in g.res.modules)
+        for (d in root_list(m))
+            if (d.kind is .Fn{is_extern: true, body} && body != null)
+                reach(g, d, null);
+    while (g.to_scan.len > 0) {
+        let d = g.to_scan[g.to_scan.len - 1];
+        g.to_scan.len--;
+        g.scanning = d;
+        if (d.kind.tag == .Fn)
+            scan(g, fn_body(d));
+        else
+            scan(g, value_of(d)); // a global's initializer
+    }
+}
+
+fn scan(g: *CodeGen, n: *Node) {
+    if (n == null)
+        return;
+    switch (n.kind) {
+    case .Identifier, .Member:
+        let d = n.decl;
+        if (d != null) {
+            if (is_function(d) && !is_template(d))
+                reach(g, d, n);
+            else if ((d.kind.tag == .Let || d.kind.tag == .Const) && d.owner != null && d.cval.kind == .None)
+                reach(g, d, n); // a global
+        }
+    case .Call{callee, args}:
+        let fun: *Node = if (n.decl != null) n.decl // a generic function's instance
+                         else if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl
+                         else null;
+        if (n.decl != null)
+            reach(g, n.decl, n);
+        // defaults are evaluated at the call site
+        if (fun != null) {
+            let params = fn_params(fun);
+            for (i in args.len..params.len)
+                scan(g, value_of(params[i]));
+        }
+    case .StructInit:
+        // fields it leaves out get their defaults
+        if (n.ty != null && n.ty.kind == .Struct)
+            for (f in n.ty.fields)
+                if (f.decl != null)
+                    scan(g, value_of(f.decl));
+    case .StaticIf:
+        scan(g, static_if_branch(n)); // the other branch isn't compiled
+        return;
+    case .ExprStmt{value}:
+        if (value.kind.tag == .Run)
+            return; // `#run f();` ran while compiling
+    default:
+    }
+    for (child in code_children(n))
+        scan(g, child);
+}
+
+/* --------------------------------------------------------------- defaults */
+
+// a value of `t` as it starts: its fields' defaults, and those of what it
+// holds; just zeros when it has none
+fn default_value(g: *CodeGen, t: *Type) -> string {
+    if (!has_defaults(g.c, t))
+        return zero_value(t); // only ever written where a value is declared
+    if (t.kind == .Array) // GNU C's range designators: every element
+        return compound(g, t, cat(".data = { [0 ... ", unum(t.len - 1), "] = ", default_value(g, t.elem), " }"));
+    if (t.is_tagged) { // the first variant, holding its defaults
+        let first = enum_variants(t.decl)[0];
+        return compound(g, t, cat(".tag = ", constant(g, first.cval, t.fields[0].ty), ", .payload.",
+                                  local_name(first.tok.text), " = ", default_value(g, payload_of(t, first))));
+    }
+    let body = "";
+    for (f in t.fields) {
+        let value = "";
+        let written: *Node = if (f.decl != null) value_of(f.decl) else null;
+        if (written != null)
+            value = expr(g, written);
+        else if (has_defaults(g.c, f.ty))
+            value = default_value(g, f.ty);
+        if (value.len > 0)
+            body = cat(body, if (body.len == 0) "" else ", ", ".", local_name(f.name), " = ", value);
+    }
+    return compound(g, t, body);
+}
+
+// a == b on strings: their contents, each side evaluated once
+fn string_equal(g: *CodeGen, a: string, b: string) -> string {
+    let t = c_type(g, ts(g).string_);
+    let x = tmp(g, "a");
+    let y = tmp(g, "b");
+    return cat("({ ", t, " ", x, " = ", a, ", ", y, " = ", b, "; rt_bytes_equal(", x, ".ptr, ", x, ".len, ", y,
+               ".ptr, ", y, ".len); })");
+}
+
+// Integer division. C traps on a zero divisor and on the minimum / -1;
+// Sabk panics on the first, with where it happened, and wraps the second
+// (signed overflow wraps), as the #run interpreter does. A divisor known to
+// be neither is just C's / and %.
+fn divide(g: *CodeGen, at: *Node, t: *Type, remainder: bool, a: string, b: string, divisor: *Node) -> string {
+    let op = if (remainder) " % " else " / ";
+    let k = divisor.cval;
+    if (k.kind == .Int && !i128_is_zero(k.i) && !i128_eq(k.i, i128(-1)))
+        return cat("((", c_type(g, t), ")(", a, op, b, "))");
+    let c_name = c_type(g, t);
+    let x = tmp(g, "a");
+    let y = tmp(g, "b");
+    let result = cat("(", x, op, y, ")");
+    if (t.is_signed) // x / -1 is -x, wrapping; x % -1 is 0
+        result = cat("(", y, " == -1 ? ",
+                     if (remainder) cat("(", c_name, ")0") else cat("(", c_name, ")(0ULL - (u64)", x, ")"),
+                     " : ", result, ")");
+    return cat("({ ", c_name, " ", x, " = ", a, ", ", y, " = ", b, "; if (", y, " == 0) rt_panic(", location(g, at.tok),
+               ", \"division by zero\"); (", c_name, ")", result, "; })");
+}
+
+/* ------------------------------------------------------- evaluation order */
+
+// a target whose place is fixed once its variables are: x, x.f, x.a.b
+fn is_plain_place(n: *Node) -> bool {
+    switch (n.kind) {
+    case .Grouped{inner}: return is_plain_place(inner);
+    case .Identifier, .Context: return true;
+    case .Member{object}:
+        return n.decl != null || (object.ty != null && object.ty.kind != .Ptr && is_plain_place(object));
+    default: return false;
+    }
+}
+
+fn ordered(g: *CodeGen, parts: []*Node) -> Ordered {
+    let o: Ordered;
+    let changing = 0;
+    let calls = false;
+    for (p in parts) {
+        if (!is_fixed(p))
+            changing++;
+        calls = calls || has_call(p);
+    }
+    let hoist = !g.static_init && changing >= 2 && calls;
+    for (p in parts) {
+        let value = expr(g, p);
+        if (hoist && !is_fixed(p)) {
+            let name = tmp(g, "v");
+            o.prefix = cat(o.prefix, c_type(g, conv_or_ty(p)), " ", name, " = ", value, "; ");
+            value = name;
+        }
+        array_add(&o.values, value);
+    }
+    return o;
+}
+
+fn in_order(o: Ordered, result: string) -> string {
+    if (o.prefix.len == 0)
+        return result;
+    return cat("({ ", o.prefix, result, "; })");
+}
+
+// does an assignment's target have to be found before its value runs?
+// when the value calls something and the target is more than a variable
+// (xs[i], *p, p.f), or the target itself calls something
+fn targets_in_order(g: *CodeGen, target: *Node, value: *Node) -> bool {
+    if (g.static_init)
+        return false;
+    return has_call(target) || (has_call(value) && !is_plain_place(target));
+}
+
+/* --------------------------------------------------------------- switches */
+
+fn clause_parts(clause: *Node) -> ([]*Node, *Node, *Node) {
+    switch (clause.kind) {
+    case .Case{patterns, guard, body}: return patterns, guard, body;
+    case .DefaultCase{body}: return .[], null, body;
+    default: return .[], null, null;
+    }
+}
+
+// A switch statement, or a switch expression's cases assigning `result`.
+// The value goes in a temp first (a pointer when a case binds with `&`),
+// which a labeled switch's `continue name = v` replaces before going back
+// to the top. C switches on integers, so a string switch first finds the
+// number of its case.
+fn emit_switch(g: *CodeGen, n: *Node, result: string) {
+    let s: NodeSwitch;
+    if (n.kind is .Switch(sw))
+        s = .{ .value = sw.value, .cases = sw.cases, .label = sw.label, .continued = sw.continued,
+               .complete = sw.complete, .in_order = sw.in_order };
+    let t = conv_or_ty(s.value);
+    let tag_type = if (t.is_tagged) t.fields[0].ty else t;
+    let by_ref = false;
+    for (clause in s.cases) {
+        let patterns, _, _ = clause_parts(clause);
+        for (p in patterns)
+            by_ref = by_ref || binds_by_ref(p);
+    }
+    let name = tmp(g, "switch");
+    line(g, "{");
+    g.indent++;
+    let value = "";
+    if (by_ref) {
+        line(g, cat(c_type(g, t), " *", name, " = &", expr(g, s.value), ";"));
+        value = cat("(*", name, ")");
+    } else {
+        line(g, cat(c_type(g, t), " ", name, " = ", expr(g, s.value), ";"));
+        value = name;
+    }
+    if (s.label != null) {
+        map_put(&g.switch_values, n, name);
+        if (s.continued) // `continue name = v` comes back here
+            line(g, cat(label_of(g, n), "_top:;"));
+    }
+    if (s.in_order) {
+        emit_switch_in_order(g, n, s, result, t, value);
+        if (s.label != null)
+            break_label(g, n);
+        g.indent--;
+        line(g, "}");
+        return;
+    }
+
+    let dispatch = if (t.is_tagged) cat(value, ".tag") else value;
+    if (t.is_string) {
+        let which = tmp(g, "case");
+        line(g, cat("int ", which, " = -1;"));
+        let test = "if";
+        for (k in 0..s.cases.len) {
+            let patterns, _, _ = clause_parts(s.cases[k]);
+            for (p in patterns) {
+                line(g, cat(test, " (", string_equal(g, value, expr(g, p)), ") ", which, " = ", num(k), ";"));
+                test = "else if";
+            }
+        }
+        dispatch = which;
+    }
+    line(g, cat("switch (", dispatch, ") {"));
+    for (k in 0..s.cases.len) {
+        let clause = s.cases[k];
+        let patterns, _, body = clause_parts(clause);
+        g.here = clause.tok; // each case's lines are its own
+        if (clause.kind.tag == .DefaultCase)
+            line(g, "default:");
+        else if (t.is_string)
+            line(g, cat("case ", num(k), ":"));
+        for (p in patterns) {
+            if (t.is_string)
+                break;
+            if (p.kind is .Range{lo, hi, inclusive}) { // GNU C's case ranges, both ends included
+                let end = if (inclusive) constant(g, hi.cval, tag_type) else cat("(", constant(g, hi.cval, tag_type), " - 1)");
+                line(g, cat("case ", constant(g, lo.cval, tag_type), " ... ", end, ":"));
+            } else {
+                let variant, _, _ = pattern_parts(p);
+                line(g, cat("case ", expr(g, if (variant != null) variant else p), ":"));
+            }
+        }
+        line(g, "{");
+        g.indent++;
+        for (p in patterns) { // the variant's value, or its fields
+            let variant, bindings, by_fields = pattern_parts(p);
+            if (variant == null)
+                continue;
+            for (b in bindings) {
+                if (b.tok.text == "_")
+                    continue;
+                let payload = cat(value, ".payload.", local_name(variant.decl.tok.text));
+                if (by_fields)
+                    payload = cat(payload, ".", local_name(item_field_name(b)));
+                line(g, cat(c_type(g, b.ty), " ", var_name(g, b), " = ", if (b.kind is .Binding{by_ref: true}) "&" else "",
+                            payload, ";"));
+            }
+        }
+        if (result.len == 0 || body.kind.tag == .Block)
+            emit_body(g, body, .Switch, n); // break name = value gives it
+        else
+            line(g, cat(result, " = ", expr(g, body), ";"));
+        g.indent--;
+        line(g, "}");
+        line(g, "break;"); // no fallthrough
+    }
+    // every variant is handled, so anything else was made with `as`
+    if (s.complete)
+        line(g, cat("default: rt_panic(", location(g, n.tok), ", \"the switch value isn't one of its enum's variants\");"));
+    line(g, "}");
+    if (s.label != null)
+        break_label(g, n);
+    g.indent--;
+    line(g, "}");
+}
+
+struct NodeSwitch {
+    value: *Node;
+    cases: []*Node;
+    label: *Node;
+    continued: bool;
+    complete: bool;
+    in_order: bool;
+}
+
+// a switch with guards or patterns inside variants: each case is tested in
+// order, inside `switch (0)` so that `break` still leaves it
+fn emit_switch_in_order(g: *CodeGen, n: *Node, s: NodeSwitch, result: string, t: *Type, value: string) {
+    line(g, "switch (0) { default:");
+    let default_case: *Node = null;
+    for (clause in s.cases) {
+        if (clause.kind.tag == .DefaultCase) {
+            default_case = clause;
+            continue;
+        }
+        let patterns, guard, body = clause_parts(clause);
+        g.here = clause.tok;
+        let test = "";
+        for (p in patterns)
+            test = cat(test, if (test.len == 0) "" else " || ", match_test(g, p, value, t));
+        line(g, cat("if (", test, ") {"));
+        g.indent++;
+        let binds: [..]Bind;
+        for (p in patterns)
+            match_binds(g, p, value, &binds);
+        for (b in binds)
+            line(g, cat(c_type(g, b.node.ty), " ", var_name(g, b.node), " = ", b.from, ";"));
+        if (guard != null) {
+            line(g, cat("if (", expr(g, guard), ") {"));
+            g.indent++;
+        }
+        if (result.len == 0 || body.kind.tag == .Block)
+            emit_body(g, body, .Switch, n);
+        else
+            line(g, cat(result, " = ", expr(g, body), ";"));
+        line(g, "break;");
+        if (guard != null) {
+            g.indent--;
+            line(g, "}");
+        }
+        g.indent--;
+        line(g, "}");
+    }
+    if (default_case != null) {
+        let _, _, body = clause_parts(default_case);
+        g.here = default_case.tok;
+        line(g, "{");
+        g.indent++;
+        if (result.len == 0 || body.kind.tag == .Block)
+            emit_body(g, body, .Switch, n);
+        else
+            line(g, cat(result, " = ", expr(g, body), ";"));
+        g.indent--;
+        line(g, "}");
+    } else if (s.complete) {
+        // every value is handled: what's left came from `as`, or a null pointer
+        line(g, cat("rt_panic(", location(g, n.tok), ", \"no case of the switch matched its value (a null pointer inside it?)\");"));
+    }
+    line(g, "}");
+}
+
+struct Bind {
+    node: *Node;
+    from: string;
+}
+
+// the C test that `value`, of type `t`, matches `p`: a pattern inside a
+// variant follows a pointer, and a null one doesn't match
+fn match_test(g: *CodeGen, p: *Node, value: string, t: *Type) -> string {
+    if (is_type_pattern(p)) { // IoError(e): the Error came from IoError
+        let et = type_pattern_enum(p);
+        let id = map_get(&g.c.error_ids, et) or_else 0;
+        let test = cat("((u64)(", value, ") >> 32) == ", unum(id as u64));
+        let _, items, _ = pattern_parts(p);
+        for (item in items)
+            if (item.kind.tag == .FieldPattern)
+                test = cat(test, " && ", match_test(g, pattern_of(item), error_as(g, value, et), et));
+        return cat("(", test, ")");
+    }
+    if (t.is_tagged) {
+        let variant, items, by_fields = pattern_parts(p);
+        let head = if (variant != null) variant else p;
+        let test = cat(value, ".tag == ", expr(g, head));
+        if (variant == null)
+            return cat("(", test, ")");
+        let payload = cat(value, ".payload.", local_name(variant.decl.tok.text));
+        for (item in items) {
+            if (item.kind.tag != .FieldPattern)
+                continue;
+            let at = if (by_fields) cat(payload, ".", local_name(item_field_name(item))) else payload;
+            if (item.ty.kind == .Ptr)
+                test = cat(test, " && ", at, " != 0 && ", match_test(g, pattern_of(item), cat("(*", at, ")"), item.ty.elem));
+            else
+                test = cat(test, " && ", match_test(g, pattern_of(item), at, item.ty));
+        }
+        return cat("(", test, ")");
+    }
+    if (t.is_string)
+        return string_equal(g, value, expr(g, p));
+    if (p.kind is .Range{lo, hi, inclusive})
+        return cat("(", value, " >= ", constant(g, lo.cval, t), " && ", value, if (inclusive) " <= " else " < ",
+                   constant(g, hi.cval, t), ")");
+    return cat("(", value, " == ", expr(g, p), ")");
+}
+
+// what `p`'s names are bound to, given that `value` matched it
+fn match_binds(g: *CodeGen, p: *Node, value: string, binds: *[..]Bind) {
+    let variant, items, by_fields = pattern_parts(p);
+    if (variant == null)
+        return;
+    if (is_type_pattern(p)) {
+        let et = type_pattern_enum(p);
+        for (item in items) {
+            if (item.kind.tag == .FieldPattern)
+                match_binds(g, pattern_of(item), error_as(g, value, et), binds);
+            else if (item.tok.text != "_")
+                array_add(binds, Bind.{ .node = item, .from = error_as(g, value, et) });
+        }
+        return;
+    }
+    let payload = cat(value, ".payload.", local_name(variant.decl.tok.text));
+    for (item in items) {
+        let at = if (by_fields) cat(payload, ".", local_name(item_field_name(item))) else payload;
+        if (item.kind.tag == .FieldPattern)
+            match_binds(g, pattern_of(item), if (item.ty.kind == .Ptr) cat("(*", at, ")") else at, binds);
+        else if (item.tok.text != "_")
+            array_add(binds, Bind.{ .node = item, .from = cat(if (item.kind is .Binding{by_ref: true}) "&" else "", at) });
+    }
+}
+
+// the variables names bound by `is` in a condition go in, declared before
+// it, so the body sees them
+fn declare_bindings(g: *CodeGen, n: *Node) {
+    switch (n.kind) {
+    case .Binary{op: .And, lhs, rhs}:
+        declare_bindings(g, lhs);
+        declare_bindings(g, rhs);
+    case .Grouped{inner}:
+        declare_bindings(g, inner);
+    case .Is{pattern}:
+        let binds: [..]Bind;
+        match_binds(g, pattern, "", &binds);
+        for (b in binds)
+            line(g, cat(c_type(g, b.node.ty), " ", var_name(g, b.node), ";"));
+    default:
+    }
+}
+
+// an Error's value as error enum `et`: the variant in its low 32 bits (a
+// tagged one holds nothing more: an Error keeps no payload)
+fn error_as(g: *CodeGen, value: string, et: *Type) -> string {
+    if (et.is_tagged)
+        return compound(g, et, cat(".tag = (u32)(", value, ")"));
+    return cat("((", c_type(g, et), ")(u32)(", value, "))");
+}
+
+// e is pattern: true or false, and on a match the bindings filled in
+fn is_test(g: *CodeGen, n: *Node) -> string {
+    let e: *Node = null;
+    let p: *Node = null;
+    if (n.kind is .Is{value, pattern})
+        e, p = value, pattern;
+    let t = conv_or_ty(e);
+    if (is_type_pattern(p)) {
+        let s = tmp(g, "is");
+        let binds: [..]Bind;
+        match_binds(g, p, s, &binds);
+        let fill = "";
+        for (b in binds)
+            fill = cat(fill, var_name(g, b.node), " = ", b.from, ", ");
+        return cat("({ ", c_type(g, t), " ", s, " = ", expr(g, e), "; ", match_test(g, p, s, t), " ? (", fill, "1) : 0; })");
+    }
+    let tag_type = if (t.is_tagged) t.fields[0].ty else t;
+    if (t.is_string)
+        return string_equal(g, expr(g, e), expr(g, p));
+    let s = tmp(g, "is");
+    if (p.kind is .Range{lo, hi, inclusive})
+        return cat("({ ", c_type(g, t), " ", s, " = ", expr(g, e), "; ", s, " >= ", constant(g, lo.cval, tag_type),
+                   " && ", s, if (inclusive) " <= " else " < ", constant(g, hi.cval, tag_type), "; })");
+    let variant, items, by_fields = pattern_parts(p);
+    if (variant != null && has_subpatterns(p)) {
+        // patterns inside the variant: the test, then the names on a match
+        let by_ref = binds_by_ref(p);
+        let value = if (by_ref) cat("(*", s, ")") else s;
+        let binds: [..]Bind;
+        match_binds(g, p, value, &binds);
+        let fill = "";
+        for (b in binds)
+            fill = cat(fill, var_name(g, b.node), " = ", b.from, ", ");
+        let start = if (by_ref) cat(c_type(g, t), " *", s, " = &", expr(g, e)) else cat(c_type(g, t), " ", s, " = ", expr(g, e));
+        return cat("({ ", start, "; ", match_test(g, p, value, t), " ? (", fill, "1) : 0; })");
+    }
+    let head = if (variant != null) variant else p;
+    if (!t.is_tagged)
+        return cat("(", expr(g, e), " == ", expr(g, head), ")");
+    let tag = expr(g, head);
+    if (variant == null || items.len == 0)
+        return cat("((", expr(g, e), ").tag == ", tag, ")");
+    let by_ref = binds_by_ref(p);
+    let value = if (by_ref) cat("(*", s, ")") else s;
+    let fill = "";
+    for (b in items) {
+        if (b.tok.text == "_")
+            continue;
+        let payload = cat(value, ".payload.", local_name(variant.decl.tok.text));
+        if (by_fields)
+            payload = cat(payload, ".", local_name(item_field_name(b)));
+        fill = cat(fill, var_name(g, b), " = ", if (b.kind is .Binding{by_ref: true}) "&" else "", payload, ", ");
+    }
+    let start = if (by_ref) cat(c_type(g, t), " *", s, " = &", expr(g, e)) else cat(c_type(g, t), " ", s, " = ", expr(g, e));
+    return cat("({ ", start, "; ", value, ".tag == ", tag, " ? (", fill, "1) : 0; })");
+}

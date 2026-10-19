@@ -1,9 +1,9 @@
-[error]: 3 names, but `flush` gives one value at [tests/errors/void_results.smelt:6:19]
+[error]: 3 names, but `flush` gives one value at [tests/errors/void_results.sabk:6:19]
      6 |     let a, b, c = flush();               // flush spells two results
        |                   ^
-[error]: 2 targets, but `flush` gives one value at [tests/errors/void_results.smelt:9:14]
+[error]: 2 targets, but `flush` gives one value at [tests/errors/void_results.sabk:9:14]
      9 |     x, err = flush();                    // x isn't void: nothing for it
        |              ^
-[error]: `f` returns one value, found 2 values at [tests/errors/void_results.smelt:10:20]
+[error]: `f` returns one value, found 2 values at [tests/errors/void_results.sabk:10:20]
     10 |     return note(), .None;                // a call isn't left out: it runs
        |                    ^

@@ -1,21 +1,21 @@
-[error]: slicing a pointer needs an end, there's no length to go up to: `p[lo..hi]` at [tests/errors/slice_errors.smelt:3:14]
+[error]: slicing a pointer needs an end, there's no length to go up to: `p[lo..hi]` at [tests/errors/slice_errors.sabk:3:14]
      3 |     let a = p[1..];
        |              ^
-[error]: can't slice a `*void`, cast it to a pointer type first at [tests/errors/slice_errors.smelt:4:14]
+[error]: can't slice a `*void`, cast it to a pointer type first at [tests/errors/slice_errors.sabk:4:14]
      4 |     let b = r[0..2];
        |              ^
-[error]: can't slice `i32` at [tests/errors/slice_errors.smelt:5:14]
+[error]: can't slice `i32` at [tests/errors/slice_errors.sabk:5:14]
      5 |     let c = x[0..1];
        |              ^
-[error]: the slice starts after it ends (3 > 1) at [tests/errors/slice_errors.smelt:6:15]
+[error]: the slice starts after it ends (3 > 1) at [tests/errors/slice_errors.sabk:6:15]
      6 |     let d = s[3..1];
        |               ^
-[error]: 5 is past the end of `[4]u8` at [tests/errors/slice_errors.smelt:7:20]
+[error]: 5 is past the end of `[4]u8` at [tests/errors/slice_errors.sabk:7:20]
      7 |     let e = arr[2..5];
        |                    ^
-[error]: a slice bound can't be negative at [tests/errors/slice_errors.smelt:8:15]
+[error]: a slice bound can't be negative at [tests/errors/slice_errors.sabk:8:15]
      8 |     let g = s[-1..];
        |               ^
-[error]: a slice bound must be an integer, found `untyped float` at [tests/errors/slice_errors.smelt:10:15]
+[error]: a slice bound must be an integer, found `untyped float` at [tests/errors/slice_errors.sabk:10:15]
     10 |     let k = s[0.5..];
        |               ^

@@ -1,8 +1,0 @@
-// #run code can use C's variables only if they exist in the compiler
-extern let smelt_no_such_variable: i32;
-
-fn read() -> i32 { return smelt_no_such_variable; }
-
-const X = #run read();
-
-fn main() {}

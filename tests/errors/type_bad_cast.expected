@@ -1,12 +1,12 @@
-[error]: can't cast `S` to `i32` at [tests/errors/type_bad_cast.smelt:3:15]
+[error]: can't cast `S` to `i32` at [tests/errors/type_bad_cast.sabk:3:15]
      3 |     let a = s as i32;
        |               ^
-[error]: can't cast a string literal to `i32`, only to `string`, `[]u8` or `*u8` at [tests/errors/type_bad_cast.smelt:4:19]
+[error]: can't cast a string literal to `i32`, only to `string`, `[]u8` or `*u8` at [tests/errors/type_bad_cast.sabk:4:19]
      4 |     let b = "str" as i32;
        |                   ^
-[error]: can't cast `*S` to `i32` at [tests/errors/type_bad_cast.smelt:5:15]
+[error]: can't cast `*S` to `i32` at [tests/errors/type_bad_cast.sabk:5:15]
      5 |     let c = p as i32;
        |               ^
-[error]: can't cast `f32` to `*S` at [tests/errors/type_bad_cast.smelt:6:15]
+[error]: can't cast `f32` to `*S` at [tests/errors/type_bad_cast.sabk:6:15]
      6 |     let d = x as *S;
        |               ^

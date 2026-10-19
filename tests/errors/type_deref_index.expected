@@ -1,18 +1,18 @@
-[error]: can't dereference `i32`, it isn't a pointer at [tests/errors/type_deref_index.smelt:2:15]
+[error]: can't dereference `i32`, it isn't a pointer at [tests/errors/type_deref_index.sabk:2:15]
      2 |     let a = x.*;
        |               ^
-[error]: can't index a `*void`, cast it to a pointer type first at [tests/errors/type_deref_index.smelt:4:14]
+[error]: can't index a `*void`, cast it to a pointer type first at [tests/errors/type_deref_index.sabk:4:14]
      4 |     let c = r[0];
        |              ^
-[error]: can't index `i32` at [tests/errors/type_deref_index.smelt:5:14]
+[error]: can't index `i32` at [tests/errors/type_deref_index.sabk:5:14]
      5 |     let d = x[0];
        |              ^
-[error]: index 3 is past the end of `[3]i32` at [tests/errors/type_deref_index.smelt:6:17]
+[error]: index 3 is past the end of `[3]i32` at [tests/errors/type_deref_index.sabk:6:17]
      6 |     let e = arr[3];
        |                 ^
-[error]: an index can't be negative at [tests/errors/type_deref_index.smelt:7:17]
+[error]: an index can't be negative at [tests/errors/type_deref_index.sabk:7:17]
      7 |     let g = arr[-1];
        |                 ^
-[error]: an index must be an integer, found `untyped float` at [tests/errors/type_deref_index.smelt:8:17]
+[error]: an index must be an integer, found `untyped float` at [tests/errors/type_deref_index.sabk:8:17]
      8 |     let h = arr[1.5];
        |                 ^

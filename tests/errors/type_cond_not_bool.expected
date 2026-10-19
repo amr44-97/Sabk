@@ -1,9 +1,9 @@
-[error]: a condition must be a `bool`, found `i32`, compare it explicitly: `x != 0` at [tests/errors/type_cond_not_bool.smelt:2:9]
+[error]: a condition must be a `bool`, found `i32`, compare it explicitly: `x != 0` at [tests/errors/type_cond_not_bool.sabk:2:9]
      2 |     if (n) {}
        |         ^
-[error]: a condition must be a `bool`, found `*i32`, compare it explicitly: `p != null` at [tests/errors/type_cond_not_bool.smelt:3:12]
+[error]: a condition must be a `bool`, found `*i32`, compare it explicitly: `p != null` at [tests/errors/type_cond_not_bool.sabk:3:12]
      3 |     while (p) {}
        |            ^
-[error]: a condition must be a `bool`, found `[]u8` at [tests/errors/type_cond_not_bool.smelt:4:9]
+[error]: a condition must be a `bool`, found `[]u8` at [tests/errors/type_cond_not_bool.sabk:4:9]
      4 |     if (s) {}
        |         ^

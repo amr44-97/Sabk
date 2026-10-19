@@ -1,6 +1,6 @@
-[error]: `n` isn't a `Code` parameter of `m` at [tests/errors/macro_not_code_param.smelt:1:32]
+[error]: `n` isn't a `Code` parameter of `m` at [tests/errors/macro_not_code_param.sabk:1:32]
      1 | fn m(n: i32) #expand { #insert n; }
        |                                ^
-[note]: in the expansion of `m` here at [tests/errors/macro_not_code_param.smelt:2:10]
+[note]: in the expansion of `m` here at [tests/errors/macro_not_code_param.sabk:2:10]
      2 | fn f() { m(1); }
        |          ^

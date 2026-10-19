@@ -1,6 +1,6 @@
-[error]: `a` is already declared in this scope at [tests/errors/resolve_duplicate_param.smelt:1:14]
+[error]: `a` is already declared in this scope at [tests/errors/resolve_duplicate_param.sabk:1:14]
      1 | fn f(a: i32, a: u8) {}
        |              ^
-[note]: the first declaration is here at [tests/errors/resolve_duplicate_param.smelt:1:6]
+[note]: the first declaration is here at [tests/errors/resolve_duplicate_param.sabk:1:6]
      1 | fn f(a: i32, a: u8) {}
        |      ^

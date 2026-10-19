@@ -1,6 +1,6 @@
-[error]: unknown name `exotic_slep` at [tests/errors/platform_if_typo.smelt:10:29]
+[error]: unknown name `exotic_slep` at [tests/errors/platform_if_typo.sabk:10:29]
     10 |     #if (POINTER_SIZE == 3) exotic_slep(1);        // a typo
        |                             ^
-[error]: unknown type `i6` at [tests/errors/platform_if_typo.smelt:5:43]
+[error]: unknown type `i6` at [tests/errors/platform_if_typo.sabk:5:43]
      5 |     struct Exotic { handle: *void; count: i6; }   // a typo in a type
        |                                           ^

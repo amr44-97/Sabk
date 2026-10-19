@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Golden-file tests. Each tests/<suite>/<name>.smelt is run through
-# ./smelt and its output is compared with <name>.expected:
+# Golden-file tests. Each tests/<suite>/<name>.sabk is run through
+# ./sabk and its output is compared with <name>.expected:
 #
-#   lexer/   smelt --tokens file   stdout, must exit 0
-#   parser/  smelt --ast file      stdout, must exit 0
-#   resolve/ smelt --resolve file  stdout (every module, names linked; with
+#   lexer/   sabk --tokens file   stdout, must exit 0
+#   parser/  sabk --ast file      stdout, must exit 0
+#   resolve/ sabk --resolve file  stdout (every module, names linked; with
 #                                  tests/resolve/std), must exit 0
-#   types/   smelt --types file    stdout (every module and instance, with
+#   types/   sabk --types file    stdout (every module and instance, with
 #                                  types; with tests/resolve/std), exit 0
-#   warnings/ smelt --check file   stderr (the warnings), must exit 0
-#   run/     smelt --run file      the program's output and exit code (with
+#   warnings/ sabk --check file   stderr (the warnings), must exit 0
+#   run/     sabk --run file      the program's output and exit code (with
 #                                  ./std); a `// args: a b` line passes
 #                                  arguments
-#   errors/  smelt --emit-c file   stderr, must exit non-zero (std is ./std)
+#   errors/  sabk --emit-c file   stderr, must exit non-zero (std is ./std)
 #
 # usage: tests/run.sh [--update] [filter]
 #   --update  rewrite the .expected files from the current output
@@ -30,29 +30,29 @@ for arg in "$@"; do
   esac
 done
 
-make -s smelt || exit 1
+make -s sabk || exit 1
 
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 pass=0
 fail=0
 
-for src in tests/*/*.smelt; do
+for src in tests/*/*.sabk; do
   [[ -n "$filter" && "$src" != *"$filter"* ]] && continue
   suite=$(basename "$(dirname "$src")")
   [[ "$suite" == unit ]] && continue   # `make unit`: checked by their own scripts
-  expected="${src%.smelt}.expected"
+  expected="${src%.sabk}.expected"
   case "$suite" in
-  lexer)  actual=$(./smelt --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  parser) actual=$(./smelt --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  resolve) actual=$(./smelt --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  types)  actual=$(./smelt --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  warnings) actual=$(./smelt --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  errors) actual=$(./smelt --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
+  lexer)  actual=$(./sabk --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  parser) actual=$(./sabk --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  resolve) actual=$(./sabk --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  types)  actual=$(./sabk --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  warnings) actual=$(./sabk --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  errors) actual=$(./sabk --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
   run)    # a `// args: a b c` line gives the program its arguments (quoted
           # as in a shell)
           eval "args=($(grep -m1 '^// args:' "$src" | sed 's|^// args: *||'))"
-          actual=$(./smelt --run --std std "$src" -- "${args[@]}" 2>&1); code=$?
+          actual=$(./sabk --run --std std "$src" -- "${args[@]}" 2>&1); code=$?
           actual+=$'\n'"[exit $code]"; ok=1 ;;
   *) echo "unknown suite: $suite"; exit 1 ;;
   esac

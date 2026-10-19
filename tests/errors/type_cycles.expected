@@ -1,6 +1,6 @@
-[error]: the definition of `X` depends on itself at [tests/errors/type_cycles.smelt:1:7]
+[error]: the definition of `X` depends on itself at [tests/errors/type_cycles.sabk:1:7]
      1 | const X = Y + 1;
        |       ^
-[error]: the definition of `T` depends on itself at [tests/errors/type_cycles.smelt:3:6]
+[error]: the definition of `T` depends on itself at [tests/errors/type_cycles.sabk:3:6]
      3 | type T = U;
        |      ^

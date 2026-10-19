@@ -1,4 +1,4 @@
-MODULE tests/types/bracket_literals.smelt
+MODULE tests/types/bracket_literals.sabk
 ROOT
   STRUCT `Point` : Point
     STRUCT_FIELD `x` : i64
@@ -44,7 +44,7 @@ ROOT
       VAR_DECL `g` : [2]Point
         lhs: ARRAY_LITERAL `.` : [2]Point
           STRUCT_INIT : Point
-            type: IDENTIFIER `Point` -> STRUCT `Point` tests/types/bracket_literals.smelt:1:8 : Point
+            type: IDENTIFIER `Point` -> STRUCT `Point` tests/types/bracket_literals.sabk:1:8 : Point
             FIELD_INIT `x`
               rhs: NUMBER_LITERAL `1` : i64 = 1
           STRUCT_INIT `.` : Point
@@ -59,7 +59,7 @@ ROOT
           NUMBER_LITERAL `4` : i64 = 4
       VAR_DECL `total` : i64
         lhs: CALL `(` : i64
-          lhs: IDENTIFIER `sum` -> FUN_DECL `sum` tests/types/bracket_literals.smelt:2:4 : fn([]i64) -> i64
+          lhs: IDENTIFIER `sum` -> FUN_DECL `sum` tests/types/bracket_literals.sabk:2:4 : fn([]i64) -> i64
           IDENTIFIER `arr` -> VAR_DECL `arr` 10:9 : [2]i64
     FUN_PARAM `small` : u8
       type: TYPE_NAME `u8` -> builtin : u8

@@ -1,0 +1,53 @@
+// std/fs, std/process and std/time
+import "std/io";
+import "std/fs";
+import "std/path";
+import "std/process";
+import "std/time";
+import "std/mem";
+import "std/str";
+import "std/fmt";
+
+fn ran(args: []string) -> string {
+    let exit, err = run_command(args);
+    return tformat("code % signal % %", exit.code, exit.signal, err);
+}
+
+fn exit_code(args: []string) -> i32 {
+    let exit, _ = run_command(args);
+    return exit.code;
+}
+const EXIT = #run exit_code(.["sh", "-c", "exit 4"]);  // at compile time too
+
+fn main() {
+    let dir, err = make_temp_dir("sabk-test");
+    println("% % %", err, is_dir(dir), starts_with(path_base(dir), "sabk-test-"));
+    let inner = path_join(dir, "inner");
+    println("% % %", make_dir(inner), is_dir(inner), make_dir(inner));
+    let file = path_join(inner, "f.txt");
+    println("% % %", write_file(file, "hi"), is_dir(file), file_exists(file));
+    println("% %", remove_dir(inner) != .None, delete_file(file));   // not empty, then emptied
+    println("% %", remove_dir(inner), remove_dir(dir));
+    println("% %", is_dir(dir), is_dir("/"));
+
+    let cwd, cerr = current_dir();
+    println("% %", cerr, path_is_absolute(cwd));
+
+    println(ran(.["true"]));
+    println(ran(.["sh", "-c", "exit 3"]));
+    println(ran(.["sh", "-c", "kill -9 $$"]));
+    println(ran(.["no-such-program-here"]));
+    println(ran(.[]));
+    let quoted = shell_quote("it's $HOME");
+    let exit, serr = run_shell(tformat("test % = \"it's \\$HOME\"", quoted));
+    println("% % %", quoted, exit.code, serr);
+    let seven, _ = run_shell("exit 7");
+    println("%", seven.code);
+    println("%", EXIT);
+
+    let start = now_ns();
+    sleep_ms(20);
+    let elapsed = now_ns() - start;
+    println("% %", elapsed >= 20000000, elapsed < 2000000000);
+    println("%", unix_time_ns() > 1700000000 * 1000000000);   // after 2023
+}

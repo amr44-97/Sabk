@@ -1,4 +1,4 @@
-// The VM's way to C (vm.smelt): libffi and dlsym. Their types and macros
+// The VM's way to C (vm.sabk): libffi and dlsym. Their types and macros
 // (ffi_cif, FFI_DEFAULT_ABI, RTLD_DEFAULT) differ between platforms, so
 // they stay on this side; the VM sees opaque pointers.
 
@@ -10,7 +10,7 @@
 // a function or variable the compiler itself can reach, or null
 void *vmffi_dlsym(const char *name) { return dlsym(RTLD_DEFAULT, name); }
 
-// the libffi type of a VM kind (vm.smelt's VmKind, in its order); -1: void
+// the libffi type of a VM kind (vm.sabk's VmKind, in its order); -1: void
 void *vmffi_type(int kind) {
   switch (kind) {
   case 0: return &ffi_type_sint8;

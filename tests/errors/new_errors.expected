@@ -1,12 +1,12 @@
-[error]: `new` of a slice needs a length: `new([]T, n)` at [tests/errors/new_errors.smelt:2:13]
+[error]: `new` of a slice needs a length: `new([]T, n)` at [tests/errors/new_errors.sabk:2:13]
      2 |     let a = new([]u8);
        |             ^
-[error]: `new(T)` takes one allocator at most; only `new([]T, n)` takes a length at [tests/errors/new_errors.smelt:3:41]
+[error]: `new(T)` takes one allocator at most; only `new([]T, n)` takes a length at [tests/errors/new_errors.sabk:3:41]
      3 |     let b = new(i32, context.allocator, 3);
        |                                         ^
-[error]: a length must be an integer, found `untyped string` at [tests/errors/new_errors.smelt:4:23]
+[error]: a length must be an integer, found `untyped string` at [tests/errors/new_errors.sabk:4:23]
      4 |     let c = new([]u8, "three");
        |                       ^
-[error]: expected `Allocator`, found `untyped int` at [tests/errors/new_errors.smelt:5:26]
+[error]: expected `Allocator`, found `untyped int` at [tests/errors/new_errors.sabk:5:26]
      5 |     let d = new([]u8, 3, 4);
        |                          ^

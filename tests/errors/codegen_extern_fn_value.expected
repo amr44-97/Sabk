@@ -1,6 +1,6 @@
-[error]: `c` is an `extern` function, which uses the C calling convention, so it can't be used as a `fn(i32) -> i32` at [tests/errors/codegen_extern_fn_value.smelt:3:24]
+[error]: `c` is an `extern` function, which uses the C calling convention, so it can't be used as a `fn(i32) -> i32` at [tests/errors/codegen_extern_fn_value.sabk:3:24]
      3 | fn main() { let f: F = c; let p = &c; }
        |                        ^
-[error]: a function is already a pointer, use `c` without `&` at [tests/errors/codegen_extern_fn_value.smelt:3:35]
+[error]: a function is already a pointer, use `c` without `&` at [tests/errors/codegen_extern_fn_value.sabk:3:35]
      3 | fn main() { let f: F = c; let p = &c; }
        |                                   ^

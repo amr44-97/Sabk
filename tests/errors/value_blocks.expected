@@ -1,18 +1,18 @@
-[error]: an `if` needs a `bool` condition, found `i64` at [tests/errors/value_blocks.smelt:7:17]
+[error]: an `if` needs a `bool` condition, found `i64` at [tests/errors/value_blocks.sabk:7:17]
      7 |     let a = if (x) 1 else 2;               // not a bool
        |                 ^
-[error]: the `if`'s two values don't agree: `isize` and `string`; give the result a type, or convert one with `as` at [tests/errors/value_blocks.smelt:8:13]
+[error]: the `if`'s two values don't agree: `isize` and `string`; give the result a type, or convert one with `as` at [tests/errors/value_blocks.sabk:8:13]
      8 |     let b = if (x > 0) 1 else "one";       // the values don't agree
        |             ^
-[error]: this block can reach its end without giving a value; end it with `break blk = value;` at [tests/errors/value_blocks.smelt:9:13]
+[error]: this block can reach its end without giving a value; end it with `break blk = value;` at [tests/errors/value_blocks.sabk:9:13]
      9 |     let c = blk: {                          // can reach its end
        |             ^
-[error]: this block never gives a value: no `break only = value;` in it at [tests/errors/value_blocks.smelt:12:13]
+[error]: this block never gives a value: no `break only = value;` in it at [tests/errors/value_blocks.sabk:12:13]
     12 |     let d = only: { return 5; };            // never gives a value
        |             ^
-[error]: this returns nothing, so it can't be the case's value; to run it first, end the case with `break sw = value;` at [tests/errors/value_blocks.smelt:16:16]
+[error]: this returns nothing, so it can't be the case's value; to run it first, end the case with `break sw = value;` at [tests/errors/value_blocks.sabk:16:16]
     16 |         println("b");                       // falls off the end
        |                ^
-[error]: expected `isize`, found `untyped string` at [tests/errors/value_blocks.smelt:18:64]
+[error]: expected `isize`, found `untyped string` at [tests/errors/value_blocks.sabk:18:64]
     18 |     let h = mixed: { if (x > 0) break mixed = 1; break mixed = "two"; };
        |                                                                ^

@@ -1,11 +1,11 @@
-MODULE tests/types/literals.smelt
+MODULE tests/types/literals.sabk
 ROOT
   CONST_DECL `A` : untyped int = 10
     lhs: NUMBER_LITERAL `10` : untyped int = 10
   CONST_DECL `B` : untyped int = 31
     lhs: ADD `+` : untyped int = 31
       lhs: MUL `*` : untyped int = 30
-        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : untyped int = 10
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.sabk:1:7 : untyped int = 10
         rhs: NUMBER_LITERAL `3` : untyped int = 3
       rhs: NUMBER_LITERAL `1` : untyped int = 1
   CONST_DECL `F` : untyped float = 3
@@ -36,10 +36,10 @@ ROOT
   CONST_DECL `CMP` : bool = false
     lhs: BOOL_AND `&&` : bool = false
       lhs: GT `>` : bool = true
-        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : untyped int = 10
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.sabk:1:7 : untyped int = 10
         rhs: NUMBER_LITERAL `5` : untyped int = 5
       rhs: NOT_EQ `!=` : bool = false
-        lhs: IDENTIFIER `B` -> CONST_DECL `B` tests/types/literals.smelt:2:7 : untyped int = 31
+        lhs: IDENTIFIER `B` -> CONST_DECL `B` tests/types/literals.sabk:2:7 : untyped int = 31
         rhs: NUMBER_LITERAL `31` : untyped int = 31
   CONST_DECL `WRAP` : u8 = 44
     lhs: CAST : u8 = 44
@@ -72,10 +72,10 @@ ROOT
         lhs: STRING_LITERAL `"text"` : string
       VAR_DECL `u` : u64
         type: TYPE_NAME `u64` -> builtin : u64
-        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : u64 = 10
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.sabk:1:7 : u64 = 10
       VAR_DECL `g` : f32
         type: TYPE_NAME `f32` -> builtin : f32
-        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : f32 = 10
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.sabk:1:7 : f32 = 10
       VAR_DECL `flag` : bool
         lhs: BOOL_LITERAL `true` : bool = true
       VAR_DECL `big` : i64

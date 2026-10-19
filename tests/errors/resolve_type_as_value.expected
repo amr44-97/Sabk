@@ -1,6 +1,6 @@
-[error]: `S` is a type, not a value at [tests/errors/resolve_type_as_value.smelt:2:18]
+[error]: `S` is a type, not a value at [tests/errors/resolve_type_as_value.sabk:2:18]
      2 | fn f() { let x = S; let y = i32; }
        |                  ^
-[error]: `i32` is a type, not a value at [tests/errors/resolve_type_as_value.smelt:2:29]
+[error]: `i32` is a type, not a value at [tests/errors/resolve_type_as_value.sabk:2:29]
      2 | fn f() { let x = S; let y = i32; }
        |                             ^

@@ -1,24 +1,24 @@
-[error]: duplicate case value 1 at [tests/errors/type_switch.smelt:3:31]
+[error]: duplicate case value 1 at [tests/errors/type_switch.sabk:3:31]
      3 |     switch (x) { case 1: case 1: default: default: }
        |                               ^
-[note]: it's first handled here at [tests/errors/type_switch.smelt:3:23]
+[note]: it's first handled here at [tests/errors/type_switch.sabk:3:23]
      3 |     switch (x) { case 1: case 1: default: default: }
        |                       ^
-[error]: this switch already has a `default` at [tests/errors/type_switch.smelt:3:43]
+[error]: this switch already has a `default` at [tests/errors/type_switch.sabk:3:43]
      3 |     switch (x) { case 1: case 1: default: default: }
        |                                           ^
-[note]: the first `default` is here at [tests/errors/type_switch.smelt:3:34]
+[note]: the first `default` is here at [tests/errors/type_switch.sabk:3:34]
      3 |     switch (x) { case 1: case 1: default: default: }
        |                                  ^
-[error]: a case value must be known at compile time at [tests/errors/type_switch.smelt:4:23]
+[error]: a case value must be known at compile time at [tests/errors/type_switch.sabk:4:23]
      4 |     switch (x) { case y: }
        |                       ^
-[error]: can only switch on integers, enums and strings, found `f64` at [tests/errors/type_switch.smelt:5:13]
+[error]: can only switch on integers, enums and strings, found `f64` at [tests/errors/type_switch.sabk:5:13]
      5 |     switch (fl) { }
        |             ^
-[error]: duplicate case value 0 at [tests/errors/type_switch.smelt:6:35]
+[error]: duplicate case value 0 at [tests/errors/type_switch.sabk:6:35]
      6 |     switch (e) { case E.A, E.B, E.A: }
        |                                   ^
-[note]: it's first handled here at [tests/errors/type_switch.smelt:6:25]
+[note]: it's first handled here at [tests/errors/type_switch.sabk:6:25]
      6 |     switch (e) { case E.A, E.B, E.A: }
        |                         ^

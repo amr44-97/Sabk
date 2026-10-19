@@ -1,9 +1,9 @@
-[error]: `#run` failed: index -1 is out of bounds for length 2 at [tests/errors/run_negative_index.smelt:4:11]
+[error]: `#run` failed: index -1 is out of bounds for length 2 at [tests/errors/run_negative_index.sabk:4:11]
      4 | const A = #run at(.[1, 2], -1);
        |           ^
-[note]: here at [tests/errors/run_negative_index.smelt:2:46]
+[note]: here at [tests/errors/run_negative_index.sabk:2:46]
      2 | fn at(xs: []i64, i: isize) -> i64 { return xs[i]; }
        |                                              ^
-[note]: called from here at [tests/errors/run_negative_index.smelt:4:28]
+[note]: called from here at [tests/errors/run_negative_index.sabk:4:28]
      4 | const A = #run at(.[1, 2], -1);
        |                            ^

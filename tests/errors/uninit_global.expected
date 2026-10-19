@@ -1,6 +1,6 @@
-[error]: a global can't be left uninitialized: it starts as its type's defaults before the program does, at no cost; drop the `= ---` at [tests/errors/uninit_global.smelt:2:5]
+[error]: a global can't be left uninitialized: it starts as its type's defaults before the program does, at no cost; drop the `= ---` at [tests/errors/uninit_global.sabk:2:5]
      2 | let counter: i32 = ---;
        |     ^
-[error]: a global can't be left uninitialized: it starts as its type's defaults before the program does, at no cost; drop the `= ---` at [tests/errors/uninit_global.smelt:3:5]
+[error]: a global can't be left uninitialized: it starts as its type's defaults before the program does, at no cost; drop the `= ---` at [tests/errors/uninit_global.sabk:3:5]
      3 | let buffer: [64]u8 = ---;
        |     ^

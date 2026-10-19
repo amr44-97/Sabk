@@ -1,6 +1,6 @@
-[error]: this expression does nothing; only calls can be used as statements at [tests/errors/type_unused_expression.smelt:1:18]
+[error]: this expression does nothing; only calls can be used as statements at [tests/errors/type_unused_expression.sabk:1:18]
      1 | fn f(x: i32) { x + 1; x == 2; }
        |                  ^
-[error]: this expression does nothing; only calls can be used as statements at [tests/errors/type_unused_expression.smelt:1:25]
+[error]: this expression does nothing; only calls can be used as statements at [tests/errors/type_unused_expression.sabk:1:25]
      1 | fn f(x: i32) { x + 1; x == 2; }
        |                         ^

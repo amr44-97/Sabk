@@ -1,12 +1,12 @@
-[error]: `#run` failed: index 3 is out of bounds for length 2 at [tests/errors/no_bounds_check_run.smelt:9:15]
+[error]: `#run` failed: index 3 is out of bounds for length 2 at [tests/errors/no_bounds_check_run.sabk:9:15]
      9 | const THIRD = #run third();
        |               ^
-[note]: here at [tests/errors/no_bounds_check_run.smelt:2:65]
+[note]: here at [tests/errors/no_bounds_check_run.sabk:2:65]
      2 | fn peek(xs: []i32, i: isize) -> i32 #no_bounds_check { return xs[i]; }
        |                                                                 ^
-[note]: called from here at [tests/errors/no_bounds_check_run.smelt:6:28]
+[note]: called from here at [tests/errors/no_bounds_check_run.sabk:6:28]
      6 |     return peek(all[0..2], 3);
        |                            ^
-[note]: called from here at [tests/errors/no_bounds_check_run.smelt:9:25]
+[note]: called from here at [tests/errors/no_bounds_check_run.sabk:9:25]
      9 | const THIRD = #run third();
        |                         ^

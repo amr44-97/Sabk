@@ -4,5 +4,5 @@ slice len 5, s[4] = 16
 grid 7
 text len 5, first h
 about to index out of bounds
-tests/run/arrays.smelt:28:21: panic: index 5 is out of bounds for length 5
+tests/run/arrays.sabk:28:21: panic: index 5 is out of bounds for length 5
 [exit 134]

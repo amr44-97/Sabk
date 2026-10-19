@@ -1,0 +1,38 @@
+// std/path: taking paths apart (views) and putting them together
+import "std/io";
+import "std/path";
+import "std/str";
+
+fn show(p: string) {
+    println("% | dir [%] base [%] stem [%] ext [%]", p, path_dir(p),
+            path_base(p), path_stem(p), path_ext(p));
+}
+
+const STEM = #run path_stem("std/fmt.sabk");
+
+fn main() {
+    show("src/main.sabk");
+    show("main.sabk");
+    show("/usr/lib/libc.so.6");
+    show("/tmp");
+    show("a//b");
+    show("dir/");
+    show(".bashrc");
+    show("..");
+    show("");
+
+    println("% % %", path_join("src", "main.sabk"), path_join("src/", "x"),
+            path_join("src", "/abs"));
+    println("[%]", path_join("", "x"));
+    for (p in .["a/./b/../c", "/../x", "../../a", "a/..", "/", "a//b///c/", "./", "x/../../y"])
+        println("% -> %", p, path_normalize(p));
+    println("% %", path_is_absolute("/a"), path_is_absolute("a"));
+
+    let abs, err = path_absolute("x/../y.sabk");
+    println("% % %", err, path_is_absolute(abs), ends_with(abs, "/y.sabk"));
+    let real, rerr = path_real("/");
+    println("% %", real, rerr);
+    let _, missing = path_real("/no/such/file");
+    println("%", missing);
+    println(STEM);
+}

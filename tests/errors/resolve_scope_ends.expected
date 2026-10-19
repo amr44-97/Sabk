@@ -1,6 +1,6 @@
-[error]: unknown name `inner` at [tests/errors/resolve_scope_ends.smelt:3:13]
+[error]: unknown name `inner` at [tests/errors/resolve_scope_ends.sabk:3:13]
      3 |     let x = inner;
        |             ^
-[error]: unknown name `i` at [tests/errors/resolve_scope_ends.smelt:5:13]
+[error]: unknown name `i` at [tests/errors/resolve_scope_ends.sabk:5:13]
      5 |     let y = i;
        |             ^

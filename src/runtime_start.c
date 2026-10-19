@@ -17,7 +17,7 @@ typedef double f64;
 typedef void *rawptr;
 /* void as a value (a variable, field or parameter): no bytes, as GNU C
    gives an empty struct; C's own void only spells a function's result */
-typedef struct {} smelt_void;
+typedef struct {} sabk_void;
 
 /* runtime: the libc functions it needs, spelled the way our code declares
    them (`extern fn memset(p: *void, value: i32, n: usize) -> *void;`),
@@ -30,17 +30,17 @@ i32 fflush(rawptr);
 /* the program's arguments, for std/os's args() */
 static int rt_argc;
 static char **rt_argv;
-i32 smelt_arg_count(void) { return rt_argc; }
-u8 *smelt_arg(i32 i) { return (u8 *)rt_argv[i]; }
+i32 sabk_arg_count(void) { return rt_argc; }
+u8 *sabk_arg(i32 i) { return (u8 *)rt_argv[i]; }
 
 /* errno, for std/io's errors; without <errno.h>, whose names (errno,
    ENOENT, ...) would take names from the program */
 #if defined(__APPLE__)
 int *__error(void);
-i32 smelt_errno(void) { return *__error(); }
+i32 sabk_errno(void) { return *__error(); }
 #else
 int *__errno_location(void);
-i32 smelt_errno(void) { return *__errno_location(); }
+i32 sabk_errno(void) { return *__errno_location(); }
 #endif
 
 /* AddressSanitizer, when the program is built with it (--sanitize): what
@@ -58,11 +58,11 @@ i32 smelt_errno(void) { return *__errno_location(); }
 void __asan_poison_memory_region(void const volatile *, usize);
 void __asan_unpoison_memory_region(void const volatile *, usize);
 const char *__asan_default_options(void) { return "detect_leaks=0"; }
-void smelt_poison(rawptr p, isize n) { __asan_poison_memory_region(p, (usize)n); }
-void smelt_unpoison(rawptr p, isize n) { __asan_unpoison_memory_region(p, (usize)n); }
+void sabk_poison(rawptr p, isize n) { __asan_poison_memory_region(p, (usize)n); }
+void sabk_unpoison(rawptr p, isize n) { __asan_unpoison_memory_region(p, (usize)n); }
 #else
-void smelt_poison(rawptr p, isize n) { (void)p; (void)n; }
-void smelt_unpoison(rawptr p, isize n) { (void)p; (void)n; }
+void sabk_poison(rawptr p, isize n) { (void)p; (void)n; }
+void sabk_unpoison(rawptr p, isize n) { (void)p; (void)n; }
 #endif
 
 /* two strings' contents */

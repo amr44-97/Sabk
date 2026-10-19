@@ -1,0 +1,230 @@
+// Memory: allocating through allocators, working with bytes, and arenas.
+//
+// Functions that allocate take the allocator last, defaulting to
+// context.allocator. Memory from an allocator is zeroed.
+//
+//   alloc(size)                    zeroed memory, or null
+//   free(p)                        gives it back
+//   delete(x)                      frees what a string, slice, growable
+//                                  array, Map or Builder holds
+//   resize(p, old_size, size)      grows or shrinks it, keeping the bytes
+//   free_all(a)                    frees everything `a` handed out, for
+//                                  arenas and context.temp_allocator
+//   with_allocator(a) { ... }      runs the block with `a` as
+//                                  context.allocator
+//   with_temp_allocator() { ... }  ... with context.temp_allocator
+//
+//   copy_bytes(dst, src)           byte slices; they may overlap
+//   copy_slice(dst, src)           slices of any type; they may overlap
+//   clone_slice(items)             a copy in allocated memory, to keep:
+//                                  return clone_slice(.[1, 2, 3]);
+//   set_bytes(dst, value)
+//   copy_memory(dst, src, size), zero_memory(dst, size)
+//
+//   let arena = arena_init();      an arena: allocations come from big
+//   defer arena_destroy(&arena);   blocks and are freed all at once
+//   with_allocator(arena_allocator(&arena)) { ... }
+
+import "std/map";
+import "std/os";
+import "std/str";
+
+extern fn memmove(dst: *void, src: *void, size: usize) -> *void;
+extern fn memset(memory: *void, value: i32, size: usize) -> *void;
+// --sanitize: memory an arena takes back is poisoned (the C runtime's)
+extern fn sabk_poison(memory: *void, size: isize);
+extern fn sabk_unpoison(memory: *void, size: isize);
+
+// ---- allocating
+
+pub fn alloc(size: isize, align: isize = 16, a: Allocator = context.allocator) -> *void {
+    return a.procedure(a.data, AllocatorMode.Alloc, size, align, null, 0);
+}
+
+pub fn free(memory: *void, a: Allocator = context.allocator) {
+    if (memory != null)
+        a.procedure(a.data, AllocatorMode.Free, 0, 0, memory, 0);
+}
+
+// Frees what `x` holds: a string's or slice's elements (from `a`: they
+// don't say which allocator they came from), a growable array's elements,
+// or a Map's or Builder's memory (each from its own allocator). `x` is a
+// copy, so the variable it came from still points at the freed memory.
+// Anything else is a compile error; a pointer from alloc or new is freed
+// with free(p).
+pub fn delete(x: $T, a: Allocator = context.allocator) {
+    #if (T == map.Map)
+        map.map_free(&x);
+    else #if (T == str.Builder)
+        str.builder_free(&x);
+    else
+        #insert #run delete_code(type_info(T));
+}
+
+fn delete_code(t: *TypeInfo) -> string {
+    switch (t.kind) {
+    case .String, .Slice: return "free(x.ptr, a);";
+    case .Growable: return "free(x.ptr, x.allocator);";
+    default:
+        panic(str.join(.["delete can't free a `", t.name, "`: it frees strings, slices, ",
+                         "growable arrays, Maps and Builders; a pointer is freed with free(p)"], ""));
+    }
+    return "";
+}
+
+pub fn resize(memory: *void, old_size: isize, size: isize, align: isize = 16, a: Allocator = context.allocator) -> *void {
+    return a.procedure(a.data, AllocatorMode.Resize, size, align, memory, old_size);
+}
+
+pub fn free_all(a: Allocator = context.allocator) {
+    a.procedure(a.data, AllocatorMode.FreeAll, 0, 0, null, 0);
+}
+
+pub fn with_allocator(a: Allocator, body: Code) #expand {
+    context.allocator = a;
+    #insert body;
+}
+
+pub fn with_temp_allocator(body: Code) #expand {
+    context.allocator = context.temp_allocator;
+    #insert body;
+}
+
+// ---- bytes
+
+// copies min(dst.len, src.len) bytes and returns how many
+pub fn copy_bytes(dst: []u8, src: []u8) -> isize {
+    let count = dst.len;
+    if (src.len < count)
+        count = src.len;
+    if (count > 0)
+        memmove(dst.ptr, src.ptr, count as usize);
+    return count;
+}
+
+// copies min(dst.len, src.len) elements and returns how many
+// a copy of `items` in memory from `a`: for keeping a slice whose memory
+// won't last, like a slice literal returned from a function
+pub fn clone_slice(items: []$T, a: Allocator = context.allocator) -> []T {
+    let copy = new([]T, items.len, a);
+    copy_slice(copy, items);
+    return copy;
+}
+
+pub fn copy_slice(dst: []$T, src: []T) -> isize {
+    let count = dst.len;
+    if (src.len < count)
+        count = src.len;
+    if (count > 0)
+        memmove(dst.ptr, src.ptr, (count * sizeof(T)) as usize);
+    return count;
+}
+
+pub fn set_bytes(dst: []u8, value: u8) {
+    if (dst.len > 0)
+        memset(dst.ptr, value, dst.len as usize);
+}
+
+pub fn copy_memory(dst: *void, src: *void, size: isize) { memmove(dst, src, size as usize); }
+pub fn zero_memory(dst: *void, size: isize) { memset(dst, 0, size as usize); }
+
+// ---- arenas
+
+pub struct Arena {
+    blocks: *ArenaBlock;   // the newest block, linked to the older ones
+    block_size: isize;
+    backing: Allocator;    // where blocks come from
+}
+
+struct ArenaBlock {
+    previous: *ArenaBlock;
+    memory: []u8;
+    used: isize;
+}
+
+pub fn arena_init(block_size: isize = 64 * 1024, backing: Allocator = context.allocator) -> Arena {
+    return Arena.{ .block_size = block_size, .backing = backing };
+}
+
+pub fn arena_allocator(arena: *Arena) -> Allocator {
+    return Allocator.{ .procedure = arena_proc, .data = arena };
+}
+
+pub fn arena_alloc(arena: *Arena, size: isize, align: isize = 16) -> *void {
+    if (align == 0)
+        align = 1;
+    if (arena.blocks != null) {
+        let memory = carve(arena.blocks, size, align);
+        if (memory != null)
+            return memory;
+    }
+    let capacity = arena.block_size;
+    if (size + align > capacity)
+        capacity = size + align;
+    let block = new(ArenaBlock, arena.backing);
+    block.memory = new([]u8, capacity, arena.backing);
+    block.previous = arena.blocks;
+    arena.blocks = block;
+    return carve(block, size, align);
+}
+
+// frees everything allocated so far, keeping the newest block to reuse
+pub fn arena_reset(arena: *Arena) {
+    if (arena.blocks == null)
+        return;
+    free_blocks(arena, arena.blocks.previous);
+    arena.blocks.previous = null;
+    arena.blocks.used = 0;
+    sabk_poison(arena.blocks.memory.ptr, arena.blocks.memory.len);
+}
+
+// frees everything, blocks included
+pub fn arena_destroy(arena: *Arena) {
+    free_blocks(arena, arena.blocks);
+    arena.blocks = null;
+}
+
+fn free_blocks(arena: *Arena, block: *ArenaBlock) {
+    while (block != null) {
+        let previous = block.previous;
+        sabk_unpoison(block.memory.ptr, block.memory.len); // its allocator's again
+        free(block.memory.ptr, arena.backing);
+        free(block, arena.backing);
+        block = previous;
+    }
+}
+
+// `size` bytes from `block`, or null if they don't fit
+fn carve(block: *ArenaBlock, size: isize, align: isize) -> *void {
+    let base = block.memory.ptr as isize;
+    let start = ((base + block.used + align - 1) & ~(align - 1)) - base;
+    if (start + size > block.memory.len)
+        return null;
+    block.used = start + size;
+    let memory = block.memory[start..start + size];
+    sabk_unpoison(memory.ptr, size);
+    memset(memory.ptr, 0, size as usize);
+    return memory.ptr;
+}
+
+fn arena_proc(data: *void, mode: AllocatorMode, size: isize, align: isize, old: *void, old_size: isize) -> *void {
+    let arena = data as *Arena;
+    switch (mode) {
+    case AllocatorMode.Alloc:
+        return arena_alloc(arena, size, align);
+    case AllocatorMode.Resize:
+        let memory = arena_alloc(arena, size, align);
+        if (memory != null && old != null) {
+            let keep = old_size;
+            if (size < keep)
+                keep = size;
+            memmove(memory, old, keep as usize);
+        }
+        return memory;
+    case AllocatorMode.FreeAll:
+        arena_reset(arena);
+        return null;
+    default:
+        return null; // Free: arena memory is freed all at once
+    }
+}

@@ -1,54 +1,54 @@
-[warning]: this is kept in `saved`, which outlives it: this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.smelt:12:32]
+[warning]: this is kept in `saved`, which outlives it: this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.sabk:12:32]
     12 |     for (i in 0..3) saved[i] = .[i, i];               // warns
        |                                ^
-[warning]: this is kept in `saved`, which outlives it: this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.smelt:16:20]
+[warning]: this is kept in `saved`, which outlives it: this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.sabk:16:20]
     16 |         saved[i] = pair;                              // warns: ...kept outside
        |                    ^
-[note]: it's made here at [tests/warnings/memory_traps.smelt:15:27]
+[note]: it's made here at [tests/warnings/memory_traps.sabk:15:27]
     15 |         let pair: []i64 = .[i, i];                    // held by `pair`...
        |                           ^
-[warning]: `array_add` may keep this in `pairs`, which outlives it: this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.smelt:24:39]
+[warning]: `array_add` may keep this in `pairs`, which outlives it: this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.sabk:24:39]
     24 |     for (i in 0..3) array_add(&pairs, .[i, i]);       // warns
        |                                       ^
-[warning]: this is kept in `s`, which outlives it: `a` is a local array, which only lives until the end of its block; keep a copy of its elements: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.smelt:32:32]
+[warning]: this is kept in `s`, which outlives it: `a` is a local array, which only lives until the end of its block; keep a copy of its elements: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.sabk:32:32]
     32 |     { let a = i64.[1, 2]; s = a[..]; }                // warns
        |                                ^
-[warning]: this is kept in `s`, which outlives it: `b` is a local array, which only lives until the end of its block; keep a copy of its elements: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.smelt:33:31]
+[warning]: this is kept in `s`, which outlives it: `b` is a local array, which only lives until the end of its block; keep a copy of its elements: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.sabk:33:31]
     33 |     { let b = i64.[3, 4]; s = b; }                    // warns: b as a slice
        |                               ^
-[warning]: `array_add` may keep this in `pairs`, which outlives it: `pair` is a local array, which only lives until the end of its block; keep a copy of its elements: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.smelt:37:31]
+[warning]: `array_add` may keep this in `pairs`, which outlives it: `pair` is a local array, which only lives until the end of its block; keep a copy of its elements: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.sabk:37:31]
     37 |         array_add(&pairs, pair[..]);                  // warns
        |                               ^
-[warning]: `array_add` may keep this in `out`, which outlives it: this slice literal's elements only live until `add` returns; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.smelt:47:20]
+[warning]: `array_add` may keep this in `out`, which outlives it: this slice literal's elements only live until `add` returns; keep a copy: `clone_slice(...)` (std/mem) at [tests/warnings/memory_traps.sabk:47:20]
     47 |     array_add(out, .[7, 7]);                          // warns
        |                    ^
-[warning]: `array_add` may keep this in `saved`, which outlives it: the copy made for this `Any` only lives until the end of its block at [tests/warnings/memory_traps.smelt:57:27]
+[warning]: `array_add` may keep this in `saved`, which outlives it: the copy made for this `Any` only lives until the end of its block at [tests/warnings/memory_traps.sabk:57:27]
     57 |         array_add(&saved, v);                         // warns
        |                           ^
-[warning]: `ys` and `xs` now share their elements: growing or freeing one leaves the other pointing at freed memory; copy them (`array_of(...)`), or pass a pointer at [tests/warnings/memory_traps.smelt:67:9]
+[warning]: `ys` and `xs` now share their elements: growing or freeing one leaves the other pointing at freed memory; copy them (`array_of(...)`), or pass a pointer at [tests/warnings/memory_traps.sabk:67:9]
     67 |     let ys = xs;                                      // warns
        |         ^
-[note]: `ys` can grow here, and `xs` is used after at [tests/warnings/memory_traps.smelt:68:33]
+[note]: `ys` can grow here, and `xs` is used after at [tests/warnings/memory_traps.sabk:68:33]
     68 |     for (i in 0..100) array_add(&ys, i);
        |                                 ^
-[warning]: `s` holds a string literal, whose bytes are read-only: this write crashes the program; to change the text, copy it first: `copy_string(...)` (std/str) at [tests/warnings/memory_traps.smelt:77:10]
+[warning]: `s` holds a string literal, whose bytes are read-only: this write crashes the program; to change the text, copy it first: `copy_string(...)` (std/str) at [tests/warnings/memory_traps.sabk:77:10]
     77 |     s[0] = 'J';                                       // warns
        |          ^
-[warning]: `b` holds a string literal, whose bytes are read-only: this write crashes the program; to change the text, copy it first: `copy_string(...)` (std/str) at [tests/warnings/memory_traps.smelt:79:10]
+[warning]: `b` holds a string literal, whose bytes are read-only: this write crashes the program; to change the text, copy it first: `copy_string(...)` (std/str) at [tests/warnings/memory_traps.sabk:79:10]
     79 |     b[0] = 'B';                                       // warns
        |          ^
-[warning]: `array_add` gets the array the loop around it reads: if it grows or frees it, the loop goes on reading the old elements; collect the changes, and make them after the loop at [tests/warnings/memory_traps.smelt:91:31]
+[warning]: `array_add` gets the array the loop around it reads: if it grows or frees it, the loop goes on reading the old elements; collect the changes, and make them after the loop at [tests/warnings/memory_traps.sabk:91:31]
     91 |         if (x == 0) array_add(&xs, 100);              // warns
        |                               ^
-[note]: the loop at [tests/warnings/memory_traps.smelt:90:10]
+[note]: the loop at [tests/warnings/memory_traps.sabk:90:10]
     90 |     for (x in xs)
        |          ^
-[warning]: `array_add` gets the array the loop around it reads: if it grows or frees it, the loop goes on reading the old elements; collect the changes, and make them after the loop at [tests/warnings/memory_traps.smelt:93:19]
+[warning]: `array_add` gets the array the loop around it reads: if it grows or frees it, the loop goes on reading the old elements; collect the changes, and make them after the loop at [tests/warnings/memory_traps.sabk:93:19]
     93 |         array_add(&shelf.books, b);                   // warns
        |                   ^
-[note]: the loop at [tests/warnings/memory_traps.smelt:92:10]
+[note]: the loop at [tests/warnings/memory_traps.sabk:92:10]
     92 |     for (b in shelf.books)
        |          ^
-[warning]: `xs` is a copy of the caller's `[..]i64`, sharing its elements: if `array_add` grows or frees it, the caller's points at freed memory; to change the caller's, take `*[..]i64` at [tests/warnings/memory_traps.smelt:99:37]
+[warning]: `xs` is a copy of the caller's `[..]i64`, sharing its elements: if `array_add` grows or frees it, the caller's points at freed memory; to change the caller's, take `*[..]i64` at [tests/warnings/memory_traps.sabk:99:37]
     99 | fn add_one(xs: [..]i64) { array_add(&xs, 99); }       // warns
        |                                     ^

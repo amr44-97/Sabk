@@ -28,7 +28,7 @@ float "": 0 Empty
 bool "true": true None
 bool "false": false None
 bool "yes": false Invalid
-cut: [name] [smelt] true
+cut: [name] [sabk] true
 cut: [no separator] [] false
 x = -12, ok = true, pi = 3.14!
 100

@@ -1,0 +1,86 @@
+// Directories, on POSIX systems (Linux, macOS). Files are std/io's:
+// read_file, write_file, append_file, delete_file and file_exists.
+//
+//   is_dir(path)                  whether there's a directory there
+//   make_dir(path)                an IoError, .None when it worked
+//   remove_dir(path)              an empty one
+//   make_temp_dir("sabk")        a new directory, $TMPDIR/sabk-XXXXXX:
+//                                 (path, IoError); remove it when done,
+//                                 and free(path.ptr)
+//   current_dir()                 the working directory: (path, IoError),
+//                                 allocated
+
+import "std/io";
+import "std/mem";
+import "std/os";
+import "std/str";
+import "std/array";
+
+extern fn opendir(path: *u8) -> *void;
+extern fn closedir(dir: *void) -> i32;
+extern fn mkdir(path: *u8, mode: u32) -> i32;
+extern fn rmdir(path: *u8) -> i32;
+extern fn mkdtemp(template: *u8) -> *u8;
+extern fn getcwd(buffer: *u8, size: usize) -> *u8;
+
+pub fn is_dir(path: string) -> bool {
+    let c_path = to_cstring(path);
+    defer free(c_path);
+    let dir = opendir(c_path);
+    if (dir == null)
+        return false;
+    closedir(dir);
+    return true;
+}
+
+// readable, writable and searchable by everyone the umask lets through
+pub fn make_dir(path: string) -> IoError {
+    let c_path = to_cstring(path);
+    defer free(c_path);
+    if (mkdir(c_path, 0x1ff) != 0) // 0777
+        return last_io_error();
+    return .None;
+}
+
+pub fn remove_dir(path: string) -> IoError {
+    let c_path = to_cstring(path);
+    defer free(c_path);
+    if (rmdir(c_path) != 0)
+        return last_io_error();
+    return .None;
+}
+
+// a new, empty directory only this user can use, named `prefix` and six
+// random characters, in $TMPDIR (or /tmp)
+pub fn make_temp_dir(prefix: string = "sabk", a: Allocator = context.allocator) -> (string, IoError) {
+    let template: [..]u8;
+    template.allocator = a;
+    append_string(&template, get_env("TMPDIR") or_else "/tmp");
+    if (template[template.len - 1] != '/')
+        array_add(&template, '/');
+    append_string(&template, prefix);
+    append_string(&template, "-XXXXXX");
+    array_add(&template, 0); // C's end of string
+    if (mkdtemp(template.ptr) == null) {
+        let err = last_io_error();
+        array_free(&template);
+        return "", err;
+    }
+    return template[..template.len - 1] as string, .None;
+}
+
+pub fn current_dir(a: Allocator = context.allocator) -> (string, IoError) {
+    let size: isize = 256;
+    while (true) {
+        let buffer = new([]u8, size, a);
+        if (getcwd(buffer.ptr, size as usize) != null)
+            return from_cstring(buffer.ptr), .None;
+        let err = last_io_error();
+        free(buffer.ptr, a);
+        if (sabk_errno() != 34) // ERANGE: too small
+            return "", err;
+        size *= 2;
+    }
+}
+
+extern fn sabk_errno() -> i32; // the runtime's

@@ -1,6 +1,6 @@
-[error]: `#run` failed: the value isn't .Some at [tests/errors/variant_access_run.smelt:3:11]
+[error]: `#run` failed: the value isn't .Some at [tests/errors/variant_access_run.sabk:3:11]
      3 | const X = #run none().Some;
        |           ^
-[note]: here at [tests/errors/variant_access_run.smelt:3:23]
+[note]: here at [tests/errors/variant_access_run.sabk:3:23]
      3 | const X = #run none().Some;
        |                       ^

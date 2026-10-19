@@ -1,12 +1,12 @@
-[error]: `break` here would leave `inner`, which gives a value: give it with `break inner = value;`, or label the loop or switch to leave it by name at [tests/errors/value_breaks.smelt:6:13]
+[error]: `break` here would leave `inner`, which gives a value: give it with `break inner = value;`, or label the loop or switch to leave it by name at [tests/errors/value_breaks.sabk:6:13]
      6 |             break;                          // would leave inner, not the loop
        |             ^
-[error]: `outer` doesn't give a value; leave it with `break outer;` at [tests/errors/value_breaks.smelt:10:23]
+[error]: `outer` doesn't give a value; leave it with `break outer;` at [tests/errors/value_breaks.sabk:10:23]
     10 |         break outer = 1;                    // a loop gives no value
        |                       ^
-[error]: `named` is a block: `continue` goes back to a loop or a switch statement at [tests/errors/value_breaks.smelt:13:9]
+[error]: `named` is a block: `continue` goes back to a loop or a switch statement at [tests/errors/value_breaks.sabk:13:9]
     13 |         continue named;                     // a block can't be continued
        |         ^
-[error]: `v` gives a value: `break v = value;` at [tests/errors/value_breaks.smelt:15:18]
+[error]: `v` gives a value: `break v = value;` at [tests/errors/value_breaks.sabk:15:18]
     15 |     let k = v: { break v; };                // needs a value
        |                  ^

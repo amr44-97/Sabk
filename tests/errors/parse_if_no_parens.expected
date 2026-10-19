@@ -1,3 +1,3 @@
-[error]: expected `(` after `if`, found `x` at [tests/errors/parse_if_no_parens.smelt:1:13]
+[error]: expected `(` after `if`, found `x` at [tests/errors/parse_if_no_parens.sabk:1:13]
      1 | fn f() { if x {} }
        |             ^

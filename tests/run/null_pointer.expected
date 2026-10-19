@@ -1,4 +1,4 @@
 2 2
 before
-tests/run/null_pointer.smelt:12:20: panic: null pointer
+tests/run/null_pointer.sabk:12:20: panic: null pointer
 [exit 134]

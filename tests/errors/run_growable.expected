@@ -1,6 +1,6 @@
-[error]: `#run` can't produce `[..]i64`: a growable array's elements were allocated while compiling; return a slice or an array instead at [tests/errors/run_growable.smelt:9:12]
+[error]: `#run` can't produce `[..]i64`: a growable array's elements were allocated while compiling; return a slice or an array instead at [tests/errors/run_growable.sabk:9:12]
      9 | const XS = #run build();
        |            ^
-[error]: `#run` can't produce `Holder`: its field `items`: a growable array's elements were allocated while compiling; return a slice or an array instead at [tests/errors/run_growable.smelt:10:11]
+[error]: `#run` can't produce `Holder`: its field `items`: a growable array's elements were allocated while compiling; return a slice or an array instead at [tests/errors/run_growable.sabk:10:11]
     10 | const H = #run hold();
        |           ^

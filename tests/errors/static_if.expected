@@ -1,6 +1,6 @@
-[error]: can't compare a type with a value at [tests/errors/static_if.smelt:2:12]
+[error]: can't compare a type with a value at [tests/errors/static_if.sabk:2:12]
      2 |     #if (T == 4) return 3;                // a type against a value
        |            ^
-[error]: unknown name `mispelled` at [tests/errors/static_if.smelt:3:42]
+[error]: unknown name `mispelled` at [tests/errors/static_if.sabk:3:42]
      3 |     #if (T == i32) return x; else return mispelled;   // names checked in both
        |                                          ^

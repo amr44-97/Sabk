@@ -1,18 +1,18 @@
-[error]: `Shape` is ambiguous: both "lib/left" and "lib/right" have it; write `left.Shape` or `right.Shape` at [tests/errors/import_ambiguous.smelt:4:9]
+[error]: `Shape` is ambiguous: both "lib/left" and "lib/right" have it; write `left.Shape` or `right.Shape` at [tests/errors/import_ambiguous.sabk:4:9]
      4 | fn f(s: Shape) {
        |         ^
-[note]: one `Shape` is declared here at [tests/errors/lib/left.smelt:3:12]
+[note]: one `Shape` is declared here at [tests/errors/lib/left.sabk:3:12]
      3 | pub struct Shape {}
        |            ^
-[note]: one `Shape` is declared here at [tests/errors/lib/right.smelt:3:12]
+[note]: one `Shape` is declared here at [tests/errors/lib/right.sabk:3:12]
      3 | pub struct Shape {}
        |            ^
-[error]: `shared` is ambiguous: both "lib/left" and "lib/right" have it; write `left.shared` or `right.shared` at [tests/errors/import_ambiguous.smelt:5:5]
+[error]: `shared` is ambiguous: both "lib/left" and "lib/right" have it; write `left.shared` or `right.shared` at [tests/errors/import_ambiguous.sabk:5:5]
      5 |     shared();
        |     ^
-[note]: one `shared` is declared here at [tests/errors/lib/left.smelt:1:8]
+[note]: one `shared` is declared here at [tests/errors/lib/left.sabk:1:8]
      1 | pub fn shared() {}
        |        ^
-[note]: one `shared` is declared here at [tests/errors/lib/right.smelt:2:8]
+[note]: one `shared` is declared here at [tests/errors/lib/right.sabk:2:8]
      2 | pub fn shared() {}
        |        ^

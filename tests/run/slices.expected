@@ -11,5 +11,5 @@ eral
 0
 0
 about to slice backwards
-tests/run/slices.smelt:41:20: panic: slice [4..2] starts after it ends
+tests/run/slices.sabk:41:20: panic: slice [4..2] starts after it ends
 [exit 134]

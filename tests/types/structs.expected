@@ -1,4 +1,4 @@
-MODULE tests/types/structs.smelt
+MODULE tests/types/structs.sabk
 ROOT
   STRUCT `Padded` : Padded
     STRUCT_FIELD `a` : u8
@@ -9,7 +9,7 @@ ROOT
       type: TYPE_NAME `u8` -> builtin : u8
   STRUCT `Nested` : Nested
     STRUCT_FIELD `p` : Padded
-      type: TYPE_NAME `Padded` -> STRUCT `Padded` tests/types/structs.smelt:1:8 : Padded
+      type: TYPE_NAME `Padded` -> STRUCT `Padded` tests/types/structs.sabk:1:8 : Padded
     STRUCT_FIELD `d` : f64
       type: TYPE_NAME `f64` -> builtin : f64
   UNION `Bits` : Bits
@@ -22,7 +22,7 @@ ROOT
       type: TYPE_NAME `i32` -> builtin : i32
     STRUCT_FIELD `next` : *List
       type: TYPE_PTR `*` : *List
-        lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+        lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.sabk:4:8 : List
   STRUCT `Def` : Def
     STRUCT_FIELD `x` : i32
       type: TYPE_NAME `i32` -> builtin : i32
@@ -33,11 +33,11 @@ ROOT
     lhs: ARRAY_LITERAL `.` : [8]usize
       type: TYPE_NAME `usize` -> builtin : usize
       SIZE_OF : usize = 12
-        type: TYPE_NAME `Padded` -> STRUCT `Padded` tests/types/structs.smelt:1:8 : Padded
+        type: TYPE_NAME `Padded` -> STRUCT `Padded` tests/types/structs.sabk:1:8 : Padded
       SIZE_OF : usize = 24
-        type: TYPE_NAME `Nested` -> STRUCT `Nested` tests/types/structs.smelt:2:8 : Nested
+        type: TYPE_NAME `Nested` -> STRUCT `Nested` tests/types/structs.sabk:2:8 : Nested
       SIZE_OF : usize = 8
-        type: TYPE_NAME `Bits` -> UNION `Bits` tests/types/structs.smelt:3:7 : Bits
+        type: TYPE_NAME `Bits` -> UNION `Bits` tests/types/structs.sabk:3:7 : Bits
       SIZE_OF : usize = 16
         type: TYPE_SLICE `[` : []u8
           lhs: TYPE_NAME `u8` -> builtin : u8
@@ -47,11 +47,11 @@ ROOT
           rhs: NUMBER_LITERAL `3` : untyped int = 3
       SIZE_OF : usize = 8
         type: TYPE_PTR `*` : *List
-          lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+          lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.sabk:4:8 : List
       SIZE_OF : usize = 1
         type: TYPE_NAME `bool` -> builtin : bool
       SIZE_OF : usize = 16
-        type: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+        type: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.sabk:4:8 : List
   FUN_DECL `f` : fn(*List, []i32, [3]u8) -> i32
     type: TYPE_NAME `i32` -> builtin : i32
     rhs: BLOCK
@@ -62,17 +62,17 @@ ROOT
               lhs: IDENTIFIER `l` -> FUN_PARAM `l` 12:6 : *List
       VAR_DECL `d` : Def
         lhs: STRUCT_INIT : Def
-          type: IDENTIFIER `Def` -> STRUCT `Def` tests/types/structs.smelt:5:8 : Def
+          type: IDENTIFIER `Def` -> STRUCT `Def` tests/types/structs.sabk:5:8 : Def
           FIELD_INIT `y`
             rhs: FLOAT_LITERAL `1.0` : f32 = 1
       VAR_DECL `pos` : Def
         lhs: STRUCT_INIT : Def
-          type: IDENTIFIER `Def` -> STRUCT `Def` tests/types/structs.smelt:5:8 : Def
+          type: IDENTIFIER `Def` -> STRUCT `Def` tests/types/structs.sabk:5:8 : Def
           NUMBER_LITERAL `1` : i32 = 1
           FLOAT_LITERAL `2.0` : f32 = 2
       VAR_DECL `b` : Bits
         lhs: STRUCT_INIT : Bits
-          type: IDENTIFIER `Bits` -> UNION `Bits` tests/types/structs.smelt:3:7 : Bits
+          type: IDENTIFIER `Bits` -> UNION `Bits` tests/types/structs.sabk:3:7 : Bits
           FIELD_INIT `wide`
             rhs: FLOAT_LITERAL `0.5` : f64 = 0.5
       ASSIGN `=`
@@ -99,7 +99,7 @@ ROOT
             lhs: IDENTIFIER `d` -> VAR_DECL `d` 14:9 : Def
     FUN_PARAM `l` : *List
       type: TYPE_PTR `*` : *List
-        lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+        lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.sabk:4:8 : List
     FUN_PARAM `items` : []i32
       type: TYPE_SLICE `[` : []i32
         lhs: TYPE_NAME `i32` -> builtin : i32

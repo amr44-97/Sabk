@@ -1,16 +1,16 @@
-tests/errors/run_panic.smelt:6:15: panic: negative
-[error]: `#run` failed: it called abort() (a panic?) at [tests/errors/run_panic.smelt:10:11]
+tests/errors/run_panic.sabk:6:15: panic: negative
+[error]: `#run` failed: it called abort() (a panic?) at [tests/errors/run_panic.sabk:10:11]
     10 | const X = #run check(-1);
        |           ^
 [note]: here at [<prelude>:129:5]
    129 |     abort();
        |     ^
-[note]: called from here at [std/os.smelt:36:52]
+[note]: called from here at [std/os.sabk:36:52]
     36 |     handler.procedure(handler.data, what, message, location);
        |                                                    ^
-[note]: called from here at [tests/errors/run_panic.smelt:6:15]
+[note]: called from here at [tests/errors/run_panic.sabk:6:15]
      6 |         panic("negative");
        |               ^
-[note]: called from here at [tests/errors/run_panic.smelt:10:22]
+[note]: called from here at [tests/errors/run_panic.sabk:10:22]
     10 | const X = #run check(-1);
        |                      ^

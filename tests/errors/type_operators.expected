@@ -1,18 +1,18 @@
-[error]: `==` needs numbers, bools, enums, pointers or strings, found `S` at [tests/errors/type_operators.smelt:3:15]
+[error]: `==` needs numbers, bools, enums, pointers or strings, found `S` at [tests/errors/type_operators.sabk:3:15]
      3 |     let c = a == b;
        |               ^
-[error]: `%` needs integers, found `f32` at [tests/errors/type_operators.smelt:4:15]
+[error]: `%` needs integers, found `f32` at [tests/errors/type_operators.sabk:4:15]
      4 |     let d = x % 2.0;
        |               ^
-[error]: `&` needs integers, found `f32` at [tests/errors/type_operators.smelt:5:15]
+[error]: `&` needs integers, found `f32` at [tests/errors/type_operators.sabk:5:15]
      5 |     let e = x & 1.0;
        |               ^
-[error]: `!` needs a `bool`, found `f32` at [tests/errors/type_operators.smelt:6:13]
+[error]: `!` needs a `bool`, found `f32` at [tests/errors/type_operators.sabk:6:13]
      6 |     let g = !x;
        |             ^
-[error]: `~` needs an integer, found `f32` at [tests/errors/type_operators.smelt:7:13]
+[error]: `~` needs an integer, found `f32` at [tests/errors/type_operators.sabk:7:13]
      7 |     let h = ~x;
        |             ^
-[error]: `*` needs numbers, found `*i32`; a pointer only moves by `+` and `-` at [tests/errors/type_operators.smelt:8:15]
+[error]: `*` needs numbers, found `*i32`; a pointer only moves by `+` and `-` at [tests/errors/type_operators.sabk:8:15]
      8 |     let k = p * 2;                // a pointer only moves by + and -
        |               ^

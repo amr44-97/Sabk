@@ -1,0 +1,96 @@
+import "std/fmt";
+import "std/io";
+import "std/mem";
+import "std/os";
+import "std/str";
+
+fn show_int(n: i64) {
+    let buffer: [24]u8;
+    println(format_int(n, &buffer));
+}
+
+fn try_parse(s: string) {
+    let n, err = parse_int(s);
+    if (err == .None)
+        println("parse \"%\": %", s, n);
+    else
+        println("parse \"%\": %", s, err);
+}
+
+fn main() {
+    assert(equal("abc", "abc"));
+    assert(!equal("abc", "abd"));
+    assert(starts_with("compiler", "comp"));
+    assert(!starts_with("co", "comp"));
+    assert(ends_with("main.sabk", ".sabk"));
+    assert(index_of("hello world", "world") == 6);
+    assert(index_of("hello", "xyz") == -1);
+    assert(index_of_char("hello", 'l') == 2);
+    assert(contains("haystack", "st"));
+    print("[");
+    print(trim("  \t padded \n"));
+    println("]");
+
+    let copy = copy_string("cloned");
+    copy[0] = 'C';
+    println(copy);
+    let c = to_cstring("to C");
+    printf("%s\n", c);
+    println(from_cstring(c));
+    free(c);
+    free(copy.ptr);
+
+    show_int(0);
+    show_int(-7);
+    show_int(9223372036854775807);
+    show_int(-9223372036854775807 - 1);
+
+    try_parse("123");
+    try_parse("-45");
+    try_parse("+6");
+    try_parse("9223372036854775807");
+    try_parse("-9223372036854775808");
+    try_parse("9223372036854775808");
+    try_parse("12a");
+    try_parse("-");
+    try_parse("");
+    for (text in string.["18446744073709551615", "18446744073709551616", "-1"]) {
+        let n, err = parse_uint(text);
+        println("uint \"%\": % %", text, n, err);
+    }
+    for (text in string.["1.5", "-2e3", "inf", "1e999", "1.5x", " 1", ""]) {
+        let f, err = parse_float(text);
+        println("float \"%\": % %", text, f, err);
+    }
+    for (text in string.["true", "false", "yes"]) {
+        let b, err = parse_bool(text);
+        println("bool \"%\": % %", text, b, err);
+    }
+    let key, value, found = cut("name = sabk", " = ");
+    println("cut: [%] [%] %", key, value, found);
+    let all, rest, cut_found = cut("no separator", "=");
+    println("cut: [%] [%] %", all, rest, cut_found);
+
+    let b = make_builder();
+    defer builder_free(&b);
+    builder_append(&b, "x = ");
+    builder_print(&b, "%", -12);
+    builder_append(&b, ", ok = ");
+    builder_print(&b, "%", true);
+    builder_append(&b, ", pi = ");
+    builder_print(&b, "%{.2}", 3.14159);
+    builder_append_char(&b, '!');
+    println(builder_string(&b));
+
+    builder_clear(&b);
+    for (i in 0..100) builder_print(&b, "%", (i % 10) as u64);   // grows several times
+    print("%", builder_string(&b).len);
+    println();
+
+    // a zero Builder is ready to use: its bytes are a [..]u8
+    let z: Builder;
+    defer builder_free(&z);
+    builder_append(&z, "zero ");
+    builder_print(&z, "%", 0);
+    println(builder_string(&z));
+}

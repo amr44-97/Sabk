@@ -1,4 +1,4 @@
-MODULE tests/resolve/macro_labels.smelt
+MODULE tests/resolve/macro_labels.sabk
 ROOT
   MACRO_DECL `twice`
     rhs: BLOCK
@@ -13,8 +13,8 @@ ROOT
         lhs: NUMBER_LITERAL `0`
         rhs: BLOCK
           EXPR_STMT `twice`
-            lhs: MACRO_EXPANSION `twice` [expansion 1] -> MACRO_DECL `twice` tests/resolve/macro_labels.smelt:4:4
-              lhs: IDENTIFIER `twice` -> MACRO_DECL `twice` tests/resolve/macro_labels.smelt:4:4
+            lhs: MACRO_EXPANSION `twice` [expansion 1] -> MACRO_DECL `twice` tests/resolve/macro_labels.sabk:4:4
+              lhs: IDENTIFIER `twice` -> MACRO_DECL `twice` tests/resolve/macro_labels.sabk:4:4
               FOR_IN `i` [macro 1]
                 lhs: NUMBER_LITERAL `0` [macro 1]
                 rhs: BLOCK [macro 1]

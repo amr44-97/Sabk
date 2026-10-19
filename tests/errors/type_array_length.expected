@@ -1,9 +1,9 @@
-[error]: an array length must be a constant integer at [tests/errors/type_array_length.smelt:2:10]
+[error]: an array length must be a constant integer at [tests/errors/type_array_length.sabk:2:10]
      2 | let a: [n()]u8;
        |          ^
-[error]: an array length can't be negative at [tests/errors/type_array_length.smelt:3:9]
+[error]: an array length can't be negative at [tests/errors/type_array_length.sabk:3:9]
      3 | let b: [-1]u8;
        |         ^
-[error]: an array length must be a constant integer at [tests/errors/type_array_length.smelt:4:9]
+[error]: an array length must be a constant integer at [tests/errors/type_array_length.sabk:4:9]
      4 | let c: [2.5]u8;
        |         ^

@@ -1,12 +1,12 @@
-[error]: `max` is generic; give the variable a function type to say which instance to use at [tests/errors/generic_values.smelt:4:13]
+[error]: `max` is generic; give the variable a function type to say which instance to use at [tests/errors/generic_values.sabk:4:13]
      4 |     let g = max;                               // no function type to say which
        |             ^
-[error]: expected `fn(i32, i32) -> bool`, but `max` here would be `fn(i32, i32) -> i32` at [tests/errors/generic_values.smelt:5:35]
+[error]: expected `fn(i32, i32) -> bool`, but `max` here would be `fn(i32, i32) -> i32` at [tests/errors/generic_values.sabk:5:35]
      5 |     let h: fn(i32, i32) -> bool = max;         // max(i32, i32) returns i32
        |                                   ^
-[error]: `make` takes a type argument, so it can't be used as a value at [tests/errors/generic_values.smelt:6:26]
+[error]: `make` takes a type argument, so it can't be used as a value at [tests/errors/generic_values.sabk:6:26]
      6 |     let k: fn() -> i32 = make;                 // takes a type argument
        |                          ^
-[error]: expected `i32`, found the generic function `max` at [tests/errors/generic_values.smelt:7:18]
+[error]: expected `i32`, found the generic function `max` at [tests/errors/generic_values.sabk:7:18]
      7 |     let n: i32 = max;
        |                  ^

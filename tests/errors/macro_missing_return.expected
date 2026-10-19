@@ -1,6 +1,6 @@
-[error]: `pick` returns `i32` but can reach the end of its body without returning a value at [tests/errors/macro_missing_return.smelt:1:4]
+[error]: `pick` returns `i32` but can reach the end of its body without returning a value at [tests/errors/macro_missing_return.sabk:1:4]
      1 | fn pick(flag: bool) -> i32 #expand {
        |    ^
-[note]: in the expansion of `pick` here at [tests/errors/macro_missing_return.smelt:4:18]
+[note]: in the expansion of `pick` here at [tests/errors/macro_missing_return.sabk:4:18]
      4 | fn f() { let x = pick(true); }
        |                  ^

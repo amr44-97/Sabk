@@ -1,6 +1,6 @@
-[error]: `m` needs at least 1 argument, got 0 at [tests/errors/macro_arity.smelt:3:6]
+[error]: `m` needs at least 1 argument, got 0 at [tests/errors/macro_arity.sabk:3:6]
      3 |     m();
        |      ^
-[error]: `m` takes at most 2 arguments, got 3 at [tests/errors/macro_arity.smelt:4:6]
+[error]: `m` takes at most 2 arguments, got 3 at [tests/errors/macro_arity.sabk:4:6]
      4 |     m(1, 2, 3);
        |      ^

@@ -1,6 +1,6 @@
-[error]: a top-level constant must be known at compile time at [tests/errors/type_global_not_constant.smelt:2:12]
+[error]: a top-level constant must be known at compile time at [tests/errors/type_global_not_constant.sabk:2:12]
      2 | const X = n();
        |            ^
-[error]: a global variable's initial value must be known at compile time at [tests/errors/type_global_not_constant.smelt:3:15]
+[error]: a global variable's initial value must be known at compile time at [tests/errors/type_global_not_constant.sabk:3:15]
      3 | let y: i32 = n();
        |               ^

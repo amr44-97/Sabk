@@ -1,24 +1,24 @@
-[error]: can't tell what type `.{ }` has here; write the type, like `Point.{ ... }` at [tests/errors/context_typed.smelt:5:13]
+[error]: can't tell what type `.{ }` has here; write the type, like `Point.{ ... }` at [tests/errors/context_typed.sabk:5:13]
      5 |     let a = .{ .x = 1 };                  // nothing says what type
        |             ^
-[error]: can't tell which enum `.Red` is from here; write the enum too, like `Color.Red` at [tests/errors/context_typed.smelt:6:13]
+[error]: can't tell which enum `.Red` is from here; write the enum too, like `Color.Red` at [tests/errors/context_typed.sabk:6:13]
      6 |     let b = .Red;                         // nothing says which enum
        |             ^
-[error]: `.Red` is an enum value, but `i32` is expected here at [tests/errors/context_typed.smelt:7:18]
+[error]: `.Red` is an enum value, but `i32` is expected here at [tests/errors/context_typed.sabk:7:18]
      7 |     let c: i32 = .Red;                    // not an enum
        |                  ^
-[error]: enum `Color` has no variant `Purple` at [tests/errors/context_typed.smelt:8:20]
+[error]: enum `Color` has no variant `Purple` at [tests/errors/context_typed.sabk:8:20]
      8 |     let d: Color = .Purple;               // no such variant
        |                    ^
-[error]: `.{ }` makes a struct or union, but `i32` is expected here at [tests/errors/context_typed.smelt:9:18]
+[error]: `.{ }` makes a struct or union, but `i32` is expected here at [tests/errors/context_typed.sabk:9:18]
      9 |     let e: i32 = .{ 1 };                  // not a struct or union
        |                  ^
-[error]: `.{ }` makes a struct or union; `[2]i32` is written `.[1, 2]` at [tests/errors/context_typed.smelt:10:21]
+[error]: `.{ }` makes a struct or union; `[2]i32` is written `.[1, 2]` at [tests/errors/context_typed.sabk:10:21]
     10 |     let g: [2]i32 = .{1, 2};              // arrays are written .[1, 2]
        |                     ^
-[error]: can't tell what `T` is from the arguments of `id` at [tests/errors/context_typed.smelt:11:15]
+[error]: can't tell what `T` is from the arguments of `id` at [tests/errors/context_typed.sabk:11:15]
     11 |     let h = id(.{ .x = 1 });              // T can't come from `.{ }` itself
        |               ^
-[error]: `Point` has no field `z` at [tests/errors/context_typed.smelt:12:24]
+[error]: `Point` has no field `z` at [tests/errors/context_typed.sabk:12:24]
     12 |     let k: Point = .{ .z = 1 };           // the usual struct checks apply
        |                        ^

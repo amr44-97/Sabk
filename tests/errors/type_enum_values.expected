@@ -1,9 +1,9 @@
-[error]: the value of `Y` (256) doesn't fit in `u8` at [tests/errors/type_enum_values.smelt:2:23]
+[error]: the value of `Y` (256) doesn't fit in `u8` at [tests/errors/type_enum_values.sabk:2:23]
      2 | enum A: u8 { X = 255, Y }
        |                       ^
-[error]: an enum value must be a constant integer at [tests/errors/type_enum_values.smelt:3:15]
+[error]: an enum value must be a constant integer at [tests/errors/type_enum_values.sabk:3:15]
      3 | enum B { X = n() }
        |               ^
-[error]: an enum's backing type must be an integer type, not `f32` at [tests/errors/type_enum_values.smelt:4:9]
+[error]: an enum's backing type must be an integer type, not `f32` at [tests/errors/type_enum_values.sabk:4:9]
      4 | enum C: f32 { X }
        |         ^

@@ -1,3 +1,3 @@
 green
-tests/run/switch_bad_value.smelt:7:5: panic: the switch value isn't one of its enum's variants
+tests/run/switch_bad_value.sabk:7:5: panic: the switch value isn't one of its enum's variants
 [exit 134]

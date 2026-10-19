@@ -1,3 +1,3 @@
-[error]: `#nodiscard` is for a function that returns a value; this one returns nothing at [tests/errors/parse_nodiscard_void.smelt:2:8]
+[error]: `#nodiscard` is for a function that returns a value; this one returns nothing at [tests/errors/parse_nodiscard_void.sabk:2:8]
      2 | fn f() #nodiscard {}
        |        ^

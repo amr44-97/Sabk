@@ -1,4 +1,4 @@
-MODULE tests/resolve/locals.smelt
+MODULE tests/resolve/locals.sabk
 ROOT
   CONST_DECL `X`
     lhs: NUMBER_LITERAL `1`
@@ -7,7 +7,7 @@ ROOT
     rhs: BLOCK
       VAR_DECL `x`
         lhs: ADD `+`
-          lhs: IDENTIFIER `X` -> CONST_DECL `X` tests/resolve/locals.smelt:1:7
+          lhs: IDENTIFIER `X` -> CONST_DECL `X` tests/resolve/locals.sabk:1:7
           rhs: IDENTIFIER `a` -> FUN_PARAM `a` 3:6
       BLOCK
         VAR_DECL `x`
@@ -63,7 +63,7 @@ ROOT
           DEFER
             lhs: EXPR_STMT `g`
               lhs: CALL `(`
-                lhs: IDENTIFIER `g` -> FUN_DECL `g` tests/resolve/locals.smelt:16:4
+                lhs: IDENTIFIER `g` -> FUN_DECL `g` tests/resolve/locals.sabk:16:4
                 IDENTIFIER `x` -> VAR_DECL `x` 4:9
           DEC `--`
             lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
@@ -82,9 +82,9 @@ ROOT
     ENUM_VARIANT `A`
     ENUM_VARIANT `B`
       lhs: ADD `+`
-        lhs: IDENTIFIER `A` -> ENUM_VARIANT `A` tests/resolve/locals.smelt:18:10
+        lhs: IDENTIFIER `A` -> ENUM_VARIANT `A` tests/resolve/locals.sabk:18:10
         rhs: NUMBER_LITERAL `1`
     ENUM_VARIANT `C`
       lhs: MUL `*`
-        lhs: IDENTIFIER `B` -> ENUM_VARIANT `B` tests/resolve/locals.smelt:18:13
+        lhs: IDENTIFIER `B` -> ENUM_VARIANT `B` tests/resolve/locals.sabk:18:13
         rhs: NUMBER_LITERAL `2`

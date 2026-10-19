@@ -1,9 +1,9 @@
-[error]: this switch doesn't handle `.Blue` of `Color`; add a case for it, or a `default` at [tests/errors/switch_missing_cases.smelt:7:5]
+[error]: this switch doesn't handle `.Blue` of `Color`; add a case for it, or a `default` at [tests/errors/switch_missing_cases.sabk:7:5]
      7 |     switch (c) {
        |     ^
-[error]: this switch doesn't handle `.B`, `.C`, `.D`, `.E`, `.F` and 2 more of `Big`; add cases for them, or a `default` at [tests/errors/switch_missing_cases.smelt:14:5]
+[error]: this switch doesn't handle `.B`, `.C`, `.D`, `.E`, `.F` and 2 more of `Big`; add cases for them, or a `default` at [tests/errors/switch_missing_cases.sabk:14:5]
     14 |     switch (b) {
        |     ^
-[error]: this switch doesn't handle `.Two` of `Same`; add a case for it, or a `default` at [tests/errors/switch_missing_cases.smelt:20:5]
+[error]: this switch doesn't handle `.Two` of `Same`; add a case for it, or a `default` at [tests/errors/switch_missing_cases.sabk:20:5]
     20 |     switch (s) {
        |     ^

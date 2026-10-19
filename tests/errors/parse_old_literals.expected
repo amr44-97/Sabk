@@ -1,24 +1,24 @@
-[error]: `[` in an expression starts a type; an array literal is written with a dot before the `[`: `.[1, 2, 3]` at [tests/errors/parse_old_literals.smelt:6:13]
+[error]: `[` in an expression starts a type; an array literal is written with a dot before the `[`: `.[1, 2, 3]` at [tests/errors/parse_old_literals.sabk:6:13]
      6 |     let a = [1, 2, 3];
        |             ^
-[error]: `[` in an expression starts a type; an array literal is written with a dot before the `[`: `.[]` at [tests/errors/parse_old_literals.smelt:7:13]
+[error]: `[` in an expression starts a type; an array literal is written with a dot before the `[`: `.[]` at [tests/errors/parse_old_literals.sabk:7:13]
      7 |     let b = [];
        |             ^
-[error]: `[` in an expression starts a type; an array literal is written with a dot before the `[`: `.[x]` at [tests/errors/parse_old_literals.smelt:8:13]
+[error]: `[` in an expression starts a type; an array literal is written with a dot before the `[`: `.[x]` at [tests/errors/parse_old_literals.sabk:8:13]
      8 |     let c = [x][0];
        |             ^
-[error]: an array literal is written with its element type before `.[`: `i64.[ ... ]`, or `.[ ... ]` where the type is known at [tests/errors/parse_old_literals.smelt:9:19]
+[error]: an array literal is written with its element type before `.[`: `i64.[ ... ]`, or `.[ ... ]` where the type is known at [tests/errors/parse_old_literals.sabk:9:19]
      9 |     let d = [3]i64{1, 2, 3};
        |                   ^
-[error]: an array literal is written with its element type before `.[`: `i64.[ ... ]`, or `.[ ... ]` where the type is known at [tests/errors/parse_old_literals.smelt:10:18]
+[error]: an array literal is written with its element type before `.[`: `i64.[ ... ]`, or `.[ ... ]` where the type is known at [tests/errors/parse_old_literals.sabk:10:18]
     10 |     let e = []i64{1, 2};
        |                  ^
-[error]: a struct literal is written with a dot before the `{`: `Point.{ ... }` at [tests/errors/parse_old_literals.smelt:11:18]
+[error]: a struct literal is written with a dot before the `{`: `Point.{ ... }` at [tests/errors/parse_old_literals.sabk:11:18]
     11 |     let p = Point{ .x = 1 };
        |                  ^
-[error]: a struct literal is written with a dot before the `{`: `Pair(i32).{ ... }` at [tests/errors/parse_old_literals.smelt:13:22]
+[error]: a struct literal is written with a dot before the `{`: `Pair(i32).{ ... }` at [tests/errors/parse_old_literals.sabk:13:22]
     13 |     let r = Pair(i32){};
        |                      ^
-[error]: a struct literal is written with a dot before the `{`: `mem.Arena.{ ... }` at [tests/errors/parse_old_literals.smelt:12:22]
+[error]: a struct literal is written with a dot before the `{`: `mem.Arena.{ ... }` at [tests/errors/parse_old_literals.sabk:12:22]
     12 |     let q = mem.Arena{};
        |                      ^

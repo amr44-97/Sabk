@@ -1,0 +1,1142 @@
+// The type checker: gives every expression and declaration a type
+// (Node.ty), computes compile-time constants (Node.cval) and struct
+// layouts, and reports type errors. It runs after the resolver; see "Type
+// checking" in docs/reference.md for the rules.
+//
+//   let c = make_checker(&r);
+//   let ok = check_program(&c);
+//
+// The checker is split over several files, all working on one Checker:
+//   check.sabk        declarations, types, layout, reporting
+//   statements.sabk   statements, several results
+//   patterns.sabk     patterns, and which values a switch covers
+//   expressions.sabk  conversions and expressions
+//   generics.sabk     generics, indexing, literals, casts
+//   comptime.sabk     #run, #insert and #if conditions, type info,
+//                      defaults
+//   formats.sabk      #format calls
+//   memory.sabk       memory that escapes, memory traps (not yet)
+//
+// `#run` runs code on the VM (vm.sabk, lower.sabk).
+
+import "std/array";
+import "std/fmt";
+import "std/io";
+import "std/map";
+import "std/mem";
+import "std/str";
+import "ast";
+import "const";
+import "module";
+import "resolve";
+import "source";
+import "token";
+import "types";
+import "statements";
+import "patterns";
+import "expressions";
+import "generics";
+import "comptime";
+import "formats";
+import "memory";
+import "vm";
+import "narrowing";
+
+pub const MAX_INSTANCE_DEPTH = 64;
+
+// a generic declaration and the types its T... are bound to: one instance
+// each
+pub struct InstanceKey {
+    templ: *Node;
+    args: []*Type;
+}
+
+// a place (a local, a parameter, a field of one) known to be a variant
+pub struct Fact {
+    path: string;
+    variant: *Node;
+}
+
+pub struct Checker {
+    res: *Resolver;
+    types: Types;
+    error_count: isize;
+
+    mod: *Module;
+    current_fn: *Node;
+    context_type: *Type;
+    allocator_type: *Type;
+    any_type: *Type;            // the prelude's Any: a value of any type
+    type_info_type: *Type;      // the prelude's TypeInfo
+    error_type: *Type;          // the prelude's Error: any failure enum's value
+    option_decl: *Node;         // the prelude's Option($T), the `?T` types
+    error_enums: [..]*Type;     // the enums that became Errors; id = index + 1
+    error_ids: Map(*Type, u32);
+    type_infos: [..]*Type;      // the types type_info(T) or Any needs
+    extern_callee: *Node;       // the callee being checked in a direct call
+    expanding: [..]*Node;       // macro expansions being checked
+
+    // generics: one instance per (template, types)
+    instances_by_key: Map(InstanceKey, *Node);
+    instances: [..]*Node;       // every instance, in the order they were made
+    pending: [..]*Node;         // function instances whose bodies need checking
+    current_instance: *Node;    // whose signature or body is checked
+    instance_parent: Map(*Node, *Node); // the instance that needed it
+    instance_site: Map(*Node, Token);   // where it was first needed
+    instance_depth: Map(*Node, i32);
+
+    // build scripts: top-level `#run`s, run once the program checks
+    build_steps: [..]*Node;
+    // function bodies: 1 being checked, 2 checked, 3 checked with errors
+    body_state: Map(*Node, i32);
+    run_statement: *Node;       // `#run f();`: the one #run without a value
+    in_run: i32;                // checking a #run's expression
+    // the expression check_expr may give several values (a tuple) for:
+    // the value of `let a, b =`, a `return`, `or_return`, ...; anywhere
+    // else that's an error
+    several_ok_for: *Node;
+
+    packs: Map(*Node, bool);    // the `.{...}`s pack_variadic made
+    // does a type, or something it holds by value, have field defaults?
+    // 1: working it out, 2: no, 3: yes
+    defaults_known: Map(*Type, i32);
+    // the type so far of a labeled block or switch expression's value
+    value_types: Map(*Node, *Type);
+    warned: Map(string, bool);  // a warning is given once per place
+
+    // narrowing: what the checker knows a place's variant to be where it
+    // is (a stack, cut back as scopes end), and the variables of the
+    // function being checked that are assigned or have their address
+    // taken somewhere, whose variant can change
+    facts: [..]Fact;
+    unstable: Map(*Node, bool);
+
+    // #run: the interpreter, made when the first #run needs it
+    vm: *Vm;
+    // what build scripts (top-level `#run`s, run once the program checks)
+    // set
+    build: BuildOptions;
+}
+
+pub fn make_checker(r: *Resolver) -> Checker {
+    let c = Checker.{ .res = r, .types = make_types() };
+    return c;
+}
+
+/* ---------------------------------------------------------------- helpers */
+
+pub fn q(s: string) -> string { return tformat("`%`", s); }
+pub fn qt(t: *Type) -> string { return tformat("`%`", type_name(t)); }
+
+// like qt() for both types, but says where each comes from when two
+// different types have the same name
+pub fn q2(a: *Type, b: *Type) -> (string, string) {
+    let qa, qb = qt(a), qt(b);
+    if (a != b && qa == qb && a.decl != null && b.decl != null) {
+        qa = tformat("% (from %)", qa, a.decl.owner.path);
+        qb = tformat("% (from %)", qb, b.decl.owner.path);
+    }
+    return qa, qb;
+}
+
+// where a message about what a call gives points: the function's name
+pub fn call_site(n: *Node) -> Token {
+    let e = n;
+    while (true) {
+        if (e.kind is .OrReturn{value})
+            e = value;
+        else if (e.kind is .Grouped{inner})
+            e = inner;
+        else
+            break;
+    }
+    if (e.kind is .Call{callee} && (callee.kind.tag == .Identifier || callee.kind.tag == .Member))
+        return callee.tok;
+    return e.tok;
+}
+
+pub fn count_values(k: isize) -> string {
+    return if (k == 1) "one value" else tformat("% values", k);
+}
+
+pub fn fits(v: I128, t: *Type) -> bool { return i128_fits(v, t.bits, t.is_signed); }
+
+// v wrapped into t's range, as a C cast does
+pub fn wrap(v: I128, t: *Type) -> I128 { return i128_wrap(v, t.bits, t.is_signed); }
+
+// what `n` looks like in the source, for messages that quote it
+pub fn text_of(n: *Node) -> string {
+    return if (n.span.len > 0) n.span else n.tok.text;
+}
+
+// the branch of a checked #if that's compiled, or null
+pub fn static_if_branch(n: *Node) -> *Node {
+    if (n.kind is .StaticIf{then, else_})
+        return if (n.cval.i.lo != 0) then else else_;
+    return null;
+}
+
+// Which result each name (or target) of `let a, b = f();` takes: its index
+// among the `count` results, or -1 for one of type void, which a void
+// result left out of f's type gives nothing to. With as many names as
+// results, each takes its own.
+pub fn result_slots(name_types: []*Type, count: isize) -> [..]i32 {
+    let slots: [..]i32;
+    let next: i32 = 0;
+    for (t in name_types) {
+        if (name_types.len > count && t != null && t.kind == .Void) {
+            array_add(&slots, -1);
+        } else {
+            array_add(&slots, next);
+            next++;
+        }
+    }
+    return slots;
+}
+
+// a pointer, typed or not: what `+` and `-` look at to count in values
+pub fn is_pointer_like(t: *Type) -> bool { return t.kind == .Ptr || t.kind == .Rawptr; }
+
+// does `t` count something a pointer can move by: any integer
+pub fn is_count(t: *Type) -> bool { return t.kind == .Int || t.kind == .UntypedInt; }
+
+// why a pointer of type `t` can't move, or "" when it can
+pub fn why_immovable(t: *Type) -> string {
+    if (t.kind == .Rawptr)
+        return "a `*void` doesn't say what it points at, so there's nothing to count in; cast it to `*u8` to move by bytes";
+    return "";
+}
+
+pub fn is_decl_of_type(d: *Node) -> bool { return d != null && is_type_decl(d); }
+
+// the type a declaration writes: a function's result, a variable's,
+// parameter's or field's type, an enum's backing type, a variant's payload
+pub fn declared_of(d: *Node) -> *Node {
+    switch (d.kind) {
+    case .Fn{result}: return result;
+    case .Param{declared}: return declared;
+    case .Field{declared}: return declared;
+    case .Let{declared}: return declared;
+    case .Const{declared}: return declared;
+    case .Enum{backing}: return backing;
+    case .Variant{payload}: return payload;
+    case .TypeAlias{aliased}: return aliased;
+    default: return null;
+    }
+}
+
+// a declaration's value: a variable's or constant's, a parameter's or
+// field's default, a variant's number
+pub fn value_of(d: *Node) -> *Node {
+    switch (d.kind) {
+    case .Let{value}: return value;
+    case .Const{value}: return value;
+    case .Param{value}: return value;
+    case .Field{value}: return value;
+    case .Variant{value}: return value;
+    default: return null;
+    }
+}
+
+pub fn fn_params(d: *Node) -> []*Node {
+    if (d.kind is .Fn{params})
+        return params;
+    return .[];
+}
+
+pub fn struct_fields_of(d: *Node) -> []*Node {
+    if (d.kind is .Struct{fields})
+        return fields;
+    return .[];
+}
+
+pub fn enum_variants(d: *Node) -> []*Node {
+    if (d.kind is .Enum{variants})
+        return variants;
+    return .[];
+}
+
+// does variant `v` hold a value: `Some(T)` or `Binary(op: Op, ...)`
+pub fn holds_value(v: *Node) -> bool {
+    if (v.kind is .Variant{payload, fields})
+        return payload != null || fields != null;
+    return false;
+}
+
+pub fn is_type_param(p: *Node) -> bool { return p.kind is .Param{is_type: true}; }
+pub fn is_variadic_param(p: *Node) -> bool { return p.kind is .Param{variadic: true}; }
+
+// the items of a call, a `.{...}` or a `.[...]`
+pub fn items_of(n: *Node) -> []*Node {
+    switch (n.kind) {
+    case .Call{args}: return args;
+    case .StructInit{items}: return items;
+    case .ArrayLiteral{items}: return items;
+    case .Values{items}: return items;
+    default: return .[];
+    }
+}
+
+// a field init's value, or the item itself
+pub fn item_value(item: *Node) -> *Node {
+    if (item.kind is .FieldInit{value})
+        return value;
+    return item;
+}
+
+pub fn ungroup(n: *Node) -> *Node {
+    let e = n;
+    while (e.kind is .Grouped{inner})
+        e = inner;
+    return e;
+}
+
+// can this initialize a global or top-level constant? Scalars must fold to
+// a value; literals built only from constants count too
+pub fn is_constant(n: *Node) -> bool {
+    // a part that failed to check was reported already
+    if (n.cval.kind != .None || n.ty == null || n.ty.kind == .Error)
+        return true;
+    switch (n.kind) {
+    case .String, .Null:
+        return true;
+    case .Identifier, .Member:
+        if (n.decl != null && n.decl.kind.tag == .Fn)
+            return true; // a function's address
+        // a global array used as a slice: its address and length
+        return n.decl != null && n.decl.owner != null && n.conv != null &&
+               n.conv.kind == .Slice && n.ty.kind == .Array;
+    case .Grouped{inner}:
+        return is_constant(inner);
+    case .Cast{value}:
+        return is_constant(value);
+    case .VariantValue{payload}:
+        return payload == null || is_constant(payload);
+    case .FieldInit{value}:
+        return is_constant(value);
+    case .StructInit{items}:
+        for (item in items)
+            if (!is_constant(item))
+                return false;
+        return true;
+    case .ArrayLiteral{items}:
+        for (item in items)
+            if (!is_constant(item))
+                return false;
+        return true;
+    default:
+        return false;
+    }
+}
+
+// a top-level declaration of the prelude
+fn prelude_decl(c: *Checker, name: string) -> *Node {
+    return map_get(&c.res.prelude.scope, ScopeKey.{ .name = name }) or_else null;
+}
+
+/* -------------------------------------------------------------- reporting */
+
+pub fn error(c: *Checker, t: Token, message: string) {
+    say(c.res, .Error, t, message);
+    c.error_count++;
+    note_inserted(c.res, t);
+    note_expansions(c.res, c.expanding);
+    note_instances(c);
+}
+
+// which instances an error is in: the innermost few, and the outermost when
+// there are many (a generic that instantiates itself forever)
+pub fn note_instances(c: *Checker) {
+    let chain: [..]*Node;
+    chain.allocator = context.temp_allocator;
+    let i = c.current_instance;
+    while (i != null) {
+        array_add(&chain, i);
+        i = map_get(&c.instance_parent, i) or_else null;
+    }
+    for (k in 0..chain.len) {
+        let site = map_get(&c.instance_site, chain[k]) or_else chain[k].tok;
+        if (k == 3 && chain.len > 4) {
+            let outer = chain[chain.len - 1];
+            let outer_site = map_get(&c.instance_site, outer) or_else outer.tok;
+            note(c, outer_site, tformat("in %, used here (after % more nested instances)",
+                                        describe_instance(c, outer), chain.len - 4));
+            break;
+        }
+        note(c, site, tformat("in %, used here", describe_instance(c, chain[k])));
+    }
+}
+
+// given once per place, however many instances share it
+pub fn warning(c: *Checker, t: Token, message: string) {
+    let key = format("%:%", t.text.ptr as usize, message);
+    if (map_has(&c.warned, key))
+        return;
+    map_put(&c.warned, key, true);
+    say(c.res, .Warning, t, message);
+}
+
+pub fn note(c: *Checker, t: Token, message: string) { say(c.res, .Note, t, message); }
+
+/* -------------------------------------------------------------------- run */
+
+// what checking anything needs; check_program and #insert call it
+pub fn prepare(c: *Checker) {
+    if (c.context_type != null)
+        return;
+    let saved = c.mod;
+    c.mod = c.res.prelude;
+    c.context_type = decl_type(c, prelude_decl(c, "Context"));
+    c.allocator_type = decl_type(c, prelude_decl(c, "Allocator"));
+    c.any_type = decl_type(c, prelude_decl(c, "Any"));
+    c.type_info_type = decl_type(c, prelude_decl(c, "TypeInfo"));
+    c.error_type = decl_type(c, prelude_decl(c, "Error"));
+    c.error_type.is_failure = true;
+    c.option_decl = prelude_decl(c, "Option");
+    c.mod = saved;
+}
+
+// false if any errors were reported
+pub fn check_program(c: *Checker) -> bool {
+    prepare(c);
+    for (d in root_list(c.res.prelude))
+        check_top(c, d);
+    for (m in c.res.modules) {
+        c.mod = m;
+        for (d in root_list(m))
+            check_top(c, d);
+    }
+    // instance bodies can need more instances, so this list grows
+    let i: isize = 0;
+    while (i < c.pending.len) {
+        c.current_instance = c.pending[i];
+        check_fn_body(c, c.pending[i]);
+        i++;
+    }
+    for (instance in c.instances) {
+        if (instance.kind.tag != .Fn && instance.ty != null) {
+            c.current_instance = instance;
+            layout(c, instance.ty);
+        }
+    }
+    c.current_instance = null;
+    run_build_steps(c);
+    return c.error_count == 0;
+}
+
+pub fn root_list(m: *Module) -> []*Node {
+    if (m.root.kind is .Root{decls})
+        return decls;
+    return .[];
+}
+
+fn check_top(c: *Checker, n: *Node) {
+    switch (n.kind) {
+    case .Run: // a build step: once the whole program checks
+        array_add(&c.build_steps, n);
+    case .Import:
+    case .Fn{is_macro: true}: // checked where it's expanded
+    case .Fn{body}:
+        if (is_template(n))
+            return; // checked through its instances
+        decl_type(c, n);
+        check_fn_body(c, n);
+    case .Struct:
+        if (is_template(n))
+            return;
+        layout(c, decl_type(c, n));
+    case .Enum{variants}:
+        if (is_template(n)) { // checked through its instances
+            let holds = false;
+            for (v in variants)
+                holds = holds || holds_value(v);
+            if (!holds)
+                error(c, n.tok, "a generic enum needs variants that hold values, like `Some(T)`");
+            return;
+        }
+        decl_type(c, n);
+    default:
+        decl_type(c, n);
+    }
+}
+
+/* ----------------------------------------------------------- declarations */
+
+// The type of a declaration, computed the first time it's needed. Top-level
+// declarations can refer to each other in any order, so this is what makes
+// `const A = B * 2; const B = 4;` work, and what detects
+// `const A = B; const B = A;`.
+pub fn decl_type(c: *Checker, d: *Node) -> *Type {
+    if (d.check_state == 2)
+        return d.ty;
+    if (d.untaken_if != null) { // reached some other way: say so at the declaration
+        untaken(c, d, d);
+        return c.types.error;
+    }
+    // a #insert can run code mid-resolution, before some of it is resolved
+    if (!ensure_resolved(c.res, d) && (map_get(&c.res.resolve_state, d) or_else 0) == 1 &&
+        d.kind.tag != .Fn) { // a function's signature comes first
+        error(c, d.tok, tformat("% is needed by the code an `#insert` inside it runs, so it isn't complete yet",
+                                q(d.tok.text)));
+        if (c.res.inserting.len > 0)
+            note(c, c.res.inserting[c.res.inserting.len - 1].tok, "the `#insert` is here");
+        return c.types.error;
+    }
+    if (d.check_state == 1) {
+        error(c, d.tok, tformat("the definition of % depends on itself", q(d.tok.text)));
+        return c.types.error;
+    }
+
+    let saved_mod = c.mod;
+    if (d.owner != null)
+        c.mod = d.owner;
+    d.check_state = 1;
+
+    switch (d.kind) {
+    case .BuiltinType:
+        d.ty = map_get(&c.types.by_name, d.tok.text) or_else c.types.error;
+    case .Struct:
+        check_struct(c, d);
+    case .Enum:
+        check_enum(c, d);
+    case .TypeAlias{aliased}:
+        d.ty = type_from_node(c, aliased);
+    case .Fn:
+        check_fn_signature(c, d);
+    case .Let, .Const:
+        check_var(c, d);
+    default:
+        // params, loop variables and enum variants are typed by their
+        // parent before anything can refer to them
+        d.ty = c.types.error;
+    }
+
+    d.check_state = 2;
+    c.mod = saved_mod;
+    return d.ty;
+}
+
+// `Name(i32, string)`: an instance's name
+fn instance_name(name: string, args: []*Type) -> string {
+    let s: [..]u8;
+    append_string(&s, name);
+    array_add(&s, '(');
+    for (i in 0..args.len) {
+        if (i > 0)
+            append_string(&s, ", ");
+        append_string(&s, type_name(args[i]));
+    }
+    array_add(&s, ')');
+    return s as string;
+}
+
+pub fn check_struct(c: *Checker, d: *Node) {
+    let t = new(Type);
+    t.kind = if (d.kind is .Struct{is_union: true}) .Union else .Struct;
+    t.name = d.tok.text;
+    if (d.generic != null) // an instance: List(i32)
+        t.name = instance_name(t.name, d.instance_args);
+    t.decl = d;
+    // done before the fields, so a field can point back: `next: *Node`
+    d.ty = t;
+    d.check_state = 2;
+
+    for (f in struct_fields_of(d)) {
+        if (f.kind is .Field{declared, value}) {
+            let ft = type_from_node(c, declared); // a void field takes no space
+            f.ty = ft;
+            f.check_state = 2;
+            array_add(&t.fields, Field.{ .name = f.tok.text, .ty = ft, .decl = f });
+            if (value != null) {
+                check_expr(c, value, ft);
+                coerce(c, value, ft);
+            }
+        }
+    }
+}
+
+fn check_enum(c: *Checker, d: *Node) {
+    let variants = enum_variants(d);
+    let backing = declared_of(d);
+    let t = new(Type);
+    t.kind = .Enum;
+    t.name = d.tok.text;
+    t.decl = d;
+    d.ty = t;
+    d.check_state = 2;
+
+    // variants that hold values make it a tagged enum: a struct of the tag
+    // (this enum) and a union of the values. Made first, so a payload can
+    // point back: `Binary(lhs: *Expr)`
+    let tagged: *Type = null;
+    for (v in variants)
+        if (holds_value(v))
+            tagged = new(Type);
+    if (d.generic != null && d.generic == c.option_decl) // the prelude's Option(i32): ?i32
+        t.name = tformat("?%", type_name(d.instance_args[0]));
+    else if (d.generic != null) // an instance: List(i32)
+        t.name = instance_name(t.name, d.instance_args);
+    if (tagged != null) {
+        tagged.kind = .Struct;
+        tagged.name = t.name;
+        tagged.decl = d;
+        tagged.is_tagged = true;
+        t.name = format("%.Tag", t.name);
+        t.part = "Tag";
+        d.ty = tagged;
+    }
+
+    t.elem = if (backing != null) type_from_node(c, backing) else c.types.i32;
+    if (t.elem.is_failure) {
+        // enum IoError: Error: its values fit an Error's 32 bits for the
+        // variant, and it converts to Error
+        t.elem = c.types.u32;
+        t.is_error_enum = true;
+        if (tagged != null)
+            tagged.is_error_enum = true;
+    }
+    if (t.elem.kind != .Int) {
+        if (t.elem.kind != .Error)
+            error(c, backing.tok, tformat("an enum's backing type must be an integer type, not %", qt(t.elem)));
+        t.elem = c.types.i32;
+    }
+
+    let next = i128(0);
+    for (v in variants) {
+        let value = value_of(v);
+        if (value != null) {
+            check_expr(c, value, null);
+            if (value.ty.kind != .Error) {
+                if (value.cval.kind != .Int)
+                    error(c, value.tok, "an enum value must be a constant integer");
+                else
+                    next = value.cval.i;
+            }
+        }
+        if (!fits(next, t.elem))
+            error(c, v.tok, tformat("the value of % (%) doesn't fit in %", q(v.tok.text),
+                                    i128_to_string(next), qt(t.elem)));
+        v.ty = t;
+        v.cval = int_const(next);
+        v.check_state = 2;
+        next = i128_add(next, i128(1));
+    }
+    if (tagged == null)
+        return;
+
+    let payload = new(Type);
+    payload.kind = .Union;
+    payload.name = format("%.Payload", tagged.name);
+    payload.decl = d;
+    payload.part = "Payload";
+    for (v in variants) {
+        let pt: *Type = null;
+        if (v.kind is .Variant{payload: written, fields}) {
+            if (written != null) {
+                pt = type_from_node(c, written);
+                if (pt.kind == .Void) {
+                    error(c, written.tok, "a variant can't hold `void`; leave out the parentheses for a variant without a value");
+                    pt = c.types.error;
+                }
+            } else if (fields != null) { // Binary(op: Op, ...): a struct of the fields
+                check_struct(c, fields);
+                pt = fields.ty;
+                pt.name = format("%.%", tagged.name, v.tok.text);
+                pt.decl = d;
+                pt.part = format("variant_%", v.tok.text); // apart from Tag and Payload
+            }
+        }
+        if (pt != null)
+            array_add(&payload.fields, Field.{ .name = v.tok.text, .ty = pt, .decl = v });
+    }
+    array_add(&tagged.fields, Field.{ .name = "tag", .ty = t });
+    array_add(&tagged.fields, Field.{ .name = "payload", .ty = payload });
+}
+
+// `Option.None`: which Option isn't known
+pub fn generic_variant_hint(templ: *Node, name: string) -> string {
+    let e = templ.tok.text;
+    let value = tformat(".%", name);
+    for (v in enum_variants(templ))
+        if (v.tok.text == name && holds_value(v))
+            value = tformat("%(...)", value);
+    return tformat("% is generic, so `%.%` doesn't say which % it is; write `%` where the type is known, like `let x: %(i32) = %;`",
+                   q(e), e, name, q(e), value, e, value);
+}
+
+// what variant `v` of tagged enum `t` holds, or null
+pub fn payload_of(t: *Type, v: *Node) -> *Type {
+    for (f in t.fields[1].ty.fields)
+        if (f.decl == v)
+            return f.ty;
+    return null;
+}
+
+// A tagged enum's value: `Expr.Nil` (call is null) or `Expr.Number(1)`.
+// `n` becomes the VariantValue.
+pub fn variant_value(c: *Checker, n: *Node, t: *Type, name: string, call: *Node) -> *Type {
+    let v: *Node = null;
+    for (variant in enum_variants(t.decl))
+        if (variant.tok.text == name)
+            v = variant;
+    if (v == null) {
+        error(c, n.tok, tformat("enum % has no variant %", qt(t), q(name)));
+        if (call != null)
+            check_items_for_error(c, call);
+        return c.types.error;
+    }
+    let pt = payload_of(t, v);
+    let held: *Node = null;
+    let written = tformat("%.%", t.name, name);
+    let fields: *Node = null;
+    if (v.kind is .Variant{fields: f})
+        fields = f;
+    // K.Let{ .declared = t }: its fields by name or in order, like a
+    // struct literal's, the rest defaulted
+    let braces = call != null && call.kind.tag == .StructInit;
+    if (braces) {
+        let at = call.tok;
+        if (call.kind is .StructInit{declared} && declared != null)
+            at = declared.tok;
+        if (pt == null) {
+            error(c, at, tformat("% holds no value, so it has no fields; write %", q(written), q(written)));
+            check_items_for_error(c, call);
+            return c.types.error;
+        }
+        if (fields == null) {
+            error(c, at, tformat("% holds % %, not fields; write %", q(written), if (index_of_char("aeiou", type_name(pt)[0]) >= 0) "an" else "a",
+                                 qt(pt), q(tformat("%(...)", written))));
+            check_items_for_error(c, call);
+            return c.types.error;
+        }
+        let init = new_node(call.tok, .StructInit(null, items_of(call)));
+        init.color = call.color;
+        if (check_expr(c, init, pt).kind == .Error)
+            return c.types.error;
+        held = init;
+    } else if (call == null) {
+        if (pt != null) {
+            error(c, n.tok, tformat("% holds a value of type %; write %. To test which variant a value is, compare its `.tag` with `.%`",
+                                    q(written), qt(pt), q(tformat("%(...)", written)), name));
+            return c.types.error;
+        }
+    } else if (pt == null) {
+        error(c, call.tok, tformat("% holds no value, so it takes no arguments; write %", q(written), q(written)));
+        check_items_for_error(c, call);
+        return c.types.error;
+    } else if (fields != null) {
+        // fields: the arguments fill them in order, like `.{ ... }`; the
+        // ones without a default must be given
+        let required = 0;
+        let field_nodes = struct_fields_of(fields);
+        for (field in field_nodes)
+            if (value_of(field) == null)
+                required++;
+        let args = items_of(call);
+        let given, total = args.len, field_nodes.len;
+        if (given < required || given > total) {
+            let defaults = if (required < total) tformat(" (% without a default)", required) else "";
+            error(c, call.tok, tformat("% has % fields%, found % %", q(written), total, defaults, given,
+                                       if (given == 1) "value" else "values"));
+            check_items_for_error(c, call);
+            return c.types.error;
+        }
+        let init = new_node(call.tok, .StructInit(null, args));
+        init.color = call.color;
+        if (check_expr(c, init, pt).kind == .Error)
+            return c.types.error;
+        held = init;
+    } else {
+        let args = items_of(call);
+        if (args.len != 1) {
+            error(c, call.tok, tformat("% holds one %, found % values", q(written), qt(pt), args.len));
+            check_items_for_error(c, call);
+            return c.types.error;
+        }
+        let arg = args[0];
+        if (check_expr(c, arg, pt).kind == .Error || !coerce(c, arg, pt))
+            return c.types.error;
+        held = arg;
+    }
+    let color = n.color;
+    let tok = n.tok;
+    n.* = Node.{ .tok = tok, .color = color, .decl = v, .kind = .VariantValue(held) };
+    return t;
+}
+
+fn check_fn_signature(c: *Checker, d: *Node) {
+    if (d.kind is .Fn(f))
+        check_signature(c, d, f.params, f.result, f.is_extern, f.variadic, f.format);
+}
+
+fn check_signature(c: *Checker, d: *Node, fn_params: []*Node, result: *Node, is_extern: bool,
+                   variadic: bool, is_format: bool) {
+    let params: [..]*Type;
+    let seen_default = false;
+    for (p in fn_params) {
+        if (is_type_param(p))
+            continue; // `$T: Type` is bound when the function is instantiated
+        let declared = declared_of(p);
+        let pt = type_from_node(c, declared);
+        if (pt.kind == .Void && is_extern) {
+            error(c, declared.tok, "a C function can't take `void`: C has no such parameter");
+            pt = c.types.error;
+        }
+        p.ty = pt;
+        p.check_state = 2;
+        array_add(&params, pt);
+
+        let value = value_of(p);
+        if (value != null) {
+            seen_default = true;
+            // a generic instance's defaults are checked when a call uses
+            // them (check_call): a default may only make sense for some
+            // types, like keys_equal's `==` for a map whose caller passes
+            // its own function
+            if (d.generic == null) {
+                check_expr(c, value, pt);
+                coerce(c, value, pt);
+            }
+        } else if (seen_default) {
+            error(c, p.tok, "parameters with default values must come after the ones without");
+        }
+    }
+    let ret = if (result != null) type_from_node(c, result) else c.types.void_;
+    if (ret.is_tuple && is_extern) {
+        error(c, result.tok, "an `extern` function returns one value at most, as C functions do");
+        ret = c.types.error;
+    }
+    d.ty = fn_type(&c.types, params, ret, variadic);
+    if (is_format) { // fn print(fmt: string, args: ..Any) #format
+        let ps = fn_params;
+        let ok = ps.len >= 2 && is_variadic_param(ps[ps.len - 1]) &&
+                 ps[ps.len - 1].ty == slice_of(&c.types, c.any_type) &&
+                 ps[ps.len - 2].ty != null && ps[ps.len - 2].ty.is_string;
+        if (!ok)
+            error(c, d.tok, "a `#format` function ends with a format and its values: `fmt: string, args: ..Any`");
+    }
+}
+
+pub fn growable_constant(c: *Checker, d: *Node) {
+    error(c, d.tok, tformat("a constant can't be a growable array: its elements are allocated; make it a variable, or a constant array (`const % = .[...];`)",
+                            d.tok.text));
+}
+
+// `let` and `const`, local or global
+pub fn check_var(c: *Checker, d: *Node) {
+    let is_const = d.kind.tag == .Const;
+    let declared = declared_of(d);
+    let value = value_of(d);
+    let uninit = false;
+    let is_extern = false;
+    if (d.kind is .Let(l)) {
+        uninit = l.uninit;
+        is_extern = l.is_extern;
+    }
+    let t: *Type = if (declared != null) type_from_node(c, declared) else null;
+    if (t != null && t.kind == .Void && is_const) {
+        error(c, declared.tok, "a constant can't have type `void`: its one value is `.{}`, so there's nothing to name");
+        t = c.types.error;
+    }
+    if (is_const && t != null && t.kind == .Growable) {
+        growable_constant(c, d);
+        t = c.types.error;
+    }
+    if (uninit && d.owner != null)
+        error(c, d.tok, "a global can't be left uninitialized: it starts as its type's defaults before the program does, at no cost; drop the `= ---`");
+
+    if (value != null && value.kind is .Values{items}) {
+        error(c, items[1].tok, tformat("`%` is one name, but there are % values; declare a name for each: `let a, b = ...`",
+                                       d.tok.text, items.len));
+        for (item in items)
+            check_expr(c, item, null);
+        d.ty = c.types.error;
+        return;
+    }
+    if (value != null) {
+        let init = check_expr(c, value, t);
+        if (t != null) {
+            coerce(c, value, t);
+        } else if (is_const && init.kind != .Null) {
+            t = init; // constants stay untyped: `const N = 4;` works as any int
+        } else if (init.kind == .Void && is_const) {
+            error(c, value.tok, "a constant can't be `void`: its one value is `.{}`, so there's nothing to name");
+            t = c.types.error;
+        } else {
+            t = default_type(c, value);
+        }
+        if (is_const)
+            d.cval = value.cval;
+    }
+    if (is_const && t != null && t.kind == .Growable) {
+        growable_constant(c, d);
+        t = c.types.error;
+    }
+
+    // a global without a value starts as its type's defaults (C's own
+    // start as C says)
+    if (d.owner != null && value == null && !is_extern && t != null && t.kind != .Error) {
+        let field = non_constant_default(c, t);
+        if (field != null) {
+            error(c, d.tok, tformat("% starts as %'s defaults, but the default of `%` isn't known at compile time; give % a value",
+                                    q(d.tok.text), qt(t), field.tok.text, q(d.tok.text)));
+            note(c, value_of(field).tok, "that default is here");
+        }
+    }
+
+    // only top-level declarations have an owner
+    if (d.owner != null && value != null && value.ty.kind != .Error && !is_constant(value))
+        error(c, value.tok, if (is_const) "a top-level constant must be known at compile time"
+                            else "a global variable's initial value must be known at compile time");
+
+    d.ty = if (t != null) t else c.types.error;
+}
+
+pub fn fn_body(fun: *Node) -> *Node {
+    if (fun.kind is .Fn{body})
+        return body;
+    return null;
+}
+
+pub fn block_list(b: *Node) -> []*Node {
+    if (b != null && b.kind is .Block{stmts})
+        return stmts;
+    return .[];
+}
+
+pub fn check_fn_body(c: *Checker, fun: *Node) {
+    let body = fn_body(fun);
+    if (body == null || (map_get(&c.body_state, fun) or_else 0) != 0)
+        return; // a #run may have needed it already
+    map_put(&c.body_state, fun, 1);
+    let errors = c.error_count;
+    c.current_fn = fun;
+    let saved_facts, saved_unstable = c.facts, c.unstable;
+    let no_facts: [..]Fact;
+    let no_unstable: Map(*Node, bool);
+    c.facts, c.unstable = no_facts, no_unstable;
+    find_unstable(c, body);
+    for (stmt in block_list(body))
+        check_stmt(c, stmt);
+    c.facts, c.unstable = saved_facts, saved_unstable;
+
+    // a function returning only an Error may fall off its end: success
+    if (fun.ty.ret.kind != .Void && !fun.ty.ret.is_failure && !always_returns(body, null))
+        error(c, fun.tok, tformat("% returns % but can reach the end of its body without returning a value",
+                                 q(fun.tok.text), qt(fun.ty.ret)));
+    c.current_fn = null;
+    if (c.error_count == errors) {
+        check_escapes(c, fun);
+        check_traps(c, fun);
+    }
+    let state: i32 = if (c.error_count == errors) 2 else 3;
+    map_put(&c.body_state, fun, state);
+}
+
+// what's saved while the checker checks something else first
+struct Place {
+    mod: *Module;
+    current_fn: *Node;
+    current_instance: *Node;
+    extern_callee: *Node;
+    expanding: [..]*Node;
+}
+
+pub fn leave_place(c: *Checker) -> Place {
+    let p = Place.{ .mod = c.mod, .current_fn = c.current_fn, .current_instance = c.current_instance,
+                    .extern_callee = c.extern_callee, .expanding = c.expanding };
+    let none: [..]*Node;
+    c.expanding = none;
+    c.extern_callee = null;
+    return p;
+}
+
+pub fn return_to_place(c: *Checker, p: *Place) {
+    c.mod = p.mod;
+    c.current_fn = p.current_fn;
+    c.current_instance = p.current_instance;
+    c.extern_callee = p.extern_callee;
+    c.expanding = p.expanding;
+}
+
+// checks `fn`'s body now if it hasn't been, from anywhere (a #run needs
+// it); false if it has errors or is being checked
+pub fn ensure_body_checked(c: *Checker, fun: *Node) -> bool {
+    if (fn_body(fun) == null)
+        return true;
+    if (!ensure_resolved(c.res, fun))
+        return false;
+    if ((map_get(&c.body_state, fun) or_else 0) == 0) {
+        let place = leave_place(c);
+        if (fun.owner != null)
+            c.mod = fun.owner;
+        if (fun.generic != null)
+            c.current_instance = fun;
+        decl_type(c, fun);
+        check_fn_body(c, fun);
+        return_to_place(c, &place);
+    }
+    return (map_get(&c.body_state, fun) or_else 0) == 2;
+}
+
+pub fn type_from_node(c: *Checker, n: *Node) -> *Type {
+    let t = c.types.error;
+    switch (n.kind) {
+    case .TypeName, .TypeMember:
+        let args = if (n.kind is .TypeName{args: a}) a else if (n.kind is .TypeMember{args: a}) a else .[];
+        if (n.decl == null || untaken(c, n, n.decl)) // the resolver reported a missing one
+            break;
+        if (args.len == 0) {
+            t = decl_type(c, n.decl);
+            break;
+        }
+        // a generic struct's instance: List(i32)
+        let arg_types: [..]*Type;
+        let ok = true;
+        for (arg in args) {
+            let at = type_from_node(c, arg);
+            array_add(&arg_types, at);
+            ok = ok && at.kind != .Error;
+        }
+        if (!ok)
+            break;
+        let instance = instantiate(c, n.decl, arg_types, n.tok);
+        if (instance != null)
+            t = if (instance.ty != null) instance.ty else c.types.error;
+
+    case .TypeParam: // `$T`: bound to a type in an instance
+        t = decl_type(c, n);
+
+    case .TypePointer{to}:
+        let elem = type_from_node(c, to);
+        if (elem.kind == .Void) // *void: the untyped pointer
+            t = c.types.rawptr;
+        else if (elem.kind != .Error)
+            t = ptr_to(&c.types, elem);
+
+    case .TypeSlice{elem: e}:
+        let elem = type_from_node(c, e);
+        if (elem.kind == .Void)
+            error(c, e.tok, "a slice can't hold `void`");
+        else if (elem.kind != .Error)
+            t = slice_of(&c.types, elem);
+
+    case .TypeGrowable{elem: e}:
+        let elem = type_from_node(c, e);
+        if (elem.kind == .Void)
+            error(c, e.tok, "a growable array can't hold `void`");
+        else if (elem.kind != .Error)
+            t = growable_of(&c.types, elem);
+
+    case .TypeArray{elem: e, len}:
+        let elem = type_from_node(c, e);
+        let len_type = check_expr(c, len, null);
+        if (elem.kind == .Void) {
+            error(c, e.tok, "an array can't hold `void`");
+            break;
+        }
+        if (len_type.kind == .Error || elem.kind == .Error)
+            break;
+        if (len.cval.kind != .Int || !is_int_like(len_type)) {
+            error(c, len.tok, "an array length must be a constant integer");
+            break;
+        }
+        if (i128_is_neg(len.cval.i)) {
+            error(c, len.tok, "an array length can't be negative");
+            break;
+        }
+        t = array_type_of(&c.types, elem, len.cval.i.lo);
+
+    case .TypeTuple{items}: // a function's results: (i64, bool)
+        // void results are left out, so `-> (void, IoError)` is `-> IoError`
+        let elems: [..]*Type;
+        let ok = true;
+        for (e in items) {
+            let et = type_from_node(c, e);
+            ok = ok && et.kind != .Error;
+            if (et.kind != .Void)
+                array_add(&elems, et);
+        }
+        if (ok)
+            t = if (elems.len == 0) c.types.void_
+                else if (elems.len == 1) elems[0]
+                else tuple_of(&c.types, elems);
+
+    case .TypeFn{params, result}:
+        let param_types: [..]*Type;
+        let ok = true;
+        for (p in params) {
+            let pt = type_from_node(c, p);
+            ok = ok && pt.kind != .Error;
+            array_add(&param_types, pt);
+        }
+        let ret = if (result != null) type_from_node(c, result) else c.types.void_;
+        if (ok && ret.kind != .Error)
+            t = fn_type(&c.types, param_types, ret, false);
+
+    default:
+    }
+    n.ty = t;
+    return t;
+}
+
+fn align_up(v: u64, a: u64) -> u64 { return (v + a - 1) / a * a; }
+
+// size and alignment, following the C rules so structs can be shared with C
+pub fn layout(c: *Checker, t: *Type) {
+    if (t.layout_state == 2)
+        return;
+    switch (t.kind) {
+    case .Bool:
+        t.size, t.align = 1, 1;
+    case .Int, .Float:
+        t.size = (t.bits / 8) as u64;
+        t.align = t.size;
+    case .Rawptr, .Ptr, .Fn:
+        t.size, t.align = 8, 8;
+    case .Slice: // pointer + length
+        t.size, t.align = 16, 8;
+    case .Growable: // pointer, length, capacity, allocator
+        layout(c, c.allocator_type);
+        t.size = 24 + c.allocator_type.size;
+        t.align = 8;
+    case .Array:
+        layout(c, t.elem);
+        t.size = t.elem.size * t.len;
+        t.align = t.elem.align;
+    case .Enum:
+        layout(c, t.elem);
+        t.size = t.elem.size;
+        t.align = t.elem.align;
+    case .Struct, .Union:
+        if (t.layout_state == 1) {
+            let saved = c.mod;
+            c.mod = t.decl.owner;
+            error(c, t.decl.tok, tformat("% contains itself, so it would be infinitely large; use a pointer instead",
+                                         q(t.name)));
+            c.mod = saved;
+            t.layout_state = 2; // report it once
+            return;
+        }
+        t.layout_state = 1;
+        let size: u64 = 0;
+        let align: u64 = 1;
+        for (i in 0..t.fields.len) {
+            let f = &t.fields[i];
+            layout(c, f.ty);
+            if (f.ty.align > align)
+                align = f.ty.align;
+            if (t.kind == .Struct) {
+                f.offset = align_up(size, f.ty.align);
+                size = f.offset + f.ty.size;
+            } else if (f.ty.size > size) {
+                size = f.ty.size;
+            }
+        }
+        t.size = align_up(size, align);
+        t.align = align;
+    default: // void, error and the untyped types have no layout
+        t.size, t.align = 0, 1;
+    }
+    t.layout_state = 2;
+}

@@ -1,9 +1,9 @@
-[error]: `g` needs at least 1 argument, got 0 at [tests/errors/type_call_args.smelt:3:6]
+[error]: `g` needs at least 1 argument, got 0 at [tests/errors/type_call_args.sabk:3:6]
      3 |     g();
        |      ^
-[error]: `g` takes 2 arguments, got 3 at [tests/errors/type_call_args.smelt:4:13]
+[error]: `g` takes 2 arguments, got 3 at [tests/errors/type_call_args.sabk:4:13]
      4 |     g(1, 2, 3);
        |             ^
-[error]: expected `i32`, found `untyped string` at [tests/errors/type_call_args.smelt:5:7]
+[error]: expected `i32`, found `untyped string` at [tests/errors/type_call_args.sabk:5:7]
      5 |     g("one");
        |       ^

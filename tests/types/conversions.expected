@@ -1,4 +1,4 @@
-MODULE tests/types/conversions.smelt
+MODULE tests/types/conversions.sabk
 ROOT
   STRUCT `S` : S
     STRUCT_FIELD `v` : i32
@@ -36,11 +36,11 @@ ROOT
         lhs: IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
       EXPR_STMT `free`
         lhs: CALL `(` : void
-          lhs: IDENTIFIER `free` -> FUN_DECL `free` tests/types/conversions.smelt:4:11 : fn(*void)
+          lhs: IDENTIFIER `free` -> FUN_DECL `free` tests/types/conversions.sabk:4:11 : fn(*void)
           IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
       VAR_DECL `none` : *S
         type: TYPE_PTR `*` : *S
-          lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S
+          lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.sabk:1:8 : S
         lhs: NULL_LITERAL : *S
       VAR_DECL `fp` : fn(i32)
         type: TYPE_FN : fn(i32)
@@ -61,7 +61,7 @@ ROOT
           lhs: IDENTIFIER `arr` -> VAR_DECL `arr` 16:9 : [4]i32
       EXPR_STMT `puts`
         lhs: CALL `(` : i32
-          lhs: IDENTIFIER `puts` -> FUN_DECL `puts` tests/types/conversions.smelt:3:11 : fn(*u8) -> i32
+          lhs: IDENTIFIER `puts` -> FUN_DECL `puts` tests/types/conversions.sabk:3:11 : fn(*u8) -> i32
           STRING_LITERAL `"c string"` : *u8
       VAR_DECL `cs` : *u8
         type: TYPE_PTR `*` : *u8
@@ -70,7 +70,7 @@ ROOT
       VAR_DECL `back` : *S
         lhs: CAST : *S
           type: TYPE_PTR `*` : *S
-            lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S
+            lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.sabk:1:8 : S
           lhs: IDENTIFIER `raw` -> VAR_DECL `raw` 11:9 : *void
       VAR_DECL `addr` : usize
         lhs: CAST : usize
@@ -79,17 +79,17 @@ ROOT
       VAR_DECL `p2` : *S
         lhs: CAST : *S
           type: TYPE_PTR `*` : *S
-            lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S
+            lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.sabk:1:8 : S
           lhs: IDENTIFIER `addr` -> VAR_DECL `addr` 21:9 : usize
       VAR_DECL `e` : E
         lhs: CAST : E = 1
-          type: TYPE_NAME `E` -> ENUM `E` tests/types/conversions.smelt:2:6 : E
+          type: TYPE_NAME `E` -> ENUM `E` tests/types/conversions.sabk:2:6 : E
           lhs: NUMBER_LITERAL `1` : u16 = 1
       VAR_DECL `n` : u16
         lhs: CAST : u16 = 1
           type: TYPE_NAME `u16` -> builtin : u16
-          lhs: MEMBER `Y` -> ENUM_VARIANT `Y` tests/types/conversions.smelt:2:18 : E = 1
-            lhs: IDENTIFIER `E` -> ENUM `E` tests/types/conversions.smelt:2:6 : E
+          lhs: MEMBER `Y` -> ENUM_VARIANT `Y` tests/types/conversions.sabk:2:18 : E = 1
+            lhs: IDENTIFIER `E` -> ENUM `E` tests/types/conversions.sabk:2:6 : E
       VAR_DECL `ok` : i32
         lhs: ADD `+` : i32
           lhs: GROUPED_EXPR `(` : i32
@@ -116,4 +116,4 @@ ROOT
       type: TYPE_NAME `f32` -> builtin : f32
     FUN_PARAM `s` : *S
       type: TYPE_PTR `*` : *S
-        lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S
+        lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.sabk:1:8 : S

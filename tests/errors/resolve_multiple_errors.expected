@@ -1,15 +1,15 @@
-[error]: can't find module `lib/missing` (looked for `tests/errors/lib/missing.smelt`) at [tests/errors/resolve_multiple_errors.smelt:1:8]
+[error]: can't find module `lib/missing` (looked for `tests/errors/lib/missing.sabk`) at [tests/errors/resolve_multiple_errors.sabk:1:8]
      1 | import "lib/missing";
        |        ^
-[error]: unknown type `Nope` at [tests/errors/resolve_multiple_errors.smelt:2:11]
+[error]: unknown type `Nope` at [tests/errors/resolve_multiple_errors.sabk:2:11]
      2 | fn f() -> Nope {
        |           ^
-[error]: unknown name `undefined_thing` at [tests/errors/resolve_multiple_errors.smelt:3:13]
+[error]: unknown name `undefined_thing` at [tests/errors/resolve_multiple_errors.sabk:3:13]
      3 |     let a = undefined_thing;
        |             ^
-[error]: `continue` outside of a loop at [tests/errors/resolve_multiple_errors.smelt:4:5]
+[error]: `continue` outside of a loop at [tests/errors/resolve_multiple_errors.sabk:4:5]
      4 |     continue;
        |     ^
-[error]: unknown type `S2` at [tests/errors/resolve_multiple_errors.smelt:6:15]
+[error]: unknown type `S2` at [tests/errors/resolve_multiple_errors.sabk:6:15]
      6 | struct S { s: S2; }
        |               ^

@@ -1,12 +1,12 @@
-[error]: `#run` failed: the calls went over 100000 deep; is the recursion endless? at [tests/errors/run_recursion.smelt:4:11]
+[error]: `#run` failed: the calls went over 100000 deep; is the recursion endless? at [tests/errors/run_recursion.sabk:4:11]
      4 | const X = #run forever(0);
        |           ^
-[note]: here at [tests/errors/run_recursion.smelt:2:48]
+[note]: here at [tests/errors/run_recursion.sabk:2:48]
      2 | fn forever(n: i64) -> i64 { return forever(n + 1) + 1; }
        |                                                ^
-[note]: called from here, 99999 times in a row at [tests/errors/run_recursion.smelt:2:48]
+[note]: called from here, 99999 times in a row at [tests/errors/run_recursion.sabk:2:48]
      2 | fn forever(n: i64) -> i64 { return forever(n + 1) + 1; }
        |                                                ^
-[note]: called from here at [tests/errors/run_recursion.smelt:4:24]
+[note]: called from here at [tests/errors/run_recursion.sabk:4:24]
      4 | const X = #run forever(0);
        |                        ^

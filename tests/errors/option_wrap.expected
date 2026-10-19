@@ -1,9 +1,9 @@
-[error]: the constant 300 doesn't fit in `u8` at [tests/errors/option_wrap.smelt:3:18]
+[error]: the constant 300 doesn't fit in `u8` at [tests/errors/option_wrap.sabk:3:18]
      3 |     let a: ?u8 = 300;
        |                  ^
-[error]: `null` doesn't become `?*i32` on its own: for no value write `.None`, for a null pointer in it `.Some(null)` at [tests/errors/option_wrap.smelt:4:20]
+[error]: `null` doesn't become `?*i32` on its own: for no value write `.None`, for a null pointer in it `.Some(null)` at [tests/errors/option_wrap.sabk:4:20]
      4 |     let b: ?*i32 = null;
        |                    ^
-[error]: expected `i32`, found `untyped string` at [tests/errors/option_wrap.smelt:5:19]
+[error]: expected `i32`, found `untyped string` at [tests/errors/option_wrap.sabk:5:19]
      5 |     let c: ?i32 = "text";
        |                   ^

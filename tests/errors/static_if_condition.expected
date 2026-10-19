@@ -1,12 +1,12 @@
-[error]: `#if` needs a condition known at compile time; this one is only known when the program runs, so use a plain `if` at [tests/errors/static_if_condition.smelt:2:10]
+[error]: `#if` needs a condition known at compile time; this one is only known when the program runs, so use a plain `if` at [tests/errors/static_if_condition.sabk:2:10]
      2 |     #if (flag) return 1;                  // not known at compile time
        |          ^
-[note]: in `pick` with T = isize, used here at [tests/errors/static_if_condition.smelt:6:18]
+[note]: in `pick` with T = isize, used here at [tests/errors/static_if_condition.sabk:6:18]
      6 | fn f() { let a = pick(5, true); }
        |                  ^
-[error]: `#if` needs a `bool` condition, found `untyped int` at [tests/errors/static_if_condition.smelt:3:10]
+[error]: `#if` needs a `bool` condition, found `untyped int` at [tests/errors/static_if_condition.sabk:3:10]
      3 |     #if (sizeof(T)) return 2;             // not a bool
        |          ^
-[note]: in `pick` with T = isize, used here at [tests/errors/static_if_condition.smelt:6:18]
+[note]: in `pick` with T = isize, used here at [tests/errors/static_if_condition.sabk:6:18]
      6 | fn f() { let a = pick(5, true); }
        |                  ^

@@ -1,3 +1,3 @@
-[error]: `K.Let` is a variant: its fields go right after it, `K.Let{ ... }` at [tests/errors/variant_literal_dot.smelt:4:15]
+[error]: `K.Let` is a variant: its fields go right after it, `K.Let{ ... }` at [tests/errors/variant_literal_dot.sabk:4:15]
      4 |     let f = K.Let.{ .declared = 1 };
        |               ^

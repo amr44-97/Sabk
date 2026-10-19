@@ -1,9 +1,9 @@
-[error]: can't `or_return` from inside a `defer` at [tests/errors/or_return_placement.smelt:11:17]
+[error]: can't `or_return` from inside a `defer` at [tests/errors/or_return_placement.sabk:11:17]
     11 |     defer get() or_return;                // can't return from a defer
        |                 ^
-[error]: `or_return` can't be used in an `#expand` function: it would return from the function the macro is used in at [tests/errors/or_return_placement.smelt:6:19]
+[error]: `or_return` can't be used in an `#expand` function: it would return from the function the macro is used in at [tests/errors/or_return_placement.sabk:6:19]
      6 |     let x = get() or_return;              // would return from the caller
        |                   ^
-[note]: in the expansion of `twice` here at [tests/errors/or_return_placement.smelt:12:5]
+[note]: in the expansion of `twice` here at [tests/errors/or_return_placement.sabk:12:5]
     12 |     twice() { }
        |     ^

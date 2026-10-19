@@ -1,30 +1,30 @@
-[error]: can't tell what `.[]` holds here; give it a type, like `let xs: []i32 = .[];` at [tests/errors/bracket_literals.smelt:6:13]
+[error]: can't tell what `.[]` holds here; give it a type, like `let xs: []i32 = .[];` at [tests/errors/bracket_literals.sabk:6:13]
      6 |     let e = .[];                   // nothing says what it holds
        |             ^
-[error]: can't tell what this literal holds: its elements take their type from it; write the element type, like `Point.[ ... ]`, or give the variable a type at [tests/errors/bracket_literals.smelt:7:13]
+[error]: can't tell what this literal holds: its elements take their type from it; write the element type, like `Point.[ ... ]`, or give the variable a type at [tests/errors/bracket_literals.sabk:7:13]
      7 |     let c = .[.{ .x = 1 }];        // only elements typed by it
        |             ^
-[error]: the elements don't agree: `isize` and `string` at [tests/errors/bracket_literals.smelt:8:18]
+[error]: the elements don't agree: `isize` and `string` at [tests/errors/bracket_literals.sabk:8:18]
      8 |     let d = .[1, "x"];             // the elements don't agree
        |                  ^
-[error]: the rows have different lengths, 2 and 1, so they can't make an array; to have slices, give it a type, like `let rows: [][]isize = ...` at [tests/errors/bracket_literals.smelt:9:24]
+[error]: the rows have different lengths, 2 and 1, so they can't make an array; to have slices, give it a type, like `let rows: [][]isize = ...` at [tests/errors/bracket_literals.sabk:9:24]
      9 |     let r = .[.[1, 2], .[3]];      // rows of different lengths
        |                        ^
-[error]: can't tell which type the `null`s in this literal have; write the element type, like `(*T).[ ... ]` at [tests/errors/bracket_literals.smelt:10:13]
+[error]: can't tell which type the `null`s in this literal have; write the element type, like `(*T).[ ... ]` at [tests/errors/bracket_literals.sabk:10:13]
     10 |     let n = .[null, null];         // nulls of no type
        |             ^
-[error]: expected `Point`, found `[1]isize` at [tests/errors/bracket_literals.smelt:11:20]
+[error]: expected `Point`, found `[1]isize` at [tests/errors/bracket_literals.sabk:11:20]
     11 |     let p: Point = .[1];           // not an array or slice
        |                    ^
-[error]: `.{ }` makes a struct or union; `[2]i64` is written `.[1, 2]` at [tests/errors/bracket_literals.smelt:12:21]
+[error]: `.{ }` makes a struct or union; `[2]i64` is written `.[1, 2]` at [tests/errors/bracket_literals.sabk:12:21]
     12 |     let o: [2]i64 = .{1, 2};       // arrays are written .[1, 2]
        |                     ^
-[error]: `[5]i32` needs 5 values, found 3 at [tests/errors/bracket_literals.smelt:14:23]
+[error]: `[5]i32` needs 5 values, found 3 at [tests/errors/bracket_literals.sabk:14:23]
     14 |     let few: [5]i32 = .[1, 2, 3];  // the rest isn't zero: it's an error
        |                       ^
-[error]: `[2]i32` needs 2 values, found none at [tests/errors/bracket_literals.smelt:15:24]
+[error]: `[2]i32` needs 2 values, found none at [tests/errors/bracket_literals.sabk:15:24]
     15 |     let none: [2]i32 = .[];
        |                        ^
-[error]: expected `i64`, found `untyped string` at [tests/errors/bracket_literals.smelt:16:24]
+[error]: expected `i64`, found `untyped string` at [tests/errors/bracket_literals.sabk:16:24]
     16 |     let many = i64.[1, "x"];       // T.[ checks each element
        |                        ^

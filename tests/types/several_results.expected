@@ -1,4 +1,4 @@
-MODULE tests/types/several_results.smelt
+MODULE tests/types/several_results.sabk
 ROOT
   ENUM `CheckError` : CheckError
     type: TYPE_NAME `Error` -> ENUM `Error` <prelude>:265:10 : Error
@@ -50,7 +50,7 @@ ROOT
   FUN_DECL `parse` : fn(string) -> (u8, CheckError)
     type: TYPE_TUPLE `(` : (u8, CheckError)
       TYPE_NAME `u8` -> builtin : u8
-      TYPE_NAME `CheckError` -> ENUM `CheckError` tests/types/several_results.smelt:2:6 : CheckError
+      TYPE_NAME `CheckError` -> ENUM `CheckError` tests/types/several_results.sabk:2:6 : CheckError
     rhs: BLOCK
       IF
         lhs: EQ_EQ `==` : bool
@@ -60,24 +60,24 @@ ROOT
         rhs: RETURN
           lhs: VALUES `0` : (u8, CheckError)
             NUMBER_LITERAL `0` : u8 = 0
-            ENUM_SHORTHAND `.Bad` -> ENUM_VARIANT `Bad` tests/types/several_results.smelt:2:26 : CheckError = 1
+            ENUM_SHORTHAND `.Bad` -> ENUM_VARIANT `Bad` tests/types/several_results.sabk:2:26 : CheckError = 1
       RETURN
         lhs: VALUES `[` : (u8, CheckError)
           INDEX `[` : u8
             lhs: IDENTIFIER `s` -> FUN_PARAM `s` 14:10 : string
             rhs: NUMBER_LITERAL `0` : isize = 0
-          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt #insert:2:18 : CheckError = 0
+          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.sabk #insert:2:18 : CheckError = 0
     FUN_PARAM `s` : string
       type: TYPE_NAME `string` -> builtin : string
   FUN_DECL `twice` : fn(string) -> (u16, CheckError)
     type: TYPE_TUPLE `(` : (u16, CheckError)
       TYPE_NAME `u16` -> builtin : u16
-      TYPE_NAME `CheckError` -> ENUM `CheckError` tests/types/several_results.smelt:2:6 : CheckError
+      TYPE_NAME `CheckError` -> ENUM `CheckError` tests/types/several_results.sabk:2:6 : CheckError
     rhs: BLOCK
       VAR_DECL `c` : u8
         lhs: OR_RETURN : u8
           lhs: CALL `(` : (u8, CheckError)
-            lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, CheckError)
+            lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.sabk:14:4 : fn(string) -> (u8, CheckError)
             IDENTIFIER `s` -> FUN_PARAM `s` 19:10 : string
       RETURN
         lhs: VALUES `*` : (u16, CheckError)
@@ -86,22 +86,22 @@ ROOT
               type: TYPE_NAME `u16` -> builtin : u16
               lhs: IDENTIFIER `c` -> VAR_DECL `c` 20:9 : u8
             rhs: NUMBER_LITERAL `2` : u16 = 2
-          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt #insert:2:18 : CheckError = 0
+          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.sabk #insert:2:18 : CheckError = 0
     FUN_PARAM `s` : string
       type: TYPE_NAME `string` -> builtin : string
   FUN_DECL `main` : fn()
     rhs: BLOCK
       LET_VALUES `q`
         lhs: CALL `(` : (i64, i64)
-          lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.smelt:4:4 : fn(i64, i64) -> (i64, i64)
+          lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.sabk:4:4 : fn(i64, i64) -> (i64, i64)
           NUMBER_LITERAL `7` : i64 = 7
           NUMBER_LITERAL `2` : i64 = 2
         VAR_DECL `q` : i64
         VAR_DECL `r` : i64
       VAR_DECL `x` : f32
         lhs: OR_ELSE : f32
-          lhs: CALL `(` -> FUN_DECL `first` tests/types/several_results.smelt:6:4 : (f32, bool)
-            lhs: IDENTIFIER `first` -> FUN_DECL `first` tests/types/several_results.smelt:6:4 : fn([]f32) -> (f32, bool)
+          lhs: CALL `(` -> FUN_DECL `first` tests/types/several_results.sabk:6:4 : (f32, bool)
+            lhs: IDENTIFIER `first` -> FUN_DECL `first` tests/types/several_results.sabk:6:4 : fn([]f32) -> (f32, bool)
             ARRAY_LITERAL `.` : [1]f32
               type: TYPE_NAME `f32` -> builtin : f32
               FLOAT_LITERAL `1.5` : f32 = 1.5
@@ -118,7 +118,7 @@ ROOT
             TYPE_NAME `i64` -> builtin : i64
           TYPE_NAME `i64` -> builtin : i64
           TYPE_NAME `i64` -> builtin : i64
-        lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.smelt:4:4 : fn(i64, i64) -> (i64, i64)
+        lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.sabk:4:4 : fn(i64, i64) -> (i64, i64)
       ASSIGN `=`
         lhs: VALUES `q`
           IDENTIFIER `q` -> VAR_DECL `q` 25:9 : i64
@@ -136,14 +136,14 @@ ROOT
           IDENTIFIER `small` -> VAR_DECL `small` 31:9 : u8
           IDENTIFIER `_`
         rhs: CALL `(` : (u8, CheckError)
-          lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, CheckError)
+          lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.sabk:14:4 : fn(string) -> (u8, CheckError)
           STRING_LITERAL `"a"` : string
       ASSIGN `=`
         lhs: VALUES `wide`
           IDENTIFIER `wide` -> VAR_DECL `wide` 30:9 : i64
           IDENTIFIER `_`
         rhs: CALL `(` : (i64, i64)
-          lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.smelt:4:4 : fn(i64, i64) -> (i64, i64)
+          lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.sabk:4:4 : fn(i64, i64) -> (i64, i64)
           IDENTIFIER `small` -> VAR_DECL `small` 31:9 : u8
           NUMBER_LITERAL `1` : i64 = 1
 INSTANCE `first` with T = f32

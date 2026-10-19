@@ -1,6 +1,6 @@
-[error]: the value of `E.B` isn't known here yet: working it out needs this use of it at [tests/errors/enum_value_order.smelt:3:19]
+[error]: the value of `E.B` isn't known here yet: working it out needs this use of it at [tests/errors/enum_value_order.sabk:3:19]
      3 | struct S { e: E = .B; }
        |                   ^
-[error]: the value of `F.Y` isn't known here yet: working it out needs this use of it at [tests/errors/enum_value_order.smelt:5:21]
+[error]: the value of `F.Y` isn't known here yet: working it out needs this use of it at [tests/errors/enum_value_order.sabk:5:21]
      5 | struct T { f: F = F.Y; }
        |                     ^

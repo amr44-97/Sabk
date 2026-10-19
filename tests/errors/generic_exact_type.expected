@@ -1,3 +1,3 @@
-[error]: `T` can't be both `i32` and `isize` in this call of `array_add` at [tests/errors/generic_exact_type.smelt:7:36]
+[error]: `T` can't be both `i32` and `isize` in this call of `array_add` at [tests/errors/generic_exact_type.sabk:7:36]
      7 |     for (i in 0..5) array_add(&xs, i);      // i is an isize
        |                                    ^

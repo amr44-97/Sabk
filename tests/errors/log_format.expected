@@ -1,6 +1,6 @@
-[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/log_format.smelt:4:23]
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/log_format.sabk:4:23]
      4 |     log(.Info, "% and %", 1);
        |                       ^
-[error]: `%{x}` prints an integer, but `"text"` is a `string`; for text write `%s` at [tests/errors/log_format.smelt:5:20]
+[error]: `%{x}` prints an integer, but `"text"` is a `string`; for text write `%s` at [tests/errors/log_format.sabk:5:20]
      5 |     log(.Warning, "%{x}", "text");
        |                    ^

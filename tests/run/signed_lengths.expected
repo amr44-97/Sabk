@@ -4,5 +4,5 @@ cba cba []
 3 3
 7 42
 about to index with -1
-tests/run/signed_lengths.smelt:56:20: panic: index -1 is out of bounds for length 3
+tests/run/signed_lengths.sabk:56:20: panic: index -1 is out of bounds for length 3
 [exit 134]

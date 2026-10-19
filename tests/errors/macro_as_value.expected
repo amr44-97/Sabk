@@ -1,6 +1,6 @@
-[error]: `m` is an `#expand` function, so it can only be called at [tests/errors/macro_as_value.smelt:4:13]
+[error]: `m` is an `#expand` function, so it can only be called at [tests/errors/macro_as_value.sabk:4:13]
      4 |     let a = m;
        |             ^
-[error]: `broken` is an `#expand` function, so it can only be called at [tests/errors/macro_as_value.smelt:5:22]
+[error]: `broken` is an `#expand` function, so it can only be called at [tests/errors/macro_as_value.sabk:5:22]
      5 |     let b = badmacro.broken;
        |                      ^

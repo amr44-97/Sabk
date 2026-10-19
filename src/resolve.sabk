@@ -1,0 +1,2363 @@
+// The resolver: loads the root file and everything it imports, then links
+// every name in the program to its declaration (Node.decl). See "Name
+// resolution" in docs/reference.md for the rules.
+//
+//   let r = make_resolver(std_dir);
+//   let ok = resolve_program(&r, "main.sabk");
+//
+// Macros (`#expand` functions) are expanded here: a call becomes a copy of
+// the macro's body. Every expansion gets a "color", and every node copied
+// into it carries that color; names are looked up together with their
+// color, so a macro's names and its caller's names never capture each
+// other. Color 0 is code written directly.
+//
+// Three things need the type checker (`checker`, when there is one):
+// deciding a top-level `#if`, deciding an `#if` around an `#insert` of a
+// string, and `#insert` of a string itself. Without one, as for --resolve,
+// no branch of a top-level `#if` is taken, and an `#insert` of a string is
+// an error.
+
+import "std/array";
+import "std/fmt";
+import "std/fs";
+import "std/io";
+import "std/map";
+import "std/mem";
+import "std/os";
+import "std/path";
+import "std/str";
+import "ast";
+import "check";
+import "comptime";
+import "lexer";
+import "module";
+import "parser";
+import "source";
+import "token";
+
+const MAX_EXPANSION_DEPTH = 64;
+
+struct Expansion {
+    module: *Module;   // where the macro is defined
+    node: *Node;       // the MacroExpansion
+    parent: i32;       // the color of the code that called the macro
+    scope: isize;      // the expansion's scope, an index into scopes
+    loop_depth: isize; // at its start
+    switch_depth: isize;
+    defer_depth: isize;
+    code_args: Map(string, *Node); // Code parameter -> argument
+}
+
+struct Ambiguous {
+    decl: *Node;
+    via: *Node;     // the import it comes through
+}
+
+pub struct Resolver {
+    std_dir: string;
+    prelude: *Module;            // not in `modules`
+    modules: [..]*Module;        // load order; modules[0] is the root
+    generated: [..]*Module;      // code made by #insert
+    loaded: Map(string, *Module); // the file's own path -> its module
+    builtins: Map(string, *Node); // i32, u8, bool, ...
+    error_count: isize;
+
+    // where it is: a module, and in it a function
+    mod: *Module;
+    scopes: [..]Map(ScopeKey, *Node); // innermost last
+    loop_depth: isize;
+    switch_depth: isize;
+    defer_depth: isize;
+    in_defer: bool;
+    value_owner: *Node;          // the labeled block or switch giving a value
+    context_ok: bool;
+    declaring_type_params: bool; // resolving a function's parameter types
+    // a side of an #if type comparison, which can name a generic struct
+    // without its types: `T == Map` (any Map)
+    any_instance_ok: *Node;
+    in_template: bool;           // resolving a generic fn or struct
+    labeled: [..]*Node;          // the labeled loops and switches around
+
+    inserting: [..]*Node;        // the #inserts whose code is being made
+    resolve_state: Map(*Node, i32); // 1: resolving, 2: done, 3: errors
+    // A generic function whose body has an `#insert` of a string: its code
+    // can differ for each T, so the body is resolved for each instance,
+    // when the checker makes it, instead of once for the template
+    deferred_bodies: Map(*Node, bool);
+
+    expansions: [..]Expansion;   // [0] stands for code written directly
+    expanding: [..]i32;          // colors being expanded, innermost last
+    macro_callee: *Node;         // the callee being resolved in a call
+    ambiguous: [..]Ambiguous;    // set by lookup
+    checker: *Checker;           // or null
+}
+
+const BUILTIN_TYPES = .["i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32",
+                        "u64", "usize", "f32", "f64", "bool", "void", "string"];
+
+pub fn make_resolver(std_dir: string) -> Resolver {
+    let r = Resolver.{ .std_dir = std_dir };
+    for (name in BUILTIN_TYPES)
+        map_put(&r.builtins, name, new_node(Token.{ .text = name, .kind = .Identifier }, .BuiltinType));
+    let direct: Expansion;
+    array_add(&r.expansions, direct);
+    return r;
+}
+
+// false if any errors were reported
+pub fn resolve_program(r: *Resolver, root_path: string) -> bool {
+    r.prelude = parse_module(r, "<prelude>", prelude_source());
+    collect_decls(r, r.prelude);
+    load(r, root_path);
+
+    // every reachable module is loaded by now. Declarations made by a
+    // top-level `#insert`, and those in the branch a top-level `#if` takes,
+    // come next, so the rest of the program can use them.
+    for (mi in 0..r.modules.len) {
+        let m = r.modules[mi];
+        let decls = root_decls(m);
+        let j: isize = 0;
+        while (j < decls.len) {
+            let d = decls.*[j];
+            if (d.kind.tag != .InsertString && d.kind.tag != .StaticIf) {
+                j++;
+                continue;
+            }
+            r.mod = m;
+            let made = if (d.kind.tag == .StaticIf) taken_decls(r, d) else inserted_decls(r, d);
+            splice(decls, j, made); // and look at what was made: it may insert more
+        }
+    }
+
+    // a #run may have needed some of these resolved already
+    for (d in root_decls(r.prelude).*)
+        ensure_resolved(r, d);
+    for (m in r.modules) {
+        for (d in root_decls(m).*) {
+            if (d.kind is .Run{value}) { // a build step
+                r.mod = m;
+                resolve_expr(r, value);
+            } else {
+                ensure_resolved(r, d);
+            }
+        }
+        for (d in m.untaken) // names only: a typo is an error anywhere
+            ensure_resolved(r, d);
+    }
+    return r.error_count == 0 && (r.checker == null || r.checker.error_count == 0);
+}
+
+fn root_decls(m: *Module) -> *[]*Node {
+    switch (m.root.kind) {
+    case .Root{decls: &d}: return d;
+    default: return null;
+    }
+}
+
+// replaces items[i] with `made`
+fn splice(items: *[]*Node, i: isize, made: []*Node) {
+    let out: [..]*Node;
+    array_append(&out, items.*[..i]);
+    array_append(&out, made);
+    array_append(&out, items.*[i + 1..]);
+    items.* = out;
+}
+
+// ---- the checker's part
+
+// a compile-time condition's value, and whether it could be decided;
+// `top_level`: a top-level #if, which reports a condition that isn't known
+fn decide_condition(r: *Resolver, cond: *Node, top_level: bool) -> (bool, bool) {
+    if (r.error_count != 0 || r.checker == null)
+        return false, false;
+    return static_condition(r.checker, cond, r.mod, top_level);
+}
+
+// the code an `#insert` of a string makes, from running its expression
+fn run_insert(r: *Resolver, n: *Node, value: *Node) -> (string, bool) {
+    if (r.checker == null) {
+        error(r, n.tok, "`#insert` of a string needs the type checker");
+        return "", false;
+    }
+    return insert_text_of(r.checker, value, r.mod);
+}
+
+/* --------------------------------------------------------------- position */
+
+// The resolver's position, saved while it resolves something else first
+struct Position {
+    mod: *Module;
+    scopes: [..]Map(ScopeKey, *Node);
+    loop_depth: isize;
+    switch_depth: isize;
+    defer_depth: isize;
+    in_defer: bool;
+    context_ok: bool;
+    declaring_type_params: bool;
+    in_template: bool;
+    expanding: [..]i32;
+    macro_callee: *Node;
+}
+
+fn leave_position(r: *Resolver) -> Position {
+    let p = Position.{
+        .mod = r.mod, .scopes = r.scopes, .loop_depth = r.loop_depth,
+        .switch_depth = r.switch_depth, .defer_depth = r.defer_depth,
+        .in_defer = r.in_defer, .context_ok = r.context_ok,
+        .declaring_type_params = r.declaring_type_params,
+        .in_template = r.in_template, .expanding = r.expanding,
+        .macro_callee = r.macro_callee,
+    };
+    let no_scopes: [..]Map(ScopeKey, *Node);
+    let no_colors: [..]i32;
+    r.scopes = no_scopes;
+    r.expanding = no_colors;
+    r.loop_depth, r.switch_depth, r.defer_depth = 0, 0, 0;
+    r.in_defer, r.context_ok, r.declaring_type_params, r.in_template = false, false, false, false;
+    r.macro_callee = null;
+    return p;
+}
+
+fn return_to(r: *Resolver, p: *Position) {
+    r.mod = p.mod;
+    r.scopes = p.scopes;
+    r.loop_depth = p.loop_depth;
+    r.switch_depth = p.switch_depth;
+    r.defer_depth = p.defer_depth;
+    r.in_defer = p.in_defer;
+    r.context_ok = p.context_ok;
+    r.declaring_type_params = p.declaring_type_params;
+    r.in_template = p.in_template;
+    r.expanding = p.expanding;
+    r.macro_callee = p.macro_callee;
+}
+
+// Resolves a top-level declaration now if it hasn't been: running code
+// with #run can need any function while the resolver is somewhere else.
+// False if it's being resolved (up the stack) or had errors.
+pub fn ensure_resolved(r: *Resolver, d: *Node) -> bool {
+    if (d.owner == null || d.generic != null)
+        return true; // locals; instances are resolved copies
+    switch (d.kind.tag) {
+    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
+    default: return true;
+    }
+    let state = map_get(&r.resolve_state, d) or_else 0;
+    if (state == 0) {
+        map_put(&r.resolve_state, d, 1);
+        let errors = r.error_count;
+        let position = leave_position(r);
+        r.mod = d.owner;
+        resolve_decl(r, d);
+        return_to(r, &position);
+        state = if (r.error_count == errors) 2 else 3;
+        map_put(&r.resolve_state, d, state);
+    }
+    return state == 2;
+}
+
+/* -------------------------------------------------------------- reporting */
+
+// the module whose text `p` points into
+pub fn module_of(r: *Resolver, p: *u8) -> *Module {
+    if (r.prelude != null && inside(r.prelude, p))
+        return r.prelude;
+    for (m in r.modules)
+        if (inside(m, p))
+            return m;
+    for (m in r.generated)
+        if (inside(m, p))
+            return m;
+    return null;
+}
+
+fn inside(m: *Module, p: *u8) -> bool {
+    return p >= m.src.text.ptr && p <= m.src.text.ptr + m.src.text.len;
+}
+
+pub fn say(r: *Resolver, severity: Severity, t: Token, message: string) {
+    let m = module_of(r, t.text.ptr);
+    if (m != null) {
+        report(&m.src, severity, t.text, message);
+        return;
+    }
+    // a builtin's name: no file to show
+    let kind = if (severity == .Error) "error" else "note";
+    eprint(tformat("[%]: % at [<builtin>:%:1]\n%{6} | %\n       | ^\n", kind, message, t.line, t.line, t.text));
+}
+
+fn error(r: *Resolver, t: Token, message: string) {
+    say(r, .Error, t, message);
+    r.error_count++;
+    note_inserted(r, t);
+    let calls: [..]*Node;
+    for (color in r.expanding)
+        array_add(&calls, r.expansions[color].node);
+    note_expansions(r, calls);
+    if (r.checker != null) // resolving a generic instance's body
+        note_instances(r.checker);
+}
+
+fn note(r: *Resolver, t: Token, message: string) { say(r, .Note, t, message); }
+
+// an error in generated code also says which #insert made it
+pub fn note_inserted(r: *Resolver, t: Token) {
+    let m = module_of(r, t.text.ptr);
+    while (m != null && m.inserted_by != null) {
+        note(r, m.inserted_by.tok, "in the code `#insert` made here");
+        m = module_of(r, m.inserted_by.tok.text.ptr);
+    }
+}
+
+// errors inside macros also say which calls they came from: the innermost
+// ones, and the outermost when there are many (a runaway recursive macro)
+pub fn note_expansions(r: *Resolver, calls: []*Node) {
+    let shown = 0;
+    let i = calls.len;
+    while (i > 0) {
+        i--;
+        if (shown == 3 && i > 0) {
+            note(r, calls[0].tok, tformat("in the expansion of `%` here (after % more nested expansions)",
+                                          calls[0].decl.tok.text, i));
+            return;
+        }
+        note(r, calls[i].tok, tformat("in the expansion of `%` here", calls[i].decl.tok.text));
+        shown++;
+    }
+}
+
+/* ---------------------------------------------------------------- loading */
+
+fn load(r: *Resolver, path: string) -> *Module {
+    let canonical = path_real(path) or_else path_normalize(path);
+    let found, seen = map_get(&r.loaded, canonical);
+    if (seen)
+        return found;
+
+    let src, err = load_source(path);
+    if (err != .None) {
+        eprintln("%: %", path, system_error_text(err));
+        exit(1);
+    }
+    let m = module_from(r, src);
+    // registered before its imports are loaded, so import cycles end
+    map_put(&r.loaded, canonical, m);
+    array_add(&r.modules, m);
+    collect_decls(r, m);
+    return m;
+}
+
+fn parse_module(r: *Resolver, path: string, text: string) -> *Module {
+    return module_from(r, Source.{ .path = path, .text = text });
+}
+
+fn module_from(r: *Resolver, src: Source) -> *Module {
+    let m = new(Module);
+    m.path = src.path;
+    m.src = src;
+    let tokens, ok = lex(&m.src);
+    if (!ok)
+        exit(1);
+    m.tokens = tokens;
+    let root, errors = parse_file(&m.src, tokens);
+    m.root = root;
+    r.error_count += errors;
+    return m;
+}
+
+// the file an import names: `std/...` in the standard library, anything
+// else next to the importing file; `.sabk` is added if it's missing
+fn import_path(r: *Resolver, from: *Module, spec: string) -> string {
+    let file = if (ends_with(spec, ".sabk")) spec else tformat("%.sabk", spec);
+    let p = if (starts_with(spec, "std/")) path_join(r.std_dir, file[4..], context.temp_allocator)
+            else path_join(path_dir(from.path), file, context.temp_allocator);
+    return path_normalize(p);
+}
+
+// an import's path, without its quotes
+fn import_spec(imp: *Node) -> string {
+    let text = imp.tok.text;
+    return text[1..text.len - 1];
+}
+
+fn is_identifier(s: string) -> bool {
+    if (s.len == 0 || (s[0] >= '0' && s[0] <= '9'))
+        return false;
+    for (c in s)
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+            return false;
+    return !is_keyword(s);
+}
+
+fn collect_decls(r: *Resolver, m: *Module) {
+    // load imported modules first; this recurses, so `mod` is set after
+    for (n in root_decls(m).*) {
+        switch (n.kind) {
+        case .Import{module: &found}:
+            let file = import_path(r, m, import_spec(n));
+            if (file_exists(file) && !is_dir(file))
+                found.* = load(r, file);
+        default:
+        }
+    }
+
+    r.mod = m;
+    for (n in root_decls(m).*) {
+        switch (n.kind) {
+        case .InsertString, .StaticIf:
+            // run or decided once every module is loaded
+        case .Run:
+            n.owner = m; // a build step: it declares nothing
+        case .Import{alias, module}:
+            let spec = import_spec(n);
+            if (module == null) {
+                error(r, n.tok, tformat("can't find module `%` (looked for `%`)", spec, import_path(r, m, spec)));
+                continue;
+            }
+            // `import "x" as name;` only binds the name
+            if (alias != null) {
+                declare(r, &m.scope, alias.tok.text, n, "this module");
+                continue;
+            }
+            // a plain import makes the module's pub names usable directly,
+            // and binds its file name (when that's a valid name) for
+            // `io.println` too
+            array_add(&m.flat_imports, n);
+            let name = import_name(n);
+            if (name.len > 0)
+                declare(r, &m.scope, name, n, "this module");
+        default:
+            collect_decl(r, m, n);
+        }
+    }
+}
+
+// a top-level declaration of `m`: its owner and its name in `m`'s scope
+fn collect_decl(r: *Resolver, m: *Module, n: *Node) {
+    prepare_decl(r, m, n);
+    declare(r, &m.scope, n.tok.text, n, "this module");
+}
+
+// every `$T` inside a type, in source order: a function type's parameters
+// come before its result
+fn collect_type_params(t: *Node, out: *[..]*Node) {
+    if (t == null)
+        return;
+    if (t.kind.tag == .TypeParam) {
+        array_add(out, t);
+        return;
+    }
+    let s = old_shape(t);
+    collect_type_params(s.lhs, out);
+    for (item in s.list)
+        collect_type_params(item, out);
+    collect_type_params(s.declared, out);
+}
+
+// what a top-level declaration needs before anything can use it
+fn prepare_decl(r: *Resolver, m: *Module, n: *Node) {
+    n.owner = m;
+    switch (n.kind) {
+    case .Fn{params, type_params: &tps}:
+        // a generic function's type parameters, known before any call to
+        // it is resolved
+        let found: [..]*Node;
+        for (param in params)
+            if (param.kind is .Param{declared})
+                collect_type_params(declared, &found);
+        tps.* = found;
+    case .Enum{variants}:
+        // variants are reached from other modules too (`util.Color.Red`)
+        for (v in variants)
+            v.owner = m;
+    default:
+    }
+}
+
+// A top-level #if: its condition, known now, picks the branch whose
+// declarations join the module. The others are set aside (see Module).
+fn taken_decls(r: *Resolver, n: *Node) -> []*Node {
+    let cond: *Node = null;
+    let then: *Node = null;
+    let else_: *Node = null;
+    if (n.kind is .StaticIf{cond: c, then: t, else_: e}) {
+        cond = c;
+        then = t;
+        else_ = e;
+    }
+    resolve_condition(r, cond);
+    let value, known = decide_condition(r, cond, true);
+    let taken: *Node = if (!known) null else if (value) then else else_;
+    for (branch in .[then, else_])
+        if (branch != null && branch != taken)
+            set_aside(r, branch, n);
+    let decls: [..]*Node;
+    if (taken == null)
+        return decls;
+    if (taken.kind.tag == .StaticIf) { // `else #if`: decided next
+        array_add(&decls, taken);
+        return decls;
+    }
+    if (taken.kind is .Block{stmts}) {
+        for (d in stmts) {
+            if (d.kind.tag == .Import) {
+                import_in_if(r, d);
+                continue;
+            }
+            if (d.kind.tag == .Run)
+                d.owner = r.mod; // a build step: it declares nothing
+            else if (d.kind.tag != .InsertString && d.kind.tag != .StaticIf)
+                collect_decl(r, r.mod, d);
+            array_add(&decls, d);
+        }
+    }
+    return decls;
+}
+
+// a branch that isn't taken, and the ones nested in it: their declarations
+// can only be named from code that isn't taken either
+fn set_aside(r: *Resolver, branch: *Node, in_if: *Node) {
+    if (branch.kind is .StaticIf{cond, then, else_}) { // `else #if`, not taken either
+        resolve_condition(r, cond);
+        set_aside(r, then, in_if);
+        if (else_ != null)
+            set_aside(r, else_, in_if);
+        return;
+    }
+    let stmts = block_stmts(branch);
+    for (d in stmts) {
+        switch (d.kind.tag) {
+        case .Import:
+            import_in_if(r, d);
+        case .StaticIf:
+            set_aside(r, d, in_if);
+        case .Run, .InsertString:
+            // never run
+        default:
+            prepare_decl(r, r.mod, d);
+            d.untaken_if = in_if;
+            if (!map_has(&r.mod.untaken_scope, d.tok.text))
+                map_put(&r.mod.untaken_scope, d.tok.text, d);
+            array_add(&r.mod.untaken, d);
+        }
+    }
+}
+
+fn block_stmts(n: *Node) -> []*Node {
+    if (n.kind is .Block{stmts})
+        return stmts;
+    return .[];
+}
+
+fn import_in_if(r: *Resolver, imp: *Node) {
+    error(r, imp.tok, "an `import` can't be inside a top-level `#if`; import the module outside it, and use it in the branch");
+}
+
+// the name a plain import binds: its file name, if that's a valid name
+fn import_name(imp: *Node) -> string {
+    if (imp.kind is .Import{alias} && alias != null)
+        return alias.tok.text;
+    let name = path_stem(import_spec(imp));
+    return if (is_identifier(name)) name else "";
+}
+
+/* ---------------------------------------------------------------- helpers */
+
+pub fn is_type_decl(d: *Node) -> bool {
+    switch (d.kind.tag) {
+    case .Struct, .Enum, .TypeAlias, .BuiltinType, .TypeParam: return true;
+    default: return false;
+    }
+}
+
+fn is_macro(d: *Node) -> bool { return d.kind is .Fn{is_macro: true}; }
+
+// a generic declaration, not one of its instances
+pub fn is_template(d: *Node) -> bool {
+    if (d.generic != null)
+        return false;
+    switch (d.kind) {
+    case .Fn{type_params}: return type_params.len > 0;
+    case .Struct{type_params}: return type_params.len > 0;
+    case .Enum{type_params}: return type_params.len > 0;
+    default: return false;
+    }
+}
+
+pub fn type_params_of(d: *Node) -> []*Node {
+    switch (d.kind) {
+    case .Fn{type_params}: return type_params;
+    case .Struct{type_params}: return type_params;
+    case .Enum{type_params}: return type_params;
+    default: return .[];
+    }
+}
+
+fn declare(r: *Resolver, scope: *Map(ScopeKey, *Node), name: string, n: *Node, where: string = "this scope") {
+    let key = ScopeKey.{ .name = name, .color = color_of(r, n) };
+    let prev, found = map_get(scope, key);
+    if (!found) {
+        map_put(scope, key, n);
+        return;
+    }
+    error(r, binding_token(n), tformat("`%` is already declared in %", name, where));
+    note(r, binding_token(prev), "the first declaration is here");
+}
+
+// where an import with `as` names itself: its alias
+fn binding_token(n: *Node) -> Token {
+    if (n.kind is .Import{alias} && alias != null)
+        return alias.tok;
+    return n.tok;
+}
+
+fn scope_get(scope: *Map(ScopeKey, *Node), name: string, color: i32) -> *Node {
+    return map_get(scope, ScopeKey.{ .name = name, .color = color }) or_else null;
+}
+
+// Looks up `name` for code of the given color: locals of that color, then
+// the top level of the module the code was written in, then the pub names
+// of that module's plain imports, the prelude, and the builtins. A name two
+// imports both provide is ambiguous: lookup returns null and leaves the
+// candidates in `ambiguous` for report_ambiguous().
+fn lookup(r: *Resolver, name: string, color: i32) -> *Node {
+    r.ambiguous.len = 0;
+    let i = r.scopes.len;
+    while (i > 0) {
+        i--;
+        let found = scope_get(&r.scopes[i], name, color);
+        if (found != null)
+            return found;
+    }
+    let m = if (color != 0) r.expansions[color].module else r.mod;
+    let own = scope_get(&m.scope, name, 0);
+    if (own != null)
+        return own;
+
+    let matches: [..]Ambiguous; // (declaration, import)
+    for (imp in m.flat_imports) {
+        let other = imported_module(imp);
+        if (other == null)
+            continue;
+        let found = scope_get(&other.scope, name, 0);
+        if (found == null || !is_pub(found))
+            continue;
+        let seen = false;
+        for (match in matches)
+            seen = seen || match.decl == found;
+        if (!seen)
+            array_add(&matches, Ambiguous.{ .decl = found, .via = imp });
+    }
+    if (matches.len == 1)
+        return matches[0].decl;
+    if (matches.len > 1) {
+        array_append(&r.ambiguous, matches);
+        return null;
+    }
+
+    // the prelude's private helpers stay private
+    let in_prelude = scope_get(&r.prelude.scope, name, 0);
+    if (in_prelude != null && is_pub(in_prelude))
+        return in_prelude;
+    let builtin = map_get(&r.builtins, name) or_else null;
+    if (builtin != null)
+        return builtin;
+
+    // declared in a top-level #if branch that isn't taken: the type
+    // checker reports it if code that is taken uses it
+    let untaken = map_get(&m.untaken_scope, name) or_else null;
+    if (untaken != null)
+        return untaken;
+    for (imp in m.flat_imports) {
+        let other = imported_module(imp);
+        if (other == null)
+            continue;
+        let found = map_get(&other.untaken_scope, name) or_else null;
+        if (found != null && is_pub(found))
+            return found;
+    }
+    return null;
+}
+
+fn imported_module(imp: *Node) -> *Module {
+    if (imp.kind is .Import{module})
+        return module;
+    return null;
+}
+
+fn is_pub(d: *Node) -> bool {
+    switch (d.kind) {
+    case .Fn{is_pub}: return is_pub;
+    case .Struct{is_pub}: return is_pub;
+    case .Enum{is_pub}: return is_pub;
+    case .TypeAlias{is_pub}: return is_pub;
+    case .Let{is_pub}: return is_pub;
+    case .Const{is_pub}: return is_pub;
+    default: return false;
+    }
+}
+
+// reports a lookup that failed because two imports provide the name
+fn report_ambiguous(r: *Resolver, t: Token) -> bool {
+    if (r.ambiguous.len == 0)
+        return false;
+    let name = t.text;
+    let matches = array_of(r.ambiguous);
+    r.ambiguous.len = 0;
+    let modules: [..]u8;
+    let qualified: [..]u8;
+    for (i in 0..matches.len) {
+        let imp = matches[i].via;
+        let sep = if (i == 0) "" else if (i + 1 == matches.len) " and " else ", ";
+        append_string(&modules, sep);
+        append_string(&modules, imp.tok.text);
+        let prefix = import_name(imp);
+        if (prefix.len > 0)
+            print_to(&qualified, "%`%.%`", if (qualified.len == 0) "" else " or ", prefix, name);
+    }
+    let hint = if (qualified.len == 0) "" else tformat("; write %", qualified as string);
+    error(r, t, tformat("`%` is ambiguous: both % have it%", name, modules as string, hint));
+    for (match in matches)
+        note(r, match.decl.tok, tformat("one `%` is declared here", name));
+    return true;
+}
+
+// when `name` is unknown but a module imported with `as` has it: a hint
+fn qualified_hint(r: *Resolver, name: string, color: i32) -> string {
+    if (name == "rawptr")
+        return "; the untyped pointer is `*void`, as in Jai and C";
+    let m = if (color != 0) r.expansions[color].module else r.mod;
+    for (n in root_decls(m).*) {
+        if (n.kind is .Import{alias, module} && alias != null && module != null) {
+            let found = scope_get(&module.scope, name, 0);
+            if (found != null && is_pub(found) && found.kind.tag != .Import)
+                return tformat("; did you mean `%.%`?", alias.tok.text, name);
+        }
+    }
+    return "";
+}
+
+fn module_member(r: *Resolver, m: *Module, name: Token) -> *Node {
+    let s = name.text;
+    let found = scope_get(&m.scope, s, 0);
+    if (found == null) { // set aside by a top-level #if (see lookup)
+        let untaken = map_get(&m.untaken_scope, s) or_else null;
+        if (untaken != null && is_pub(untaken))
+            return untaken;
+    }
+    // import bindings are never exported
+    if (found == null || found.kind.tag == .Import) {
+        error(r, name, tformat("module `%` has no member `%`", m.path, s));
+        return null;
+    }
+    if (!is_pub(found)) {
+        error(r, name, tformat("`%` is private to module `%`", s, m.path));
+        note(r, found.tok, "declared here, add `pub` to export it");
+        return null;
+    }
+    return found;
+}
+
+// reports a name that refers to a type or module where a value is needed
+fn check_value(r: *Resolver, n: *Node) {
+    let d = n.decl;
+    if (d == null)
+        return;
+    if (is_type_decl(d))
+        error(r, n.tok, tformat("`%` is a type, not a value", n.tok.text));
+    else if (d.kind.tag == .Import)
+        error(r, n.tok, tformat("`%` is a module, not a value", n.tok.text));
+}
+
+fn push_scope(r: *Resolver) {
+    let scope: Map(ScopeKey, *Node);
+    array_add(&r.scopes, scope);
+}
+
+fn pop_scope(r: *Resolver) {
+    r.scopes.len--;
+}
+
+fn top_scope(r: *Resolver) -> *Map(ScopeKey, *Node) { return &r.scopes[r.scopes.len - 1]; }
+
+/* ----------------------------------------------------------- declarations */
+
+fn resolve_decl(r: *Resolver, n: *Node) {
+    switch (n.kind) {
+    case .Import:
+        return;
+
+    case .Fn(f):
+        if (f.is_macro) { // resolved each time it's expanded
+            if (f.type_params.len > 0)
+                error(r, f.type_params[0].tok, "an `#expand` function can't be generic");
+            return;
+        }
+        resolve_fn(r, n);
+
+    case .Struct(s):
+        // a generic struct's fields see its type parameters
+        r.in_template = s.type_params.len > 0;
+        push_scope(r);
+        for (param in s.type_params)
+            declare(r, top_scope(r), param.tok.text, param);
+        let fields: Map(ScopeKey, *Node);
+        for (field in s.fields) {
+            declare(r, &fields, field.tok.text, field, if (s.is_union) "this union" else "this struct");
+            if (field.kind is .Field{declared, value}) {
+                resolve_type(r, declared);
+                if (value != null)
+                    resolve_expr(r, value);
+            }
+        }
+        pop_scope(r);
+        r.in_template = false;
+
+    case .Enum(e):
+        // a generic enum's payloads see its type parameters
+        r.in_template = e.type_params.len > 0;
+        push_scope(r);
+        for (param in e.type_params)
+            declare(r, top_scope(r), param.tok.text, param);
+        if (e.backing != null)
+            resolve_type(r, e.backing);
+        // a variant's value can refer to the variants before it: `B = A + 1`
+        push_scope(r);
+        for (v in e.variants) {
+            if (v.kind is .Variant{value} && value != null)
+                resolve_expr(r, value);
+            declare(r, top_scope(r), v.tok.text, v, "this enum");
+        }
+        // the variants' payloads: a type, or fields
+        for (v in e.variants) {
+            if (v.kind is .Variant{payload, fields}) {
+                if (payload != null)
+                    resolve_type(r, payload);
+                if (fields != null) {
+                    let names: Map(ScopeKey, *Node);
+                    for (field in struct_fields(fields)) {
+                        declare(r, &names, field.tok.text, field, "this variant");
+                        if (field.kind is .Field{declared, value}) {
+                            resolve_type(r, declared);
+                            if (value != null)
+                                resolve_expr(r, value);
+                        }
+                    }
+                }
+            }
+        }
+        pop_scope(r);
+        r.in_template = false;
+        pop_scope(r);
+
+    case .TypeAlias{aliased}:
+        resolve_type(r, aliased);
+
+    case .Let{declared, value}:
+        if (declared != null)
+            resolve_type(r, declared);
+        if (value != null)
+            resolve_expr(r, value);
+
+    case .Const{declared, value}:
+        if (declared != null)
+            resolve_type(r, declared);
+        if (value != null)
+            resolve_expr(r, value);
+
+    default:
+        error(r, n.tok, tformat("unexpected top-level %", old_shape(n).tag));
+    }
+}
+
+fn struct_fields(n: *Node) -> []*Node {
+    if (n.kind is .Struct{fields})
+        return fields;
+    return .[];
+}
+
+// does this code `#insert` a string? (not counting macros it calls)
+fn has_string_insert(n: *Node) -> bool {
+    if (n == null)
+        return false;
+    if (n.kind.tag == .InsertString)
+        return true;
+    let s = old_shape(n);
+    for (c in .[s.lhs, s.rhs, s.extra])
+        if (has_string_insert(c))
+            return true;
+    for (item in s.list)
+        if (has_string_insert(item))
+            return true;
+    return false;
+}
+
+fn resolve_fn(r: *Resolver, n: *Node) {
+    let f = fn_parts(n);
+    r.context_ok = true;
+    r.in_template = f.type_params.len > 0;
+    push_scope(r);
+
+    // generic: every `$T` in a parameter's type declares T for the whole
+    // function, so a parameter can use T before the one that says `$T`
+    if (f.type_params.len > 0 && f.is_extern)
+        error(r, n.tok, "an `extern` function can't be generic");
+    for (param in f.type_params)
+        declare(r, top_scope(r), param.tok.text, param);
+
+    // defaults are evaluated at the call site, so they can't see the params
+    r.declaring_type_params = true;
+    for (param in f.params) {
+        if (param.kind is .Param{declared, value}) {
+            resolve_type(r, declared);
+            if (value != null)
+                resolve_expr(r, value);
+        }
+    }
+    r.declaring_type_params = false;
+    for (param in f.params)
+        if (!(param.kind is .Param{is_type: true}))
+            declare(r, top_scope(r), param.tok.text, param);
+    if (f.result != null)
+        resolve_type(r, f.result);
+
+    // the body shares the parameters' scope, so `let a` can't redeclare
+    // the parameter a
+    if (f.body != null && r.in_template && has_string_insert(f.body))
+        map_put(&r.deferred_bodies, n, true); // see resolve_instance_body
+    else if (f.body != null)
+        resolve_stmts(r, body_stmts(f.body));
+
+    pop_scope(r);
+    r.context_ok = false;
+    r.in_template = false;
+}
+
+// a function's parts, as one value
+struct FnParts {
+    params: []*Node;
+    result: *Node;
+    body: *Node;
+    is_extern: bool;
+    type_params: []*Node;
+}
+
+fn fn_parts(n: *Node) -> FnParts {
+    let parts: FnParts;
+    if (n.kind is .Fn{params, result, body, is_extern, type_params}) {
+        parts = .{ .params = params, .result = result, .body = body,
+                   .is_extern = is_extern, .type_params = type_params };
+    }
+    return parts;
+}
+
+fn body_stmts(b: *Node) -> *[]*Node {
+    switch (b.kind) {
+    case .Block{stmts: &s}: return s;
+    default: return null;
+    }
+}
+
+// The body of an instance of a deferred template, a copy of the template's
+// unresolved body: its type parameters are bound now, so `#insert #run
+// f(type_info(T))` makes this instance's code
+pub fn resolve_instance_body(r: *Resolver, instance: *Node) {
+    let position = leave_position(r);
+    let f = fn_parts(instance);
+    r.mod = instance.owner;
+    r.context_ok = true;
+    push_scope(r);
+    for (param in f.type_params)
+        declare(r, top_scope(r), param.tok.text, param);
+    for (param in f.params)
+        if (!(param.kind is .Param{is_type: true}))
+            declare(r, top_scope(r), param.tok.text, param);
+    resolve_stmts(r, body_stmts(f.body));
+    return_to(r, &position);
+}
+
+/* ------------------------------------------------------------- statements */
+
+// statements in a list, where `#insert` of a string splices in the
+// statements it makes: what they declare is visible after them
+fn resolve_stmts(r: *Resolver, stmts: *[]*Node) {
+    let i: isize = 0;
+    while (i < stmts.len) {
+        let s = stmts.*[i];
+        if (s.kind.tag != .InsertString) {
+            resolve_stmt(r, s);
+            i++;
+            continue;
+        }
+        if (s.kind is .InsertString{value} && value == null) {
+            i++; // one that failed, left in place
+            continue;
+        }
+        // resolve what was inserted, which may insert more
+        splice(stmts, i, inserted_stmts(r, s));
+    }
+}
+
+// An if's or while's condition: `is` can bind names along its `&&`s, which
+// the rest of the condition and the body see
+fn resolve_test(r: *Resolver, n: *Node) {
+    switch (n.kind) {
+    case .Binary{op: .And, lhs, rhs}:
+        resolve_test(r, lhs);
+        resolve_test(r, rhs);
+    case .Grouped{inner}:
+        resolve_test(r, inner);
+    case .Is{value, pattern}:
+        resolve_expr(r, value);
+        resolve_pattern(r, pattern, r.scopes.len - 1);
+    default:
+        resolve_expr(r, n);
+    }
+}
+
+// `e !is .V`, parsed as a `!` right before its `is`
+fn is_negated_is(n: *Node, operand: *Node) -> bool {
+    return operand.kind.tag == .Is && n.tok.text.ptr + 1 == operand.tok.text.ptr;
+}
+
+// resolve_pattern's `bindings` for the pattern of an `!is`, which can't
+// have any
+const NEGATED: isize = -2;
+
+// A pattern's parts; its bindings go in the scope `bindings` (an index into
+// scopes), when it may have some (-1 when it can't, NEGATED after `!is`)
+fn resolve_pattern(r: *Resolver, p: *Node, bindings: isize) {
+    switch (p.kind) {
+    case .Range{lo, hi}:
+        resolve_expr(r, lo);
+        resolve_expr(r, hi);
+    case .VariantPattern{variant, bindings: items}:
+        resolve_expr(r, variant, true);
+        for (item in items) {
+            if (item.kind is .FieldPattern{pattern}) { // a pattern inside
+                resolve_pattern(r, pattern, bindings);
+                continue;
+            }
+            if (item.tok.text == "_") // binds nothing
+                continue;
+            if (bindings == NEGATED) {
+                error(r, item.tok, "`!is` can't name a variant's value: where it's true, the value isn't that variant; test it with `is` to use its value");
+                return;
+            }
+            if (bindings < 0) {
+                error(r, item.tok, "`is` can only name a variant's value in an `if` or `while` condition (joined with `&&`), where it's known to match");
+                return;
+            }
+            declare(r, &r.scopes[bindings], item.tok.text, item);
+        }
+    default:
+        resolve_expr(r, p);
+    }
+}
+
+// a switch statement or expression: each case's bindings are for its body
+fn resolve_switch(r: *Resolver, n: *Node) {
+    let value: *Node = null;
+    let cases: []*Node;
+    let gives_value = false;
+    if (n.kind is .Switch{value: v, cases: c, gives_value: g}) {
+        value = v;
+        cases = c;
+        gives_value = g;
+    }
+    resolve_expr(r, value);
+    for (clause in cases) {
+        push_scope(r);
+        let body: *Node = null;
+        switch (clause.kind) {
+        case .Case{patterns, guard, body: b}:
+            for (pattern in patterns)
+                resolve_pattern(r, pattern, r.scopes.len - 1);
+            if (guard != null) // the guard sees the case's names
+                resolve_expr(r, guard);
+            body = b;
+        case .DefaultCase{body: b}:
+            body = b;
+        default:
+        }
+        if (gives_value && body.kind.tag == .Block)
+            resolve_value_stmts(r, n, body_stmts(body)); // break label = value
+        else if (gives_value)
+            resolve_expr(r, body);
+        else
+            resolve_stmt(r, body);
+        pop_scope(r);
+    }
+}
+
+fn label_of(n: *Node) -> *Node {
+    switch (n.kind) {
+    case .Block{label}: return label;
+    case .While{label}: return label;
+    case .DoWhile{label}: return label;
+    case .For{label}: return label;
+    case .ForIn{label}: return label;
+    case .Switch{label}: return label;
+    default: return null;
+    }
+}
+
+// starts resolving `n`, a labeled loop, switch or block, with its label in
+// reach; end_label() when done
+fn begin_label(r: *Resolver, n: *Node) {
+    let label = label_of(n);
+    for (outer in r.labeled) {
+        let outer_label = label_of(outer);
+        if (outer_label.tok.text == label.tok.text && color_of(r, outer_label) == color_of(r, label)) {
+            error(r, label.tok, tformat("a loop, switch or block around this one is already named `%`", label.tok.text));
+            note(r, outer_label.tok, "it's named here");
+        }
+    }
+    array_add(&r.labeled, n);
+}
+
+fn end_label(r: *Resolver) { r.labeled.len--; }
+
+// statements that give a value with `break name = v`: a plain `break` or
+// `continue` there can't leave for a loop or switch outside
+fn resolve_value_stmts(r: *Resolver, owner: *Node, stmts: *[]*Node) {
+    let saved_loop, saved_switch, saved_owner = r.loop_depth, r.switch_depth, r.value_owner;
+    r.loop_depth, r.switch_depth = 0, 0;
+    r.value_owner = owner;
+    push_scope(r);
+    resolve_stmts(r, stmts);
+    pop_scope(r);
+    r.loop_depth, r.switch_depth, r.value_owner = saved_loop, saved_switch, saved_owner;
+}
+
+// a loop or if body gets its own scope even when it isn't a block
+fn resolve_body(r: *Resolver, n: *Node) {
+    push_scope(r);
+    resolve_stmt(r, n);
+    pop_scope(r);
+}
+
+fn resolve_stmt(r: *Resolver, n: *Node) {
+    // a labeled loop or switch: `break name;` and `continue name;` find it
+    let target = false;
+    switch (n.kind.tag) {
+    case .While, .DoWhile, .For, .ForIn, .Switch, .Block: target = true;
+    default:
+    }
+    if (target && label_of(n) != null && (r.labeled.len == 0 || r.labeled[r.labeled.len - 1] != n)) {
+        begin_label(r, n);
+        resolve_stmt(r, n);
+        end_label(r);
+        return;
+    }
+    switch (n.kind) {
+    case .Block{stmts: &stmts, gives_value: false}:
+        push_scope(r);
+        resolve_stmts(r, stmts);
+        pop_scope(r);
+
+    case .InsertString{value}:
+        // where one statement goes (an `if` body): the statements as a block
+        if (value == null)
+            return; // one that failed, left in place
+        let made = inserted_stmts(r, n);
+        if (made.len == 1 && made[0] == n)
+            return; // it failed
+        n.kind = .Block(made, null, false);
+        resolve_stmt(r, n);
+
+    case .Let{declared, value}:
+        resolve_local(r, n, declared, value);
+    case .Const{declared, value}:
+        resolve_local(r, n, declared, value);
+
+    case .LetValues{names, values}:
+        if (n.caller) {
+            error(r, n.tok, "a backtick `let` declares one name at a time");
+            return;
+        }
+        if (values == null) { // let a, b: T; each a `let a: T;`
+            for (d in names)
+                resolve_stmt(r, d);
+            return;
+        }
+        // the values first: `let a, b = b, a;` uses the outer a and b
+        resolve_expr(r, values);
+        for (d in names)
+            if (d.tok.text != "_") // `_` takes a value and declares nothing
+                declare(r, top_scope(r), d.tok.text, d);
+
+    case .Return{value}:
+        if (!check_backtick(r, n))
+            return;
+        // returns from the expansion of that color, or from the function
+        let color = color_of(r, n);
+        if (color != 0)
+            n.decl = r.expansions[color].node;
+        let depth = if (color != 0) r.expansions[color].defer_depth else 0;
+        if (r.defer_depth != depth)
+            error(r, n.tok, "can't `return` from inside a `defer`");
+        if (value != null)
+            resolve_expr(r, value);
+
+    case .Insert:
+        // #insert body; the caller's code goes here, as a block or a statement
+        let code = code_arg(r, n);
+        if (code == null)
+            return;
+        let copy = clone_node(code, -1);
+        if (copy.kind.tag == .Block) {
+            n.* = copy.*;
+        } else {
+            let stmt = new_node(copy.tok, .ExprStmt(copy, false));
+            stmt.color = copy.color;
+            n.* = stmt.*;
+        }
+        resolve_stmt(r, n);
+
+    case .ExprStmt{value}: resolve_expr(r, value);
+    case .Inc{target}: resolve_expr(r, target);
+    case .Dec{target}: resolve_expr(r, target);
+
+    case .Assign{target, value}:
+        if (target.kind is .Values{items}) {
+            // a, b = ...; `_` is a target that drops its value
+            for (t in items)
+                if (!is_discard(t))
+                    resolve_expr(r, t);
+        } else {
+            resolve_expr(r, target);
+        }
+        resolve_expr(r, value);
+
+    case .Defer{stmt}:
+        if (!check_backtick(r, n))
+            return;
+        if (n.caller) {
+            // `defer runs when the caller's scope ends
+            let e = &r.expansions[n.color];
+            if (expansion_result(e.node) != null)
+                error(r, n.tok, "a backtick `defer` only works in an `#expand` function that doesn't return a value");
+            else if (r.scopes.len - 1 != e.scope)
+                error(r, n.tok, "a backtick `defer` must be at the top level of the `#expand` function");
+        }
+        // break/continue/return can't jump out of a deferred statement
+        let saved_loop, saved_switch, saved_defer = r.loop_depth, r.switch_depth, r.in_defer;
+        r.loop_depth, r.switch_depth = 0, 0;
+        r.in_defer = true;
+        r.defer_depth++;
+        resolve_body(r, stmt);
+        r.defer_depth--;
+        r.loop_depth, r.switch_depth, r.in_defer = saved_loop, saved_switch, saved_defer;
+
+    case .If{cond, then, else_, gives_value: false}:
+        // names bound by `is` in the condition are for the body, not `else`
+        push_scope(r);
+        resolve_test(r, cond);
+        resolve_body(r, then);
+        pop_scope(r);
+        if (else_ != null)
+            resolve_body(r, else_);
+
+    case .StaticIf{cond, then, else_}:
+        // names are resolved in both branches, and the type checker picks
+        // one; but a branch that inserts code made by `#run` would run it,
+        // so then the condition is decided now (in an instance, its types
+        // are known) and only the branch taken is resolved
+        resolve_condition(r, cond);
+        if (has_string_insert(then) || has_string_insert(else_)) {
+            let value, known = decide_condition(r, cond, false);
+            if (known) {
+                let taken = if (value) then else else_;
+                if (taken != null)
+                    resolve_body(r, taken);
+                return;
+            }
+        }
+        resolve_body(r, then);
+        if (else_ != null)
+            resolve_body(r, else_);
+
+    case .While{cond, body}:
+        push_scope(r);
+        resolve_test(r, cond);
+        r.loop_depth++;
+        resolve_body(r, body);
+        r.loop_depth--;
+        pop_scope(r);
+
+    case .DoWhile{body, cond}: // the condition comes after the body: no bindings
+        r.loop_depth++;
+        resolve_body(r, body);
+        r.loop_depth--;
+        resolve_expr(r, cond);
+
+    case .For{init, cond, step, body}:
+        push_scope(r);
+        if (init != null)
+            resolve_stmt(r, init);
+        if (cond != null)
+            resolve_expr(r, cond);
+        if (step != null)
+            resolve_stmt(r, step);
+        r.loop_depth++;
+        resolve_body(r, body);
+        r.loop_depth--;
+        pop_scope(r);
+
+    case .ForIn{iterable, range_end, body, index}:
+        resolve_expr(r, iterable);
+        if (range_end != null)
+            resolve_expr(r, range_end);
+        push_scope(r);
+        declare(r, top_scope(r), n.tok.text, n); // the loop variable
+        if (index != null)
+            declare(r, top_scope(r), index.tok.text, index);
+        r.loop_depth++;
+        resolve_body(r, body);
+        r.loop_depth--;
+        pop_scope(r);
+
+    case .Switch{gives_value: false}:
+        r.switch_depth++;
+        resolve_switch(r, n);
+        r.switch_depth--;
+
+    case .Break{label, value}:
+        resolve_leave(r, n, label, value, true);
+    case .Continue{label, value}:
+        resolve_leave(r, n, label, value, false);
+
+    default:
+        error(r, n.tok, tformat("unexpected statement %", old_shape(n).tag));
+    }
+}
+
+// `let`, `const`, and their backtick forms in macros
+fn resolve_local(r: *Resolver, n: *Node, declared: *Node, value: *Node) {
+    if (!check_backtick(r, n))
+        return;
+    // the initializer is resolved first: `let x = x;` uses an outer x
+    if (declared != null)
+        resolve_type(r, declared);
+    if (value != null)
+        resolve_expr(r, value);
+    let target = r.scopes.len - 1;
+    if (n.caller) {
+        // `let at the top of a macro declares into the caller's scope, so
+        // the caller can use the name after the call
+        let e = &r.expansions[n.color];
+        if (expansion_result(e.node) != null) {
+            error(r, n.tok, "a backtick declaration only works in an `#expand` function that doesn't return a value");
+            return;
+        }
+        if (target == e.scope && target > 0)
+            target--;
+    }
+    declare(r, &r.scopes[target], n.tok.text, n);
+}
+
+fn expansion_result(e: *Node) -> *Node {
+    if (e.kind is .MacroExpansion{result})
+        return result;
+    return null;
+}
+
+// break and continue
+fn resolve_leave(r: *Resolver, n: *Node, label: *Node, value: *Node, is_break: bool) {
+    if (label != null) { // break outer; continue outer; continue state = .Next;
+        let name = label.tok.text;
+        let i = r.labeled.len;
+        while (i > 0) {
+            i--;
+            let outer = r.labeled[i];
+            let outer_label = label_of(outer);
+            if (outer_label.tok.text == name && color_of(r, outer_label) == color_of(r, label))
+                n.decl = outer;
+        }
+        let d = n.decl;
+        if (d == null) {
+            error(r, label.tok, tformat("there's no loop, switch or block named `%` around this", name));
+            return;
+        }
+        let gives = d.kind is .Switch{gives_value: true} || d.kind is .Block{gives_value: true};
+        let is_switch_expr = d.kind is .Switch{gives_value: true};
+        if (!is_break && (gives || d.kind.tag == .Block)) {
+            error(r, n.tok, tformat("`%` is a %: `continue` goes back to a loop or a switch statement",
+                                    name, if (is_switch_expr) "switch expression" else "block"));
+            return;
+        }
+        if (is_break && gives && value == null) {
+            error(r, n.tok, tformat("`%` gives a value: `break % = value;`", name, name));
+            return;
+        }
+        if (is_break && !gives && value != null) {
+            error(r, value.tok, tformat("`%` doesn't give a value; leave it with `break %;`", name, name));
+            return;
+        }
+        if (r.in_defer) {
+            error(r, n.tok, "can't leave a `defer` with `break` or `continue`");
+            return;
+        }
+        let is_switch = d.kind is .Switch{gives_value: false};
+        if (!is_break && is_switch && value == null)
+            error(r, n.tok, tformat("`continue %` runs the switch again, so it needs the next value: `continue % = value;`", name, name));
+        else if (!is_break && value != null && !is_switch)
+            error(r, value.tok, tformat("`%` is a loop: only a labeled switch takes a value with `continue`", name));
+        if (value != null && !is_break) {
+            switch (d.kind) {
+            case .Switch{continued: &c}: c.* = true;
+            default:
+            }
+        }
+        if (value != null)
+            resolve_expr(r, value);
+        return;
+    }
+    // a macro's own code can only leave loops it started itself; code
+    // passed in (color 0 or another macro's) breaks the loop it was
+    // inserted into
+    let base_loop: isize = 0;
+    let base_switch: isize = 0;
+    if (n.color != 0) {
+        base_loop = r.expansions[n.color].loop_depth;
+        base_switch = r.expansions[n.color].switch_depth;
+    }
+    if (r.loop_depth > base_loop || (is_break && r.switch_depth > base_switch))
+        return;
+    let what = if (is_break) "`break`" else "`continue`";
+    if (r.value_owner != null && !r.in_defer && n.color == 0) {
+        let name = label_of(r.value_owner).tok.text;
+        error(r, n.tok, tformat("% here would leave `%`, which gives a value: give it with `break % = value;`, or label the loop or switch to leave it by name",
+                                what, name, name));
+        return;
+    }
+    if (r.in_defer)
+        error(r, n.tok, tformat("can't % out of a `defer`", what));
+    else if (n.color != 0 && (r.loop_depth > 0 || (is_break && r.switch_depth > 0)))
+        error(r, n.tok, tformat("% can't leave the `#expand` function it's in", what));
+    else
+        error(r, n.tok, tformat(if (is_break) "% outside of a loop or switch" else "% outside of a loop", what));
+}
+
+// `_` among the targets of `a, b = ...`: the value is dropped
+pub fn is_discard(n: *Node) -> bool {
+    return n.kind.tag == .Identifier && !n.caller && n.tok.text == "_";
+}
+
+/* ------------------------------------------------------------ expressions */
+
+// non_value_ok: the expression may name a type or module, which is only
+// allowed on the left of `.` (`Color.Red`, `io.print`) and before a struct
+// literal (`Vec2.{...}`)
+fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
+    switch (n.kind) {
+    case .Identifier:
+        if (!check_backtick(r, n))
+            return;
+        let name = n.tok.text;
+        let color = color_of(r, n);
+        n.decl = lookup(r, name, color);
+        if (n.decl == null) {
+            if (report_ambiguous(r, n.tok))
+                return;
+            if (color != 0 && map_has(&r.expansions[color].code_args, name))
+                error(r, n.tok, tformat("`%` is a `Code` parameter, insert it with `#insert %`", name, name));
+            else if (color != 0 && lookup(r, name, r.expansions[color].parent) != null)
+                error(r, n.tok, tformat("unknown name `%`; the caller has a `%`, write `` `% `` to use it", name, name, name));
+            else
+                error(r, n.tok, tformat("unknown name `%`%", name, qualified_hint(r, name, color)));
+            return;
+        }
+        if (is_macro(n.decl) && n != r.macro_callee) {
+            error(r, n.tok, tformat("`%` is an `#expand` function, so it can only be called", name));
+            return;
+        }
+        if (!non_value_ok)
+            check_value(r, n);
+
+    case .Insert:
+        // #insert cond, inside an expression
+        let code = code_arg(r, n);
+        if (code == null)
+            return;
+        if (code.kind.tag == .Block) {
+            error(r, n.tok, tformat("`%` is a block, so it can't be inserted into an expression", n.tok.text));
+            return;
+        }
+        n.* = clone_node(code, -1).*;
+        resolve_expr(r, n, non_value_ok);
+
+    case .InsertString:
+        let e = inserted_expr(r, n);
+        if (e == null)
+            return;
+        n.* = e.*;
+        resolve_expr(r, n, non_value_ok);
+
+    case .TextOf, .LocationOf:
+        // #text(cond) / #location(cond): a string made from the Code argument
+        let code = code_arg(r, n);
+        if (code == null)
+            return;
+        let begin = if (code.span.len > 0) code.span.ptr else code.tok.text.ptr;
+        let text: string;
+        if (n.kind.tag == .TextOf) {
+            text = if (code.span.len > 0) code.span else code.tok.text;
+        } else {
+            let m = module_of(r, begin);
+            let line = 1;
+            let line_start = if (m != null) m.src.text.ptr else begin;
+            if (m != null) {
+                let p = m.src.text.ptr;
+                while (p < begin) {
+                    if (p.* == '\n') {
+                        line++;
+                        line_start = p + 1;
+                    }
+                    p = p + 1;
+                }
+            }
+            let column = (begin as isize) - (line_start as isize) + 1;
+            text = tformat("%:%:%", if (m != null) m.path else "<unknown>", line, column);
+        }
+        n.kind = .String(quote_string(text));
+
+    case .Member{object}:
+        resolve_expr(r, object, true);
+        let target = object.decl;
+        if (target == null)
+            return; // a value (checked by the type checker) or already an error
+        switch (target.kind) {
+        case .Import{module}:
+            if (module == null)
+                return; // reported when the import failed
+            n.decl = module_member(r, module, n.tok);
+            if (n.decl != null && is_macro(n.decl) && n != r.macro_callee) {
+                error(r, n.tok, tformat("`%` is an `#expand` function, so it can only be called", n.tok.text));
+                n.decl = null;
+                return;
+            }
+            if (n.decl != null && !non_value_ok)
+                check_value(r, n);
+        case .Enum{variants}:
+            for (v in variants)
+                if (v.tok.text == n.tok.text) {
+                    n.decl = v;
+                    return;
+                }
+            error(r, n.tok, tformat("enum `%` has no variant `%`", target.tok.text, n.tok.text));
+        case .Struct, .BuiltinType:
+            error(r, n.tok, tformat("can't access `%` on the type `%`, only on a value", n.tok.text, target.tok.text));
+        default:
+            // members of values (and of type aliases) are left to the
+            // type checker
+        }
+
+    case .StructInit{declared: &declared, items, variant}:
+        let t = declared.*;
+        if (variant) {
+            // K.Let{...} or .Let{...}: a variant; .Let finds its enum in
+            // the type checker
+            if (t.kind.tag != .EnumShorthand) {
+                resolve_expr(r, t, true);
+                let d = t.decl;
+                if (d != null && d.kind.tag != .Variant) {
+                    if (is_type_decl(d))
+                        error(r, n.tok, tformat("a struct literal is written with a dot before the `{`: `%.{ ... }`",
+                                                expr_text(t)));
+                    else
+                        error(r, t.tok, tformat("`%` isn't an enum variant, so `{` can't follow it", t.tok.text));
+                }
+            }
+        } else if (t == null) {
+            // .{...}: the type checker gets its type from the context
+        } else if (t.kind.tag == .Call) {
+            // List(i32).{...}
+            let made = expr_to_type(t);
+            if (made == null) {
+                error(r, t.tok, "expected a struct type before `{`");
+            } else {
+                declared.* = made;
+                resolve_type(r, made);
+            }
+        } else {
+            resolve_expr(r, t, true);
+            let d = t.decl;
+            if (d != null && d.kind.tag == .Variant)
+                error(r, t.tok, tformat("`%` is a variant: its fields go right after it, `%{}{ ... }`",
+                                        expr_text(t), expr_text(t)));
+            else if (d != null && d.kind.tag != .Struct && d.kind.tag != .TypeAlias && d.kind.tag != .TypeParam)
+                error(r, t.tok, tformat("`%` is not a struct type", t.tok.text));
+            // a generic struct without its types (`Box.{ .value = 1.5 }`)
+            // gets them from the field values, in the type checker
+        }
+        let named: Map(string, *Node);
+        let named_count = 0;
+        for (item in items) {
+            if (item.kind is .FieldInit{value}) {
+                named_count++;
+                if (map_has(&named, item.tok.text))
+                    error(r, item.tok, tformat("field `%` is set twice", item.tok.text));
+                map_put(&named, item.tok.text, item);
+                resolve_expr(r, value);
+            } else {
+                resolve_expr(r, item);
+            }
+        }
+        if (named_count != 0 && named_count != items.len)
+            error(r, n.tok, "a struct literal can't mix `.field = value` and positional values");
+
+    case .ArrayLiteral{elem: &elem, items}:
+        if (elem.* != null) { // i64.[1, 2]: the element type, written as an expression
+            let made = expr_to_type(elem.*);
+            if (made == null) {
+                error(r, elem.*.tok, "expected the element type before `.[`, like `i64.[1, 2]`");
+                elem.* = null;
+            } else {
+                elem.* = made;
+                resolve_type(r, made);
+            }
+        }
+        for (item in items)
+            resolve_expr(r, item);
+
+    case .Cast{value, to}:
+        resolve_expr(r, value);
+        resolve_type(r, to);
+
+    case .SizeOf{of: &of, is_type: &is_type}:
+        resolve_size_of(r, of, is_type);
+    case .TypeInfo{of: &of, is_type: &is_type}:
+        resolve_size_of(r, of, is_type);
+
+    case .New(&nw):
+        if (nw.value != null && names_type(r, nw.value)) { // new(Point): a type after all
+            nw.declared = expr_to_type(nw.value);
+            nw.value = null;
+        }
+        if (nw.declared != null)
+            resolve_type(r, nw.declared);
+        if (nw.value != null)
+            resolve_expr(r, nw.value);
+        if (nw.first != null)
+            resolve_expr(r, nw.first);
+        if (nw.second != null)
+            resolve_expr(r, nw.second);
+
+    case .Slice{object, lo, hi}:
+        resolve_expr(r, object);
+        if (lo != null)
+            resolve_expr(r, lo);
+        if (hi != null)
+            resolve_expr(r, hi);
+
+    case .Call{callee}:
+        r.macro_callee = callee;
+        resolve_expr(r, callee);
+        r.macro_callee = null;
+        if (callee.decl != null && is_macro(callee.decl)) {
+            expand(r, n);
+            return;
+        }
+        resolve_call(r, n);
+
+    case .TypeExpr:
+        error(r, n.tok, "a type can't be used as a value here; types are only passed to `$T: Type` parameters");
+
+    case .Unary{op: .PointerType, operand}:
+        if (names_type(r, operand)) {
+            error(r, n.tok, "a type can't be used as a value here; types are only passed to `$T: Type` parameters");
+            return;
+        }
+        if (operand.kind is .ArrayLiteral{elem} && elem != null) {
+            error(r, n.tok, "`*` here applies to the whole literal; for an array of pointers, put the element type in parentheses: `(*T).[ ... ]`");
+            return;
+        }
+        // *p from C: dereferencing is written after the pointer
+        error(r, n.tok, tformat("`*` before a value isn't a dereference; write `%`", postfix_deref(n)));
+
+    case .EnumShorthand: // .Red: the type checker finds its enum
+
+    case .Is{value, pattern}: // only an if's or while's condition can bind names
+        resolve_expr(r, value);
+        resolve_pattern(r, pattern, -1);
+
+    case .Unary{op: .Not, operand} if (is_negated_is(n, operand)):
+        if (operand.kind is .Is{value, pattern}) {
+            resolve_expr(r, value);
+            resolve_pattern(r, pattern, NEGATED);
+        }
+
+    case .Switch{label, gives_value: true}:
+        if (label != null)
+            begin_label(r, n);
+        resolve_switch(r, n);
+        if (label != null)
+            end_label(r);
+
+    case .Block{stmts: &stmts, gives_value: true}:
+        begin_label(r, n);
+        resolve_value_stmts(r, n, stmts);
+        end_label(r);
+
+    case .If{cond, then, else_, gives_value: true}:
+        // `is` in the condition binds names for the first value
+        push_scope(r);
+        resolve_test(r, cond);
+        resolve_expr(r, then);
+        pop_scope(r);
+        resolve_expr(r, else_);
+
+    case .Values{items}:
+        for (item in items)
+            resolve_expr(r, item);
+
+    case .OrReturn{value}:
+        // it returns from the function, as `return` does
+        if (color_of(r, n) != 0)
+            error(r, n.tok, "`or_return` can't be used in an `#expand` function: it would return from the function the macro is used in");
+        else if (r.defer_depth != 0)
+            error(r, n.tok, "can't `or_return` from inside a `defer`");
+        resolve_expr(r, value);
+
+    case .Context:
+        if (!r.context_ok)
+            error(r, n.tok, "`context` is only available inside functions");
+
+    case .Number, .Float, .String, .Char, .Bool, .Null:
+
+    default:
+        // unary, binary, grouping and indexing: just the children
+        let s = old_shape(n);
+        if (s.lhs != null)
+            resolve_expr(r, s.lhs);
+        if (s.rhs != null)
+            resolve_expr(r, s.rhs);
+    }
+}
+
+fn resolve_size_of(r: *Resolver, of: **Node, is_type: *bool) {
+    if (names_type(r, of.*)) { // sizeof(T), type_info(T)
+        of.* = expr_to_type(of.*);
+        is_type.* = true;
+        resolve_type(r, of.*);
+    } else { // sizeof(value): its type's size; it isn't evaluated
+        resolve_expr(r, of.*);
+    }
+}
+
+// a call of a function (not a macro): its arguments
+fn resolve_call(r: *Resolver, n: *Node) {
+    let callee: *Node = null;
+    let args: *[]*Node = null;
+    let trailing = false;
+    switch (n.kind) {
+    case .Call{callee: c, args: &a, trailing_block}:
+        callee = c;
+        args = a;
+        trailing = trailing_block;
+    default:
+    }
+    if (trailing) {
+        error(r, args.*[args.len - 1].tok, "only `#expand` functions take a block after the call");
+        return;
+    }
+    let fn_decl = callee.decl;
+    let params: []*Node;
+    if (fn_decl != null && fn_decl.kind is .Fn{params: ps, is_macro: false})
+        params = ps;
+    // A `$T: Type` argument can be left out when the context says what T
+    // is: `let xs: List(i32) = make_list();`. It's left out when what's in
+    // its place isn't a type and the arguments leave room for that; a
+    // placeholder keeps the later arguments lined up with their parameters.
+    for (i in 0..params.len) {
+        if (!(params[i].kind is .Param{is_type: true}))
+            continue;
+        let given = i < args.len && names_type(r, args.*[i]);
+        if (!given && args.len < params.len) {
+            let placeholder: []*Node = .[new_node(n.tok, .TypeExpr(null))];
+            let out: [..]*Node;
+            array_append(&out, args.*[..i]);
+            array_append(&out, placeholder);
+            array_append(&out, args.*[i..]);
+            args.* = out;
+        }
+    }
+    for (i in 0..args.len) {
+        let arg = args.*[i];
+        if (arg.kind is .TypeExpr{declared} && declared == null)
+            continue; // left out: inferred from the context
+        // the argument for a `$T: Type` parameter is a type
+        if (i < params.len && params[i].kind is .Param{is_type: true}) {
+            let made = expr_to_type(arg);
+            if (made == null) {
+                error(r, arg.tok, tformat("`%` takes a type here, like `i32` or `[]u8`", params[i].tok.text));
+                continue;
+            }
+            args.*[i] = made;
+            resolve_type(r, made);
+            continue;
+        }
+        resolve_expr(r, arg);
+    }
+}
+
+// C's `*p`, as Sabk writes it: `p.*`; `**pp` is `pp.*.*`
+// a name as written: `K.Let`, `mod.Point`
+fn expr_text(n: *Node) -> string {
+    if (n.kind is .Member{object})
+        return tformat("%.%", expr_text(object), n.tok.text);
+    return n.tok.text;
+}
+
+fn postfix_deref(star: *Node) -> string {
+    let inner: *Node = null;
+    if (star.kind is .Unary{operand})
+        inner = operand;
+    if (inner.kind is .Unary{op: .PointerType})
+        return tformat("%.*", postfix_deref(inner));
+    let text = inner.span;
+    let wrap = false;
+    if (inner.kind is .Unary{op})
+        wrap = op == .Neg || op == .Not || op == .BitNot || op == .AddressOf;
+    if (wrap)
+        text = tformat("(%)", text);
+    return tformat("%.*", text);
+}
+
+/* ------------------------------------------------------------------ types */
+
+fn resolve_type(r: *Resolver, n: *Node) {
+    switch (n.kind) {
+    case .TypeName:
+        if (n.tok.kind == .Question) { // ?T
+            n.decl = scope_get(&r.prelude.scope, "Option", 0);
+            resolve_type_args(r, n, n.decl);
+            return;
+        }
+        let d = lookup(r, n.tok.text, color_of(r, n));
+        if (d == null && report_ambiguous(r, n.tok))
+            return;
+        if (d == null)
+            error(r, n.tok, tformat("unknown type `%`%", n.tok.text, qualified_hint(r, n.tok.text, color_of(r, n))));
+        else if (d.kind.tag == .Import)
+            error(r, n.tok, tformat("`%` is a module, not a type", n.tok.text));
+        else if (!is_type_decl(d))
+            error(r, n.tok, tformat("`%` is not a type", n.tok.text));
+        else {
+            n.decl = d;
+            resolve_type_args(r, n, d);
+        }
+
+    case .TypeParam:
+        if (!r.declaring_type_params)
+            error(r, n.tok, tformat("`$%` declares a type parameter, which only a function parameter's type can do; write `%` to use one",
+                                    n.tok.text, n.tok.text));
+
+    case .TypeMember{module: module_name}:
+        let name = module_name.tok;
+        let d = lookup(r, name.text, color_of(r, module_name));
+        if (d == null && report_ambiguous(r, name))
+            return;
+        if (d == null) {
+            error(r, name, tformat("unknown name `%`", name.text));
+            return;
+        }
+        if (d.kind.tag != .Import) {
+            error(r, name, tformat("`%` is not a module", name.text));
+            return;
+        }
+        module_name.decl = d;
+        let m = imported_module(d);
+        if (m == null)
+            return; // reported when the import failed
+        let member = module_member(r, m, n.tok);
+        if (member != null && !is_type_decl(member))
+            error(r, n.tok, tformat("`%.%` is not a type", name.text, n.tok.text));
+        else if (member != null) {
+            n.decl = member;
+            resolve_type_args(r, n, member);
+        }
+
+    case .TypePointer{to}: resolve_type(r, to);
+    case .TypeSlice{elem}: resolve_type(r, elem);
+    case .TypeGrowable{elem}: resolve_type(r, elem);
+
+    case .TypeArray{elem, len}:
+        resolve_type(r, elem);
+        resolve_expr(r, len);
+
+    case .TypeFn{params, result}:
+        for (param in params)
+            resolve_type(r, param);
+        if (result != null)
+            resolve_type(r, result);
+
+    case .TypeTuple{items}:
+        for (t in items)
+            resolve_type(r, t);
+
+    default:
+        error(r, n.tok, tformat("unexpected type %", old_shape(n).tag));
+    }
+}
+
+// does `e`, written as an expression, name a type? (T, []u8, *T, List(T))
+fn names_type(r: *Resolver, e: *Node) -> bool {
+    switch (e.kind) {
+    case .TypeExpr:
+        return true;
+    case .Identifier:
+        let d = lookup(r, e.tok.text, color_of(r, e));
+        return d != null && is_type_decl(d);
+    case .Member{object}:
+        if (object.kind.tag != .Identifier)
+            return false;
+        let m = lookup(r, object.tok.text, color_of(r, object));
+        if (m == null || m.kind.tag != .Import || imported_module(m) == null)
+            return false;
+        let found = scope_get(&imported_module(m).scope, e.tok.text, 0);
+        return found != null && is_type_decl(found);
+    case .Unary{op: .PointerType, operand}:
+        return names_type(r, operand);
+    case .Call{callee}:
+        return names_type(r, callee);
+    case .Grouped{inner}:
+        return names_type(r, inner);
+    default:
+        return false;
+    }
+}
+
+// A type written as an expression, as a type argument is: `i32`, `*Node`,
+// `mem.Arena`, `List(i32)`, or anything starting with `[` or `fn`. Null if
+// `e` can't be one.
+fn expr_to_type(e: *Node) -> *Node {
+    let t: *Node = null;
+    switch (e.kind) {
+    case .Identifier:
+        t = new_node(e.tok, .TypeName(.[]));
+    case .Member{object}:
+        if (object.kind.tag != .Identifier)
+            return null;
+        t = new_node(e.tok, .TypeMember(expr_to_type(object), .[]));
+    case .Unary{op: .PointerType, operand}:
+        let inner = expr_to_type(operand);
+        if (inner == null)
+            return null;
+        t = new_node(e.tok, .TypePointer(inner));
+    case .Call{callee, args}:
+        if (callee.kind.tag != .Identifier && callee.kind.tag != .Member)
+            return null;
+        t = expr_to_type(callee);
+        let made: [..]*Node;
+        for (arg in args) {
+            let a = expr_to_type(arg);
+            if (a == null)
+                return null;
+            array_add(&made, a);
+        }
+        switch (t.kind) {
+        case .TypeName{args: &a}: a.* = made;
+        case .TypeMember{args: &a}: a.* = made;
+        default:
+        }
+    case .Grouped{inner}:
+        return expr_to_type(inner);
+    case .TypeExpr{declared}:
+        return declared;
+    default:
+        return null;
+    }
+    t.color = e.color;
+    t.caller = e.caller;
+    return t;
+}
+
+// An #if condition: like any expression, except that `==` and `!=` can
+// compare types (`T == []u8`)
+fn resolve_condition(r: *Resolver, n: *Node) {
+    switch (n.kind) {
+    case .Binary{op: .And, lhs, rhs}:
+        resolve_condition(r, lhs);
+        resolve_condition(r, rhs);
+    case .Binary{op: .Or, lhs, rhs}:
+        resolve_condition(r, lhs);
+        resolve_condition(r, rhs);
+    case .Unary{op: .Not, operand}:
+        resolve_condition(r, operand);
+    case .Grouped{inner}:
+        resolve_condition(r, inner);
+    case .Binary{op, lhs, rhs} if (op == .EqEq || op == .NotEq):
+        if (names_type(r, lhs) || names_type(r, rhs)) {
+            let left, right = expr_to_type(lhs), expr_to_type(rhs);
+            if (left == null || right == null) {
+                error(r, n.tok, "can't compare a type with a value");
+                return;
+            }
+            n.kind = .TypeCompare(left, right);
+            r.any_instance_ok = left;
+            resolve_type(r, left);
+            r.any_instance_ok = right;
+            resolve_type(r, right);
+            r.any_instance_ok = null;
+            return;
+        }
+        resolve_expr(r, n);
+    default:
+        resolve_expr(r, n);
+    }
+}
+
+// List(i32): the type arguments a generic type needs, and only it
+fn resolve_type_args(r: *Resolver, n: *Node, d: *Node) {
+    let args: []*Node;
+    switch (n.kind) {
+    case .TypeName{args: a}: args = a;
+    case .TypeMember{args: a}: args = a;
+    default:
+    }
+    let name = d.tok.text;
+    let generic = is_template(d);
+    let expected = type_params_of(d).len;
+    if (generic && args.len == 0 && n == r.any_instance_ok)
+        return; // `T == Map`: is T any Map
+    if (generic && args.len == 0)
+        error(r, n.tok, tformat("`%` is generic: give its types, `%(T)`", name, name));
+    else if (!generic && args.len > 0)
+        error(r, n.tok, tformat("`%` isn't generic, so it takes no types", name));
+    else if (args.len != expected)
+        error(r, n.tok, tformat("`%` takes %, got %", name, count_of(expected, "type"), args.len));
+    for (arg in args)
+        resolve_type(r, arg);
+}
+
+// "1 type", "2 types"
+fn count_of(k: isize, what: string) -> string {
+    return if (k == 1) tformat("% %", k, what) else tformat("% %{}s", k, what);
+}
+
+/* ----------------------------------------------------------------- macros */
+
+// a node's color for name lookup: backticked code means the caller's names
+fn color_of(r: *Resolver, n: *Node) -> i32 {
+    return if (n.caller) r.expansions[n.color].parent else n.color;
+}
+
+fn check_backtick(r: *Resolver, n: *Node) -> bool {
+    if (n.caller && n.color == 0) {
+        error(r, n.tok, "a backtick only works inside an `#expand` function");
+        return false;
+    }
+    return true;
+}
+
+// the argument passed for the Code parameter a directive names
+fn code_arg(r: *Resolver, n: *Node) -> *Node {
+    let name = n.tok.text;
+    let directive = switch (n.kind.tag) {
+    case .Insert: "#insert";
+    case .TextOf: "#text";
+    default: "#location";
+    };
+    if (n.color == 0) {
+        error(r, n.tok, tformat("`%` only works inside an `#expand` function", directive));
+        return null;
+    }
+    let e = &r.expansions[n.color];
+    let code, found = map_get(&e.code_args, name);
+    if (!found) {
+        error(r, n.tok, tformat("`%` isn't a `Code` parameter of `%`", name, e.node.decl.tok.text));
+        return null;
+    }
+    return code;
+}
+
+fn is_code_param(p: *Node) -> bool {
+    if (p.kind is .Param{declared})
+        return declared.kind.tag == .TypeName && declared.tok.text == "Code";
+    return false;
+}
+
+// Replaces a call of an #expand function with a copy of the function's body:
+//
+//   let <param> = <argument>;   for each value parameter, in order
+//   <body>
+//
+// The copy gets a new color, so its names resolve where the macro was
+// defined. Code arguments are kept aside, unresolved, until #insert puts a
+// copy of them somewhere in the body.
+fn expand(r: *Resolver, n: *Node) {
+    let callee: *Node = null;
+    let args: []*Node;
+    if (n.kind is .Call{callee: c, args: a}) {
+        callee = c;
+        args = a;
+    }
+    let macro = callee.decl;
+    let name = macro.tok.text;
+    if (r.expanding.len >= MAX_EXPANSION_DEPTH) {
+        error(r, callee.tok, tformat("too many nested expansions of `%`; does it expand itself forever?", name));
+        return;
+    }
+
+    let f = fn_parts(macro);
+    let params = f.params;
+    let required: isize = 0;
+    for (p in params)
+        if (p.kind is .Param{value} && value == null)
+            required++;
+    let exact = required == params.len;
+    if (args.len < required) {
+        let how_many = count_of(required, "argument");
+        if (!exact)
+            how_many = tformat("at least %", how_many);
+        error(r, n.tok, tformat("`%` needs %, got %", name, how_many, args.len));
+        return;
+    }
+    if (args.len > params.len) {
+        let how_many = count_of(params.len, "argument");
+        if (!exact)
+            how_many = tformat("at most %", how_many);
+        error(r, n.tok, tformat("`%` takes %, got %", name, how_many, args.len));
+        return;
+    }
+
+    let color = r.expansions.len as i32;
+    let e = Expansion.{
+        .module = macro.owner, .node = n, .parent = n.color,
+        .loop_depth = r.loop_depth, .switch_depth = r.switch_depth,
+        .defer_depth = r.defer_depth,
+    };
+
+    let stmts: [..]*Node;
+    let seen: Map(string, *Node);
+    let ok = true;
+    for (i in 0..params.len) {
+        let p = params[i];
+        let pname = p.tok.text;
+        if (map_has(&seen, pname)) {
+            error(r, p.tok, tformat("`%` has two parameters named `%`", name, pname));
+            ok = false;
+        }
+        map_put(&seen, pname, p);
+        let arg: *Node = if (i < args.len) args[i] else null;
+        let declared: *Node = null;
+        let default_value: *Node = null;
+        if (p.kind is .Param{declared: d, value: v}) {
+            declared = d;
+            default_value = v;
+        }
+
+        if (is_code_param(p)) {
+            if (default_value != null) {
+                error(r, default_value.tok, "a `Code` parameter can't have a default value");
+                ok = false;
+                continue;
+            }
+            // passing a Code parameter on passes the code itself
+            while (arg.kind.tag == .Identifier && arg.color != 0 && !arg.caller) {
+                let outer, found = map_get(&r.expansions[arg.color].code_args, arg.tok.text);
+                if (!found)
+                    break;
+                arg = outer;
+            }
+            map_put(&e.code_args, pname, arg);
+            continue;
+        }
+
+        if (arg != null && arg.kind.tag == .Block) {
+            error(r, arg.tok, tformat("a block can only be passed to a `Code` parameter, and `%` has type `%`",
+                                      pname, declared.tok.text));
+            ok = false;
+            continue;
+        }
+        let value = if (arg != null) arg else clone_node(default_value, color);
+        let let_node = new_node(p.tok, .Let(clone_node(declared, color), value, false, false, false));
+        let_node.color = color;
+        array_add(&stmts, let_node);
+    }
+    if (!ok)
+        return;
+    for (stmt in body_stmts(f.body).*)
+        array_add(&stmts, clone_node(stmt, color));
+
+    // the call becomes the expansion
+    n.tok = callee.tok;
+    n.decl = macro;
+    n.kind = .MacroExpansion(callee, stmts, clone_node(f.result, color), color);
+    array_add(&r.expansions, e);
+
+    array_add(&r.expanding, color);
+    push_scope(r);
+    r.expansions[color].scope = r.scopes.len - 1;
+    let result = expansion_result(n);
+    if (result != null)
+        resolve_type(r, result);
+    switch (n.kind) {
+    case .MacroExpansion{stmts: &s}: resolve_stmts(r, s);
+    default:
+    }
+    pop_scope(r);
+    r.expanding.len--;
+}
+
+/* --------------------------------------------------- #insert of a string */
+
+// does `n` use a local variable or parameter? (#run can't: they only exist
+// when the program runs, and the checker hasn't seen them yet)
+fn local_use(n: *Node) -> *Node {
+    if (n == null)
+        return null;
+    if ((n.kind.tag == .Identifier || n.kind.tag == .Member) && n.decl != null) {
+        let d = n.decl;
+        let local = ((d.kind.tag == .Let || d.kind.tag == .Const) && d.owner == null) ||
+                    d.kind.tag == .Param || d.kind.tag == .ForIn || d.kind.tag == .LoopIndex;
+        if (local)
+            return n;
+    }
+    let s = old_shape(n);
+    for (c in .[s.lhs, s.rhs, s.extra]) {
+        let found = local_use(c);
+        if (found != null)
+            return found;
+    }
+    for (item in s.list) {
+        let found = local_use(item);
+        if (found != null)
+            return found;
+    }
+    return null;
+}
+
+// the code an `#insert` of a string inserts; false if it can't be had
+fn inserted_text(r: *Resolver, n: *Node) -> (string, bool) {
+    let value: *Node = null;
+    if (n.kind is .InsertString{value: v})
+        value = v;
+    if (r.in_template) {
+        error(r, n.tok, "`#insert` of a string can't be used here in generic code yet: only in a generic function's body (written there, not through a macro)");
+        return "", false;
+    }
+    resolve_expr(r, value);
+    let local = local_use(value);
+    if (local != null) {
+        error(r, local.tok, tformat("`#insert` can't use `%`: the code is made while compiling, before it exists", local.tok.text));
+        return "", false;
+    }
+    if (r.error_count != 0)
+        return "", false; // the code that would make it may be broken
+    array_add(&r.inserting, n);
+    let text, ok = run_insert(r, n, value);
+    r.inserting.len--;
+    return text, ok;
+}
+
+// the code belongs where the #insert is: inside a macro, it has the
+// macro's color
+fn give_color(n: *Node, color: i32) {
+    if (n == null)
+        return;
+    n.color = color;
+    for (child in children(n))
+        give_color(child, color);
+}
+
+// what notes a syntax error in code an #insert made gets
+struct InsertSite {
+    r: *Resolver;
+    n: *Node;
+}
+
+fn note_insert_site(data: *void) {
+    let site = data as *InsertSite;
+    note(site.r, site.n.tok, "in the code `#insert` made here");
+    note_inserted(site.r, site.n.tok);
+}
+
+// A new module holding the code an #insert made, so its tokens and errors
+// have a place; a syntax error in it stops the compiler, after notes
+fn generated_source(r: *Resolver, n: *Node, text: string, site: *InsertSite) -> *Module {
+    let m = new(Module);
+    let at = module_of(r, n.tok.text.ptr);
+    m.path = format("%:%:% #insert", if (at != null) at.path else "<unknown>", n.tok.line, n.tok.column);
+    m.src = Source.{ .path = m.path, .text = text };
+    m.inserted_by = n;
+    array_add(&r.generated, m);
+    site.* = .{ .r = r, .n = n };
+    on_fatal_error, on_fatal_error_data = note_insert_site, site;
+    let tokens, ok = lex(&m.src);
+    if (!ok) {
+        fatal_error_notes();
+        exit(1);
+    }
+    m.tokens = tokens;
+    return m;
+}
+
+fn generated_parsed(r: *Resolver, errors: isize) {
+    on_fatal_error, on_fatal_error_data = null, null;
+    r.error_count += errors;
+}
+
+fn inserted_stmts(r: *Resolver, n: *Node) -> []*Node {
+    let text, ok = inserted_text(r, n);
+    if (!ok) {
+        // reported, or skipped after other errors: the #insert stays,
+        // standing for code that isn't known, so "can reach the end" isn't
+        // reported too
+        switch (n.kind) {
+        case .InsertString{value: &v}: v.* = null;
+        default:
+        }
+        let same: []*Node = .[n];
+        return array_of(same);
+    }
+    let site: InsertSite;
+    let m = generated_source(r, n, text, &site);
+    let stmts, errors = parse_stmts(&m.src, m.tokens);
+    generated_parsed(r, errors);
+    for (s in stmts)
+        give_color(s, n.color);
+    return stmts;
+}
+
+fn inserted_expr(r: *Resolver, n: *Node) -> *Node {
+    let text, ok = inserted_text(r, n);
+    if (!ok)
+        return null;
+    let site: InsertSite;
+    let m = generated_source(r, n, text, &site);
+    let e, errors = parse_whole_expr(&m.src, m.tokens);
+    generated_parsed(r, errors);
+    give_color(e, n.color);
+    return e;
+}
+
+fn inserted_decls(r: *Resolver, n: *Node) -> []*Node {
+    let text, ok = inserted_text(r, n);
+    if (!ok)
+        return .[];
+    let site: InsertSite;
+    let m = generated_source(r, n, text, &site);
+    let root, errors = parse_file(&m.src, m.tokens);
+    generated_parsed(r, errors);
+    let decls: [..]*Node;
+    for (d in root_list(root)) {
+        if (d.kind.tag == .Import) {
+            error(r, d.tok, "code made by `#insert` can't import; import in the file instead");
+            continue;
+        }
+        if (d.kind.tag != .InsertString)
+            collect_decl(r, r.mod, d);
+        array_add(&decls, d);
+    }
+    return decls;
+}
+
+fn root_list(root: *Node) -> []*Node {
+    if (root.kind is .Root{decls})
+        return decls;
+    return .[];
+}

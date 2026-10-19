@@ -1,18 +1,18 @@
-[error]: can't tell what `T` is here; pass it, like `zero_of(i32)`, or give the result a type at [tests/errors/inference_errors.smelt:7:20]
+[error]: can't tell what `T` is here; pass it, like `zero_of(i32)`, or give the result a type at [tests/errors/inference_errors.sabk:7:20]
      7 |     let a = zero_of();                    // nothing says what T is
        |                    ^
-[error]: can't tell what `T` is here; pass it, like `make(i32, ...)`, or give the result a type at [tests/errors/inference_errors.smelt:8:17]
+[error]: can't tell what `T` is here; pass it, like `make(i32, ...)`, or give the result a type at [tests/errors/inference_errors.sabk:8:17]
      8 |     let b = make(4);                      // ... here either
        |                 ^
-[error]: can't tell what `T` is for `List` from its fields; give it, like `List(i32).{ ... }` at [tests/errors/inference_errors.smelt:9:13]
+[error]: can't tell what `T` is for `List` from its fields; give it, like `List(i32).{ ... }` at [tests/errors/inference_errors.sabk:9:13]
      9 |     let c = List.{ .items = null };       // null doesn't say
        |             ^
-[error]: can't tell what `T` is for `Box` from its fields; give it, like `Box(i32).{ ... }` at [tests/errors/inference_errors.smelt:10:13]
+[error]: can't tell what `T` is for `Box` from its fields; give it, like `Box(i32).{ ... }` at [tests/errors/inference_errors.sabk:10:13]
     10 |     let d = Box.{};                       // no fields to go by
        |             ^
-[error]: `T` can't be both `i32` and `u64` in `Same` at [tests/errors/inference_errors.smelt:11:42]
+[error]: `T` can't be both `i32` and `u64` in `Same` at [tests/errors/inference_errors.sabk:11:42]
     11 |     let e = Same.{ .a = 1 as i32, .b = 2 as u64 };  // the fields disagree
        |                                          ^
-[error]: the constant 300 doesn't fit in `u8` at [tests/errors/inference_errors.smelt:12:37]
+[error]: the constant 300 doesn't fit in `u8` at [tests/errors/inference_errors.sabk:12:37]
     12 |     let g: Box(u8) = Box.{ .value = 300 }; // the context says u8: 300 doesn't fit
        |                                     ^

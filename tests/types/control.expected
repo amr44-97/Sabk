@@ -1,4 +1,4 @@
-MODULE tests/types/control.smelt
+MODULE tests/types/control.sabk
 ROOT
   ENUM `Dir` : Dir
     ENUM_VARIANT `Up` : Dir = 0
@@ -49,14 +49,14 @@ ROOT
           rhs: BLOCK
             RETURN
               lhs: NUMBER_LITERAL `1` : i32 = 1
-          MEMBER `Up` -> ENUM_VARIANT `Up` tests/types/control.smelt:1:12 : Dir = 0
-            lhs: IDENTIFIER `Dir` -> ENUM `Dir` tests/types/control.smelt:1:6 : Dir
+          MEMBER `Up` -> ENUM_VARIANT `Up` tests/types/control.sabk:1:12 : Dir = 0
+            lhs: IDENTIFIER `Dir` -> ENUM `Dir` tests/types/control.sabk:1:6 : Dir
         DEFAULT_CASE
           rhs: BLOCK
             RETURN
               lhs: NUMBER_LITERAL `2` : i32 = 2
     FUN_PARAM `d` : Dir
-      type: TYPE_NAME `Dir` -> ENUM `Dir` tests/types/control.smelt:1:6 : Dir
+      type: TYPE_NAME `Dir` -> ENUM `Dir` tests/types/control.sabk:1:6 : Dir
   FUN_DECL `loops` : fn([]f32, *[3]u8)
     rhs: BLOCK
       FOR_IN `i` : isize

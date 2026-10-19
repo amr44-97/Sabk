@@ -1,6 +1,6 @@
-[error]: `Config` is needed by the code an `#insert` inside it runs, so it isn't complete yet at [tests/errors/insert_incomplete.smelt:2:8]
+[error]: `Config` is needed by the code an `#insert` inside it runs, so it isn't complete yet at [tests/errors/insert_incomplete.sabk:2:8]
      2 | struct Config {
        |        ^
-[note]: the `#insert` is here at [tests/errors/insert_incomplete.smelt:3:17]
+[note]: the `#insert` is here at [tests/errors/insert_incomplete.sabk:3:17]
      3 |     size: i32 = #insert #run default_size();
        |                 ^

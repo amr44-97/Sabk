@@ -1,6 +1,6 @@
-[error]: `f` is already declared in this module at [tests/errors/resolve_duplicate_global.smelt:2:8]
+[error]: `f` is already declared in this module at [tests/errors/resolve_duplicate_global.sabk:2:8]
      2 | struct f {}
        |        ^
-[note]: the first declaration is here at [tests/errors/resolve_duplicate_global.smelt:1:4]
+[note]: the first declaration is here at [tests/errors/resolve_duplicate_global.sabk:1:4]
      1 | fn f() {}
        |    ^

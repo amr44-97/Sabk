@@ -1,6 +1,6 @@
-[error]: too many values, `V` has 2 fields at [tests/errors/type_struct_literal.smelt:4:27]
+[error]: too many values, `V` has 2 fields at [tests/errors/type_struct_literal.sabk:4:27]
      4 |     let v = V.{ 1.0, 2.0, 3.0 };
        |                           ^
-[error]: a union literal can set only one field at [tests/errors/type_struct_literal.smelt:5:26]
+[error]: a union literal can set only one field at [tests/errors/type_struct_literal.sabk:5:26]
      5 |     let u = U.{ .a = 1, .b = 2.0 };
        |                          ^

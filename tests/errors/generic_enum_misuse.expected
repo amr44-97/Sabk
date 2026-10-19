@@ -1,9 +1,9 @@
-[error]: a generic enum needs variants that hold values, like `Some(T)` at [tests/errors/generic_enum_misuse.smelt:3:6]
+[error]: a generic enum needs variants that hold values, like `Some(T)` at [tests/errors/generic_enum_misuse.sabk:3:6]
      3 | enum Plain($T) { A, B }                  // nothing uses T
        |      ^
-[error]: `Option` is generic, so `Option.None` doesn't say which `Option` it is; write `.None` where the type is known, like `let x: Option(i32) = .None;` at [tests/errors/generic_enum_misuse.smelt:6:20]
+[error]: `Option` is generic, so `Option.None` doesn't say which `Option` it is; write `.None` where the type is known, like `let x: Option(i32) = .None;` at [tests/errors/generic_enum_misuse.sabk:6:20]
      6 |     let a = Option.None;                 // which Option?
        |                    ^
-[error]: `Option` is generic, so `Option.Some` doesn't say which `Option` it is; write `.Some(...)` where the type is known, like `let x: Option(i32) = .Some(...);` at [tests/errors/generic_enum_misuse.smelt:7:20]
+[error]: `Option` is generic, so `Option.Some` doesn't say which `Option` it is; write `.Some(...)` where the type is known, like `let x: Option(i32) = .Some(...);` at [tests/errors/generic_enum_misuse.sabk:7:20]
      7 |     let b = Option.Some(1);
        |                    ^

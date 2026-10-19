@@ -1,18 +1,18 @@
-[error]: this returns memory that's gone once `local_view` returns at [tests/errors/escaping_array_views.smelt:7:12]
+[error]: this returns memory that's gone once `local_view` returns at [tests/errors/escaping_array_views.sabk:7:12]
      7 |     return a;
        |            ^
-[note]: `a` is a local array, used as a slice here, which only lives until `local_view` returns; to keep its elements, copy them: `clone_slice(...)` (std/mem) at [tests/errors/escaping_array_views.smelt:7:12]
+[note]: `a` is a local array, used as a slice here, which only lives until `local_view` returns; to keep its elements, copy them: `clone_slice(...)` (std/mem) at [tests/errors/escaping_array_views.sabk:7:12]
      7 |     return a;
        |            ^
-[error]: this returns memory that's gone once `temporary_view` returns at [tests/errors/escaping_array_views.smelt:10:44]
+[error]: this returns memory that's gone once `temporary_view` returns at [tests/errors/escaping_array_views.sabk:10:44]
     10 | fn temporary_view() -> []i64 { return three(); }
        |                                            ^
-[note]: this array, used as a slice, is a copy that only lives until `temporary_view` returns; to keep its elements, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_array_views.smelt:10:44]
+[note]: this array, used as a slice, is a copy that only lives until `temporary_view` returns; to keep its elements, allocate a copy: `clone_slice(...)` (std/mem) at [tests/errors/escaping_array_views.sabk:10:44]
     10 | fn temporary_view() -> []i64 { return three(); }
        |                                            ^
-[error]: this stores memory that's gone once `store` returns into the global `kept` at [tests/errors/escaping_array_views.smelt:13:31]
+[error]: this stores memory that's gone once `store` returns into the global `kept` at [tests/errors/escaping_array_views.sabk:13:31]
     13 | fn store(p: Point) { kept = p.cells; }
        |                               ^
-[note]: this array is part of the local `p`, which only lives until `store` returns; to keep its elements, copy them: `clone_slice(...)` (std/mem) at [tests/errors/escaping_array_views.smelt:13:31]
+[note]: this array is part of the local `p`, which only lives until `store` returns; to keep its elements, copy them: `clone_slice(...)` (std/mem) at [tests/errors/escaping_array_views.sabk:13:31]
     13 | fn store(p: Point) { kept = p.cells; }
        |                               ^

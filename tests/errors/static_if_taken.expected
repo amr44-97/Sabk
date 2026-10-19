@@ -1,6 +1,6 @@
-[error]: expected `i32`, found `f64` at [tests/errors/static_if_taken.smelt:2:27]
+[error]: expected `i32`, found `f64` at [tests/errors/static_if_taken.sabk:2:27]
      2 |     #if (T == f64) return x;              // checked only for T = f64
        |                           ^
-[note]: in `show` with T = f64, used here at [tests/errors/static_if_taken.smelt:7:13]
+[note]: in `show` with T = f64, used here at [tests/errors/static_if_taken.sabk:7:13]
      7 |     let b = show(2.5);
        |             ^

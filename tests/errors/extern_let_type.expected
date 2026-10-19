@@ -1,3 +1,3 @@
-[error]: an `extern let` needs its type: `extern let stdout: T;` at [tests/errors/extern_let_type.smelt:2:18]
+[error]: an `extern let` needs its type: `extern let stdout: T;` at [tests/errors/extern_let_type.sabk:2:18]
      2 | extern let stdout;
        |                  ^

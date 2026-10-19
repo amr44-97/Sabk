@@ -1,4 +1,4 @@
-MODULE tests/types/context.smelt
+MODULE tests/types/context.sabk
 ROOT
   STRUCT `Vec2` : Vec2
     STRUCT_FIELD `x` : f32
@@ -7,11 +7,11 @@ ROOT
       type: TYPE_NAME `f32` -> builtin : f32
   FUN_DECL `make` : fn(Allocator) -> *Vec2
     type: TYPE_PTR `*` : *Vec2
-      lhs: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/types/context.smelt:1:8 : Vec2
+      lhs: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/types/context.sabk:1:8 : Vec2
     rhs: BLOCK
       RETURN
         lhs: NEW : *Vec2
-          type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/types/context.smelt:1:8 : Vec2
+          type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/types/context.sabk:1:8 : Vec2
           lhs: IDENTIFIER `a` -> FUN_PARAM `a` 3:9 : Allocator
     FUN_PARAM `a` : Allocator
       type: TYPE_NAME `Allocator` -> STRUCT `Allocator` <prelude>:13:12 : Allocator
@@ -29,10 +29,10 @@ ROOT
           lhs: CONTEXT : Context
       VAR_DECL `v` : *Vec2
         lhs: NEW : *Vec2
-          type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/types/context.smelt:1:8 : Vec2
+          type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/types/context.sabk:1:8 : Vec2
       VAR_DECL `w` : *Vec2
         lhs: CALL `(` : *Vec2
-          lhs: IDENTIFIER `make` -> FUN_DECL `make` tests/types/context.smelt:3:4 : fn(Allocator) -> *Vec2
+          lhs: IDENTIFIER `make` -> FUN_DECL `make` tests/types/context.sabk:3:4 : fn(Allocator) -> *Vec2
       VAR_DECL `arr` : *[16]u8
         lhs: NEW : *[16]u8
           type: TYPE_ARRAY `[` : [16]u8

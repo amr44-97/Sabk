@@ -1,18 +1,18 @@
-[error]: expected `i32`, found `untyped string` at [tests/errors/variadic_misuse.smelt:10:14]
+[error]: expected `i32`, found `untyped string` at [tests/errors/variadic_misuse.sabk:10:14]
     10 |     count(1, "x");                       // each value must be an i32
        |              ^
-[error]: `..` passes a slice as a function's `..` parameter, and only as its last argument at [tests/errors/variadic_misuse.smelt:12:11]
+[error]: `..` passes a slice as a function's `..` parameter, and only as its last argument at [tests/errors/variadic_misuse.sabk:12:11]
     12 |     count(..xs, 2);                      // `..xs` is the only one, last
        |           ^
-[error]: `..` passes a slice as a function's `..` parameter, and only as its last argument at [tests/errors/variadic_misuse.smelt:13:11]
+[error]: `..` passes a slice as a function's `..` parameter, and only as its last argument at [tests/errors/variadic_misuse.sabk:13:11]
     13 |     plain(..xs);                         // only for a `..` parameter
        |           ^
-[error]: this returns nothing, so there's no value to pass as an `Any` at [tests/errors/variadic_misuse.smelt:14:25]
+[error]: this returns nothing, so there's no value to pass as an `Any` at [tests/errors/variadic_misuse.sabk:14:25]
     14 |     println("%", nothing());             // no value
        |                         ^
-[error]: expected `Any`, found the generic function `pick` at [tests/errors/variadic_misuse.smelt:15:18]
+[error]: expected `Any`, found the generic function `pick` at [tests/errors/variadic_misuse.sabk:15:18]
     15 |     println("%", pick);                  // which pick?
        |                  ^
-[error]: expected `[]i32`, found `i64` at [tests/errors/variadic_misuse.smelt:17:13]
+[error]: expected `[]i32`, found `i64` at [tests/errors/variadic_misuse.sabk:17:13]
     17 |     count(..i);                          // `..` passes a slice
        |             ^

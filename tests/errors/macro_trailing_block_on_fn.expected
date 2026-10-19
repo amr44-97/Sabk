@@ -1,3 +1,3 @@
-[error]: only `#expand` functions take a block after the call at [tests/errors/macro_trailing_block_on_fn.smelt:2:14]
+[error]: only `#expand` functions take a block after the call at [tests/errors/macro_trailing_block_on_fn.sabk:2:14]
      2 | fn f() { g() { let x = 1; } }
        |              ^

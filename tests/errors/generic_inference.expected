@@ -1,9 +1,9 @@
-[error]: `T` can't be both `i32` and `u64` in this call of `max` at [tests/errors/generic_inference.smelt:5:20]
+[error]: `T` can't be both `i32` and `u64` in this call of `max` at [tests/errors/generic_inference.sabk:5:20]
      5 |     let a = max(x, y);
        |                    ^
-[error]: can't tell what `T` is from the arguments of `deref` at [tests/errors/generic_inference.smelt:6:18]
+[error]: can't tell what `T` is from the arguments of `deref` at [tests/errors/generic_inference.sabk:6:18]
      6 |     let b = deref(5);
        |                  ^
-[error]: can't tell what `T` is from the arguments of `first` at [tests/errors/generic_inference.smelt:7:18]
+[error]: can't tell what `T` is from the arguments of `first` at [tests/errors/generic_inference.sabk:7:18]
      7 |     let c = first(null);
        |                  ^

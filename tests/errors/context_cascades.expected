@@ -1,27 +1,27 @@
-[error]: `.{ }` makes a struct or union, but `i32` is expected here at [tests/errors/context_cascades.smelt:7:30]
+[error]: `.{ }` makes a struct or union, but `i32` is expected here at [tests/errors/context_cascades.sabk:7:30]
      7 | let g: Box = .{ .p = .{ .x = .{ .q = .Red } } };   // .x is an i32
        |                              ^
-[error]: `none` doesn't return a value at [tests/errors/context_cascades.smelt:8:20]
+[error]: `none` doesn't return a value at [tests/errors/context_cascades.sabk:8:20]
      8 | fn none() { return .Red; }                         // returns nothing
        |                    ^
-[error]: `e` isn't a function, its type is `i32` at [tests/errors/context_cascades.smelt:11:5]
+[error]: `e` isn't a function, its type is `i32` at [tests/errors/context_cascades.sabk:11:5]
     11 |     e(.Red);                                       // not a function
        |     ^
-[error]: `Point` has no field `nope` at [tests/errors/context_cascades.smelt:13:7]
+[error]: `Point` has no field `nope` at [tests/errors/context_cascades.sabk:13:7]
     13 |     p.nope(.Green);                                // no field `nope`
        |       ^
-[error]: `Point` has no field `z` at [tests/errors/context_cascades.smelt:14:24]
+[error]: `Point` has no field `z` at [tests/errors/context_cascades.sabk:14:24]
     14 |     let b: Point = .{ .z = .{} };                  // no field `z`
        |                        ^
-[error]: too many values, `Point` has 2 fields at [tests/errors/context_cascades.smelt:15:29]
+[error]: too many values, `Point` has 2 fields at [tests/errors/context_cascades.sabk:15:29]
     15 |     let c: Point = .{ 1, 2, .Red };                // too many values
        |                             ^
-[error]: an array length must be a constant integer at [tests/errors/context_cascades.smelt:17:13]
+[error]: an array length must be a constant integer at [tests/errors/context_cascades.sabk:17:13]
     17 |     let d: [n]Color = .[.Red];                     // length not constant
        |             ^
-[error]: `i32` is not a struct type at [tests/errors/context_cascades.smelt:18:13]
+[error]: `i32` is not a struct type at [tests/errors/context_cascades.sabk:18:13]
     18 |     let x = I.{ .Red };                            // not a struct
        |             ^
-[error]: `+=` needs a number, found `Color` at [tests/errors/context_cascades.smelt:20:7]
+[error]: `+=` needs a number, found `Color` at [tests/errors/context_cascades.sabk:20:7]
     20 |     k += .Green;                                   // `+=` needs a number
        |       ^

@@ -13,11 +13,11 @@ twice(10) = 40 None
 twice(60) = 0 TooBig
   (twice(-1) done)
 twice(-1) = 0 Negative
-both: smelt smelt true
+both: sabk sabk true
 both missing: false
 or_else: fallback
-or_else: smelt
-chain: smelt
+or_else: sabk
+chain: sabk
 pass: 3 2
 ok_only: None TooBig
 run: 32012131 32012131

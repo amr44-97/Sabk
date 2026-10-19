@@ -1,39 +1,39 @@
-[error]: a `#format` function ends with a format and its values: `fmt: string, args: ..Any` at [tests/errors/format_check.smelt:13:4]
+[error]: a `#format` function ends with a format and its values: `fmt: string, args: ..Any` at [tests/errors/format_check.sabk:13:4]
     13 | fn not_format(x: i32) #format {}          // must end with fmt and ..Any
        |    ^
-[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:16:20]
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.sabk:16:20]
     16 |     println("% and %", 1);                // too few values
        |                    ^
-[error]: this value has no `%` in the format: it has 1 `%`, for 2 values at [tests/errors/format_check.smelt:17:21]
+[error]: this value has no `%` in the format: it has 1 `%`, for 2 values at [tests/errors/format_check.sabk:17:21]
     17 |     println("%", 1, 2);                   // too many
        |                     ^
-[note]: the format at [tests/errors/format_check.smelt:17:13]
+[note]: the format at [tests/errors/format_check.sabk:17:13]
     17 |     println("%", 1, 2);                   // too many
        |             ^
-[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:18:13]
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.sabk:18:13]
     18 |     println(ROW, 1);                      // a constant format too
        |             ^
-[error]: `%{zz}` isn't a format: `z` isn't a kind; the kinds are s q (text), w (an error or enum), x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:19:18]
+[error]: `%{zz}` isn't a format: `z` isn't a kind; the kinds are s q (text), w (an error or enum), x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.sabk:19:18]
     19 |     println("x = %{zz}", 1);              // not a spec
        |                  ^
-[error]: `%{.}` isn't a format: a `.` needs the precision's digits after it at [tests/errors/format_check.smelt:20:18]
+[error]: `%{.}` isn't a format: a `.` needs the precision's digits after it at [tests/errors/format_check.sabk:20:18]
     20 |     println("x = %{.}", 1);
        |                  ^
-[error]: `%{5.2k}` isn't a format: `k` isn't a kind; the kinds are s q (text), w (an error or enum), x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:21:18]
+[error]: `%{5.2k}` isn't a format: `k` isn't a kind; the kinds are s q (text), w (an error or enum), x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.sabk:21:18]
     21 |     println("x = %{5.2k}", 1);
        |                  ^
-[error]: `%{x}` prints an integer, but `"text"` is a `string`; for text write `%s` at [tests/errors/format_check.smelt:22:14]
+[error]: `%{x}` prints an integer, but `"text"` is a `string`; for text write `%s` at [tests/errors/format_check.sabk:22:14]
     22 |     println("%{x} %{e}", "text", true);   // kinds that don't fit
        |              ^
-[error]: `%{e}` prints a number, but `true` is a `bool` at [tests/errors/format_check.smelt:22:19]
+[error]: `%{e}` prints a number, but `true` is a `bool` at [tests/errors/format_check.sabk:22:19]
     22 |     println("%{x} %{e}", "text", true);   // kinds that don't fit
        |                   ^
-[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:23:20]
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.sabk:23:20]
     23 |     log("info", "% %", 1);                // through a wrapper
        |                    ^
-[error]: `%{x}` prints an integer, but `2.5` is an `f64` at [tests/errors/format_check.smelt:24:21]
+[error]: `%{x}` prints an integer, but `2.5` is an `f64` at [tests/errors/format_check.sabk:24:21]
     24 |     let s = format("%{x}", 2.5);
        |                     ^
-[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:26:23]
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.sabk:26:23]
     26 |     print_to(&buf, "% %", 1);             // onto a [..]u8
        |                       ^

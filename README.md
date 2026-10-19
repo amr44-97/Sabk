@@ -1,6 +1,6 @@
-# Smelt
+# Sabk
 
-Smelt is a small systems programming language in the spirit of C, with ideas
+Sabk is a small systems programming language in the spirit of C, with ideas
 from Jai, Odin and Zig. It compiles to C.
 
 ```
@@ -48,7 +48,7 @@ fn main() {
 ```
 
 ```
-$ ./smelt --run example.smelt
+$ ./sabk --run example.sabk
 0 1 4 9 16 25 36 49 64 81
 ```
 
@@ -83,7 +83,7 @@ $ ./smelt --run example.smelt
   also call C) and puts the result in the program. `#insert #run gen();`
   compiles the source text that code returns, and a top-level
   `#run configure();` is a build script: it links libraries, adds C files
-  and sets the output, in Smelt.
+  and sets the output, in Sabk.
 - **Tagged enums**, like Rust's: `enum Expr { Number(i64), Binary(op: Op,
   lhs: *Expr, rhs: *Expr), Nil }`, taken apart with `switch` (`case
   .Binary{op, lhs, rhs}:`) or `if (e is .Number(n))`. A `switch` on an enum
@@ -132,30 +132,30 @@ It starts with a section for C programmers, and covers
 
 ## Building
 
-The compiler is written in Smelt and builds itself. The first build starts
-from `bootstrap/smelt.c`, the C it writes for itself (for Linux x86-64),
+The compiler is written in Sabk and builds itself. The first build starts
+from `bootstrap/sabk.c`, the C it writes for itself (for Linux x86-64),
 so all it needs is a C compiler with GNU C's extensions (`cc` by default,
 or set `$CC`) and libffi. It's developed on Linux.
 
 ```
-make            builds ./smelt: build/stage0 from the seed, which builds it
+make            builds ./sabk: build/stage0 from the seed, which builds it
 make test       runs the test suite
-make bootstrap  ./smelt builds itself twice; both must write the same C
-make seed       refreshes bootstrap/smelt.c (after changing the compiler)
-make clean      removes build/ and ./smelt
+make bootstrap  ./sabk builds itself twice; both must write the same C
+make seed       refreshes bootstrap/sabk.c (after changing the compiler)
+make clean      removes build/ and ./sabk
 ```
 
 ## Using it
 
 ```
-./smelt main.smelt            build an executable named `main`
-./smelt main.smelt -o app     ... named `app`
-./smelt --run main.smelt      build and run it
-./smelt --run main.smelt -- a b   ... with arguments
-./smelt --release main.smelt  build optimized
-./smelt --emit-c main.smelt   print the generated C
-./smelt --check main.smelt    only check for errors
-./smelt --stats ...           also print phase times and generic instances
+./sabk main.sabk            build an executable named `main`
+./sabk main.sabk -o app     ... named `app`
+./sabk --run main.sabk      build and run it
+./sabk --run main.sabk -- a b   ... with arguments
+./sabk --release main.sabk  build optimized
+./sabk --emit-c main.sabk   print the generated C
+./sabk --check main.sabk    only check for errors
+./sabk --stats ...           also print phase times and generic instances
 ```
 
 The standard library lives in [`std/`](std): `io`, `fmt` (formatting any
@@ -168,41 +168,41 @@ summary of what it offers.
 ## Project layout
 
 ```
-src/                  the compiler, in Smelt (the table below)
-std/                  the standard library, in Smelt
-bootstrap/smelt.c     the compiler's own C: the seed of its first build
+src/                  the compiler, in Sabk (the table below)
+std/                  the standard library, in Sabk
+bootstrap/sabk.c     the compiler's own C: the seed of its first build
 tests/                golden-file tests: lexer, parser, resolve, types,
                       errors, warnings, and run (programs that are compiled
                       and run); tests/run.sh runs them
 docs/reference.md     the language reference
-Smelt-*.md            design notes: decisions, the review, the memory
+Sabk-*.md            design notes: decisions, the review, the memory
                       traps, and the plan for the language's next steps
 ```
 
 | File | What's in it |
 |---|---|
-| `src/main.smelt` | the command line |
-| `src/source.smelt` | source files, and messages that point into them |
-| `src/token.smelt` | token kinds, keywords, and their names in dumps |
-| `src/lexer.smelt` | text to tokens; number values |
-| `src/ast.smelt` | the syntax tree's nodes, and the `--ast` dump |
-| `src/parser.smelt` | tokens to a syntax tree |
-| `src/module.smelt` | modules, and the prelude (`src/prelude.smelt`, baked in by `#run`) |
-| `src/resolve.smelt` | loading imports, linking names, expanding macros |
-| `src/const.smelt` | compile-time values: 128-bit integers, floats, bools |
-| `src/types.smelt` | types, interned |
-| `src/check.smelt` | the type checker: declarations, types, layout, reporting |
-| `src/statements.smelt` | statements, and several results |
-| `src/patterns.smelt` | patterns, `switch`, `is`, and which values cases cover |
-| `src/expressions.smelt` | conversions and expressions |
-| `src/generics.smelt` | instances, indexing, literals, casts |
-| `src/comptime.smelt` | `#run`, `#insert` and `#if` conditions, type info, defaults |
-| `src/formats.smelt` | checking `#format` calls |
-| `src/memory.smelt` | memory that escapes a function, and the memory traps |
-| `src/lower.smelt` | checked code to the VM's bytecode |
-| `src/vm.smelt` | the VM: running bytecode, calling C, baking `#run` results |
+| `src/main.sabk` | the command line |
+| `src/source.sabk` | source files, and messages that point into them |
+| `src/token.sabk` | token kinds, keywords, and their names in dumps |
+| `src/lexer.sabk` | text to tokens; number values |
+| `src/ast.sabk` | the syntax tree's nodes, and the `--ast` dump |
+| `src/parser.sabk` | tokens to a syntax tree |
+| `src/module.sabk` | modules, and the prelude (`src/prelude.sabk`, baked in by `#run`) |
+| `src/resolve.sabk` | loading imports, linking names, expanding macros |
+| `src/const.sabk` | compile-time values: 128-bit integers, floats, bools |
+| `src/types.sabk` | types, interned |
+| `src/check.sabk` | the type checker: declarations, types, layout, reporting |
+| `src/statements.sabk` | statements, and several results |
+| `src/patterns.sabk` | patterns, `switch`, `is`, and which values cases cover |
+| `src/expressions.sabk` | conversions and expressions |
+| `src/generics.sabk` | instances, indexing, literals, casts |
+| `src/comptime.sabk` | `#run`, `#insert` and `#if` conditions, type info, defaults |
+| `src/formats.sabk` | checking `#format` calls |
+| `src/memory.sabk` | memory that escapes a function, and the memory traps |
+| `src/lower.sabk` | checked code to the VM's bytecode |
+| `src/vm.sabk` | the VM: running bytecode, calling C, baking `#run` results |
 | `src/vm_ffi.c` | libffi and dlsym, whose types differ between platforms |
-| `src/codegen.smelt` | the checked program as C |
+| `src/codegen.sabk` | the checked program as C |
 | `src/runtime_start.c`, `src/runtime_new.c` | the runtime's C, pieces of every program's C (baked in by `#run`) |
 
 ## History
@@ -228,7 +228,7 @@ compiler. Where the two differ inside:
   of node needs no code there.
 - A macro's labels get its color like its names do: the C++ resolver left
   them uncolored, so a macro's `outer:` clashed with its caller's
-  (tests/resolve/macro_labels.smelt).
+  (tests/resolve/macro_labels.sabk).
 - Constants are 128-bit (`I128`, two 64-bit halves) where the C++ used
   `__int128`.
 - A tagged enum's value made by the checker is a `VariantValue` node.
@@ -244,11 +244,11 @@ compiler. Where the two differ inside:
 
 ## Status
 
-Smelt is young and experimental. It works end to end, and the test suite
+Sabk is young and experimental. It works end to end, and the test suite
 compiles and runs real programs, but the language and standard library will
-still change (Smelt-language-plan.md says how). Debuggers work in Smelt
-terms: the C maps back to Smelt files and lines, so gdb breakpoints,
-backtraces and stepping show Smelt source.
+still change (Sabk-language-plan.md says how). Debuggers work in Sabk
+terms: the C maps back to Sabk files and lines, so gdb breakpoints,
+backtraces and stepping show Sabk source.
 
 ## License
 

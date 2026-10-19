@@ -1,3 +1,3 @@
-[error]: `---` gives `a` no value to take a type from; give it one: `let a: T = ---;` at [tests/errors/uninit_no_type.smelt:3:13]
+[error]: `---` gives `a` no value to take a type from; give it one: `let a: T = ---;` at [tests/errors/uninit_no_type.sabk:3:13]
      3 |     let a = ---;
        |             ^
