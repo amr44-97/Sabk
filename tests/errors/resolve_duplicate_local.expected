@@ -1,0 +1,6 @@
+[error]: `a` is already declared in this scope at [tests/errors/resolve_duplicate_local.smelt:3:9]
+     3 |     let a = 2;
+       |         ^
+[note]: the first declaration is here at [tests/errors/resolve_duplicate_local.smelt:2:9]
+     2 |     let a = 1;
+       |         ^

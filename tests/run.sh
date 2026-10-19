@@ -4,8 +4,12 @@
 #
 #   lexer/   smelt --tokens file   stdout, must exit 0
 #   parser/  smelt --ast file      stdout, must exit 0
-#   errors/  smelt --ast file      stderr, must exit non-zero (for now, the
-#                                  lexer's and parser's errors)
+#   resolve/ smelt --resolve file  stdout (every module, names linked; with
+#                                  tests/resolve/std), must exit 0
+#   types/   smelt --types file    stdout (every module and instance, with
+#                                  types; with tests/resolve/std), exit 0
+#   errors/  smelt --resolve file  stderr, must exit non-zero (for now, the
+#                                  errors up to the resolver's; std is ./std)
 #
 # usage: tests/run.sh [--update] [filter]
 #   --update  rewrite the .expected files from the current output
@@ -33,11 +37,14 @@ fail=0
 for src in tests/*/*.smelt; do
   [[ -n "$filter" && "$src" != *"$filter"* ]] && continue
   suite=$(basename "$(dirname "$src")")
+  [[ "$suite" == unit ]] && continue   # `make unit`: checked by their own scripts
   expected="${src%.smelt}.expected"
   case "$suite" in
   lexer)  actual=$(build/smelt --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
   parser) actual=$(build/smelt --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  errors) actual=$(build/smelt --ast "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
+  resolve) actual=$(build/smelt --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  types)  actual=$(build/smelt --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  errors) actual=$(build/smelt --resolve --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
   *) echo "unknown suite: $suite"; exit 1 ;;
   esac
 

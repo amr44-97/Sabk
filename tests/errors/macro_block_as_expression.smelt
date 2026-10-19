@@ -1,0 +1,2 @@
+fn m(body: Code) #expand { let x = #insert body; }
+fn f() { m() { } }

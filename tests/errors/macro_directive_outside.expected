@@ -1,0 +1,6 @@
+[error]: `#insert` only works inside an `#expand` function at [tests/errors/macro_directive_outside.smelt:2:13]
+     2 |     #insert body;
+       |             ^
+[error]: `#text` only works inside an `#expand` function at [tests/errors/macro_directive_outside.smelt:3:19]
+     3 |     let t = #text(body);
+       |                   ^

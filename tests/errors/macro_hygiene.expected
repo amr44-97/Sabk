@@ -1,0 +1,6 @@
+[error]: unknown name `secret`; the caller has a `secret`, write `` `secret `` to use it at [tests/errors/macro_hygiene.smelt:1:27]
+     1 | fn use_secret() #expand { secret += 1; }
+       |                           ^
+[note]: in the expansion of `use_secret` here at [tests/errors/macro_hygiene.smelt:4:5]
+     4 |     use_secret();
+       |     ^

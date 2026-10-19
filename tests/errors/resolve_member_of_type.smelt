@@ -1,0 +1,2 @@
+struct Vec2 { x: f32; }
+fn f() { let a = Vec2.x; }

@@ -1,0 +1,2 @@
+fn m(n: i32) #expand {}
+fn f() { m() { } }

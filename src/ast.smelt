@@ -8,14 +8,36 @@
 import "std/array";
 import "std/fmt";
 import "std/io";
+import "std/map";
 import "std/str";
 import "token";
+import "module";
+import "types";
+import "const";
 
 pub struct Node {
     tok: Token;
     span: string;      // its source text, where a message quotes it (call
                        // arguments, operands of operators); else empty
     kind: NodeKind;
+    caller: bool;      // written with a backtick: the macro caller's
+    color: i32;        // the macro expansion it was copied into; 0: none
+
+    // set by the resolver
+    decl: *Node;       // what a name, a `break label` or a `return` in a
+                       // macro refers to
+    owner: *Module;    // a top-level declaration's (or variant's) module
+    untaken_if: *Node; // a declaration in a top-level #if branch not taken
+
+    // set by the checker
+    ty: *Type;         // an expression's type; a declaration's declared type
+    conv: *Type;       // an expression implicitly converted to this type
+    cval: Const;       // the value, when it's known at compile time
+    check_state: u8;   // declarations: 0 unchecked, 1 in progress, 2 done
+    convs: []*Type;    // `a, b = f()`: each target's conversion, or null
+    generic: *Node;    // an instance: the template it was made from
+    instance_args: []*Type; // an instance: the types its T... are bound to
+    is_baked: bool;    // a literal made from a #run result: already checked
 }
 
 pub enum BinaryOp {
@@ -35,10 +57,11 @@ pub enum NodeKind {
     Root(decls: []*Node),
 
     // ---- declarations; tok is the name unless said otherwise
-    Import(alias: *Node),                    // tok: the path, a string token
+    Import(alias: *Node, module: *Module = null), // tok: the path, a string token
     Fn(params: []*Node, result: *Node, body: *Node, is_pub: bool,
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
-       nodiscard: bool, no_bounds_check: bool),
+       nodiscard: bool, no_bounds_check: bool,
+       type_params: []*Node = .[]),          // the $Ts in params' types
     Param(declared: *Node, value: *Node, is_type: bool, variadic: bool),
     Struct(fields: []*Node, type_params: []*Node, is_union: bool, is_pub: bool),
     Field(declared: *Node, value: *Node),
@@ -46,10 +69,9 @@ pub enum NodeKind {
     // Number(i64) has a payload type; Binary(op: Op, ...) fields, a Struct
     Variant(payload: *Node, fields: *Node, value: *Node),
     TypeAlias(aliased: *Node, is_pub: bool),
-    Let(declared: *Node, value: *Node, is_pub: bool, is_extern: bool,
-        uninit: bool, caller: bool),
-    LetValues(names: []*Node, values: *Node, caller: bool), // let a, b = ...; names are Lets
-    Const(declared: *Node, value: *Node, is_pub: bool, caller: bool),
+    Let(declared: *Node, value: *Node, is_pub: bool, is_extern: bool, uninit: bool),
+    LetValues(names: []*Node, values: *Node), // let a, b = ...; names are Lets
+    Const(declared: *Node, value: *Node, is_pub: bool),
     Run(value: *Node),                       // #run value; tok: `#run`
     InsertString(value: *Node),              // #insert value; tok: `#insert`
 
@@ -59,24 +81,28 @@ pub enum NodeKind {
     Assign(target: *Node, value: *Node),     // tok: `=`, `+=`, ...
     Inc(target: *Node),                      // tok: `++`
     Dec(target: *Node),
-    Return(value: *Node, caller: bool),
+    Return(value: *Node),
     Break(label: *Node, value: *Node),
     Continue(label: *Node, value: *Node),
-    Defer(stmt: *Node, caller: bool),
+    Defer(stmt: *Node),
     If(cond: *Node, then: *Node, else_: *Node, gives_value: bool),
     StaticIf(cond: *Node, then: *Node, else_: *Node), // #if; tok: `if`
     While(cond: *Node, body: *Node, label: *Node),
     DoWhile(body: *Node, cond: *Node, label: *Node),
     For(init: *Node, cond: *Node, step: *Node, body: *Node, label: *Node),
     ForIn(iterable: *Node, range_end: *Node, body: *Node, label: *Node), // tok: the variable
-    Switch(value: *Node, cases: []*Node, label: *Node, gives_value: bool),
+    Switch(value: *Node, cases: []*Node, label: *Node, gives_value: bool,
+           continued: bool = false,    // `continue label = v` runs it again
+           complete: bool = false,     // handles every value of its enum
+           in_order: bool = false),    // nested patterns or guards: cases tested in order
     Case(patterns: []*Node, guard: *Node, body: *Node),
     DefaultCase(body: *Node),
     Insert,                                  // #insert code; tok: the Code parameter
 
     // ---- expressions
-    Identifier(caller: bool),                // `name: the macro caller's
-    Number, Float, String, Char, Bool, Null, Context,
+    Identifier,
+    Number, Float, Char, Bool, Null, Context,
+    String(quoted: string),                  // the token, or text #text made
     Unary(op: UnaryOp, operand: *Node),      // tok: the operator
     Binary(op: BinaryOp, lhs: *Node, rhs: *Node),
     Deref(pointer: *Node),                   // p.*; tok: `*`
@@ -86,8 +112,8 @@ pub enum NodeKind {
     Index(object: *Node, index: *Node),      // tok: `[`
     Slice(object: *Node, lo: *Node, hi: *Node),
     Cast(value: *Node, to: *Node),
-    SizeOf(of: *Node),                       // a type or a value
-    TypeInfo(of: *Node),
+    SizeOf(of: *Node, is_type: bool = false), // a type or a value; the
+    TypeInfo(of: *Node, is_type: bool = false), // resolver says which
     Spread(value: *Node),                    // ..xs as arguments; tok: `..`
     Values(items: []*Node),                  // a, b; tok: the first's
     OrReturn(value: *Node),
@@ -102,6 +128,13 @@ pub enum NodeKind {
     TextOf,                                  // #text(code)
     LocationOf,                              // #location(code)
     TypeExpr(declared: *Node),               // a type where an expression goes
+    // made by the resolver: a macro call replaced by a copy of the macro's
+    // body, `expansion` the copy's color; tok: the callee's
+    MacroExpansion(callee: *Node, stmts: []*Node, result: *Node, expansion: i32),
+    TypeCompare(lhs: *Node, rhs: *Node),     // T == U in an #if condition
+    // made by the checker: a tagged enum's value, `Expr.Number(1)`; decl:
+    // the variant, payload: its value, or null
+    VariantValue(payload: *Node),
 
     // ---- patterns, in cases and after `is`
     Is(value: *Node, pattern: *Node),
@@ -120,6 +153,7 @@ pub enum NodeKind {
     TypeFn(params: []*Node, result: *Node),
     TypeTuple(items: []*Node),               // (i64, bool) after `->`
     TypeParam,                               // $T; tok: the name
+    BuiltinType,                             // i32, bool, ...: the resolver's
 }
 
 pub fn new_node(tok: Token, kind: NodeKind) -> *Node {
@@ -130,7 +164,7 @@ pub fn new_node(tok: Token, kind: NodeKind) -> *Node {
 
 // a node as the C++ Node held it: its tag, and its parts in lhs, rhs,
 // extra and list
-struct OldShape {
+pub struct OldShape {
     tag: string;
     declared: *Node;    // `type:`
     lhs: *Node;
@@ -138,7 +172,6 @@ struct OldShape {
     extra: *Node;
     list: []*Node;
     type_params: []*Node;
-    caller: bool;
     is_pub: bool;
     is_extern: bool;
     uninit: bool;
@@ -172,13 +205,14 @@ fn unary_tag(op: UnaryOp) -> string {
     };
 }
 
-fn old_shape(n: *Node) -> OldShape {
+pub fn old_shape(n: *Node) -> OldShape {
     let s: OldShape;
     switch (n.kind) {
     case .Root{decls}: s.tag = "ROOT"; s.list = decls;
     case .Import{alias}: s.tag = "IMPORT"; s.rhs = alias;
     case .Fn(f):
         s.tag = if (f.is_macro) "MACRO_DECL" else "FUN_DECL";
+        s.generic = f.type_params.len > 0 && n.generic == null;
         s.declared = f.result;
         s.rhs = f.body;
         s.list = f.params;
@@ -197,7 +231,7 @@ fn old_shape(n: *Node) -> OldShape {
         s.tag = if (st.is_union) "UNION" else "STRUCT";
         s.list = st.fields;
         s.type_params = st.type_params;
-        s.generic = st.type_params.len > 0;
+        s.generic = st.type_params.len > 0 && n.generic == null;
         s.is_pub = st.is_pub;
     case .Field{declared, value}:
         s.tag = "STRUCT_FIELD"; s.declared = declared; s.lhs = value;
@@ -205,7 +239,7 @@ fn old_shape(n: *Node) -> OldShape {
         s.tag = "ENUM";
         s.declared = e.backing;
         s.list = e.variants;
-        s.generic = e.type_params.len > 0;
+        s.generic = e.type_params.len > 0 && n.generic == null;
         s.is_pub = e.is_pub;
     case .Variant{payload, fields, value}:
         s.tag = "ENUM_VARIANT"; s.declared = payload; s.lhs = value; s.rhs = fields;
@@ -218,12 +252,10 @@ fn old_shape(n: *Node) -> OldShape {
         s.is_pub = l.is_pub;
         s.is_extern = l.is_extern;
         s.uninit = l.uninit;
-        s.caller = l.caller;
-    case .LetValues{names, values, caller}:
-        s.tag = "LET_VALUES"; s.lhs = values; s.list = names; s.caller = caller;
+    case .LetValues{names, values}: s.tag = "LET_VALUES"; s.lhs = values; s.list = names;
     case .Const(c):
         s.tag = "CONST_DECL"; s.declared = c.declared; s.lhs = c.value;
-        s.is_pub = c.is_pub; s.caller = c.caller;
+        s.is_pub = c.is_pub;
     case .Run{value}: s.tag = "RUN"; s.lhs = value;
     case .InsertString{value}: s.tag = "INSERT_STRING"; s.lhs = value;
 
@@ -233,10 +265,10 @@ fn old_shape(n: *Node) -> OldShape {
     case .Assign{target, value}: s.tag = "ASSIGN"; s.lhs = target; s.rhs = value;
     case .Inc{target}: s.tag = "INC"; s.lhs = target;
     case .Dec{target}: s.tag = "DEC"; s.lhs = target;
-    case .Return{value, caller}: s.tag = "RETURN"; s.lhs = value; s.caller = caller;
+    case .Return{value}: s.tag = "RETURN"; s.lhs = value;
     case .Break{value}: s.tag = "BREAK"; s.rhs = value;
     case .Continue{value}: s.tag = "CONTINUE"; s.rhs = value;
-    case .Defer{stmt, caller}: s.tag = "DEFER"; s.lhs = stmt; s.caller = caller;
+    case .Defer{stmt}: s.tag = "DEFER"; s.lhs = stmt;
     case .If(i):
         s.tag = if (i.gives_value) "IF_EXPR" else "IF";
         s.lhs = i.cond; s.rhs = i.then; s.extra = i.else_;
@@ -260,7 +292,7 @@ fn old_shape(n: *Node) -> OldShape {
     case .DefaultCase{body}: s.tag = "DEFAULT_CASE"; s.rhs = body;
     case .Insert: s.tag = "INSERT";
 
-    case .Identifier{caller}: s.tag = "IDENTIFIER"; s.caller = caller;
+    case .Identifier: s.tag = "IDENTIFIER";
     case .Number: s.tag = "NUMBER_LITERAL";
     case .Float: s.tag = "FLOAT_LITERAL";
     case .String: s.tag = "STRING_LITERAL";
@@ -277,8 +309,12 @@ fn old_shape(n: *Node) -> OldShape {
     case .Index{object, index}: s.tag = "INDEX"; s.lhs = object; s.rhs = index;
     case .Slice{object, lo, hi}: s.tag = "SLICE"; s.lhs = object; s.rhs = lo; s.extra = hi;
     case .Cast{value, to}: s.tag = "CAST"; s.declared = to; s.lhs = value;
-    case .SizeOf{of}: s.tag = "SIZE_OF"; s.extra = of;
-    case .TypeInfo{of}: s.tag = "TYPE_INFO"; s.extra = of;
+    case .SizeOf{of, is_type}:
+        s.tag = "SIZE_OF";
+        if (is_type) s.declared = of; else s.extra = of;
+    case .TypeInfo{of, is_type}:
+        s.tag = "TYPE_INFO";
+        if (is_type) s.declared = of; else s.extra = of;
     case .Spread{value}: s.tag = "SPREAD"; s.lhs = value;
     case .Values{items}: s.tag = "VALUES"; s.list = items;
     case .OrReturn{value}: s.tag = "OR_RETURN"; s.lhs = value;
@@ -293,6 +329,10 @@ fn old_shape(n: *Node) -> OldShape {
     case .TextOf: s.tag = "TEXT_OF";
     case .LocationOf: s.tag = "LOCATION_OF";
     case .TypeExpr{declared}: s.tag = "TYPE_EXPR"; s.lhs = declared;
+    case .MacroExpansion{callee, stmts, result}:
+        s.tag = "MACRO_EXPANSION"; s.declared = result; s.lhs = callee; s.list = stmts;
+    case .TypeCompare{lhs, rhs}: s.tag = "TYPE_COMPARE"; s.lhs = lhs; s.rhs = rhs;
+    case .VariantValue{payload}: s.tag = "VARIANT_VALUE"; s.lhs = payload;
 
     case .Is{value, pattern}: s.tag = "IS"; s.lhs = value; s.rhs = pattern;
     case .Range{lo, hi}: s.tag = "RANGE"; s.lhs = lo; s.rhs = hi;
@@ -310,6 +350,7 @@ fn old_shape(n: *Node) -> OldShape {
     case .TypeFn{params, result}: s.tag = "TYPE_FN"; s.declared = result; s.list = params;
     case .TypeTuple{items}: s.tag = "TYPE_TUPLE"; s.list = items;
     case .TypeParam: s.tag = "TYPE_PARAM";
+    case .BuiltinType: s.tag = "BUILTIN_TYPE";
     }
     return s;
 }
@@ -336,9 +377,16 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
     // keyword and `{` tokens repeat the tag, so only the others show;
     // `true` and `false` are the value, so they show
     let keyword = (n.tok.kind as u8) >= (TokenKind.Fn as u8) && n.kind.tag != .Bool;
-    if (n.tok.text.len > 0 && !keyword && n.tok.kind != .LBrace)
+    let quoted = "";
+    if (n.kind is .String{quoted: q})
+        quoted = q;
+    if (quoted.len > 0)
+        print_to(out, " %", quoted);
+    else if (n.tok.text.len > 0 && !keyword && n.tok.kind != .LBrace)
         print_to(out, " `%`", n.tok.text);
-    if (s.caller) append_string(out, " [caller]");
+    if (n.caller) append_string(out, " [caller]");
+    if (n.color != 0) print_to(out, " [macro %]", n.color);
+    if (n.kind is .MacroExpansion{expansion}) print_to(out, " [expansion %]", expansion);
     if (s.is_pub) append_string(out, " [pub]");
     if (s.is_extern) append_string(out, " [extern]");
     if (s.uninit) append_string(out, " [uninit]");
@@ -348,6 +396,18 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
     if (s.variadic) append_string(out, " [variadic]");
     if (s.type_param) append_string(out, " [type param]");
     if (s.generic) append_string(out, " [generic]");
+    if (n.decl != null)
+        print_ref(out, n.decl);
+    if (n.kind is .Import{module} && module != null)
+        print_to(out, " -> module %", module.path);
+    if (n.ty != null)
+        print_to(out, " : %", type_name(n.ty));
+    switch (n.cval.kind) {
+    case .Int:   print_to(out, " = %", i128_to_string(n.cval.i));
+    case .Float: print_to(out, " = %", format_g(n.cval.f));
+    case .Bool:  append_string(out, if (n.cval.i.lo != 0) " = true" else " = false");
+    case .None:
+    }
     array_add(out, '\n');
 
     if (s.declared != null) dump_into(out, s.declared, indent + 1, "type");
@@ -358,4 +418,173 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
         dump_into(out, child, indent + 1, "");
     for (param in s.type_params)
         dump_into(out, param, indent + 1, "type_param");
+}
+
+// " -> VAR_DECL `x` 3:9", with the file for a top-level declaration
+fn print_ref(out: *[..]u8, d: *Node) {
+    if (d.kind.tag == .BuiltinType) {
+        append_string(out, " -> builtin");
+        return;
+    }
+    print_to(out, " -> % `%` ", old_shape(d).tag, d.tok.text);
+    if (d.owner != null) {
+        let text = d.owner.src.text;
+        let in_file = d.tok.text.ptr >= text.ptr && d.tok.text.ptr <= text.ptr + text.len;
+        append_string(out, d.owner.path);
+        append_string(out, if (in_file) ":" else " #insert:");
+    }
+    print_to(out, "%:%", d.tok.line, d.tok.column);
+}
+
+// ---- walking and copying trees
+//
+// A node's children are the *Node and []*Node parts of its kind, found
+// through NodeKind's type information, so a new kind needs nothing here.
+
+// the type of `n`'s variant's parts, and where they are
+fn parts(n: *Node) -> (*TypeInfo, *u8) {
+    let info = type_info(NodeKind);
+    let tag = n.kind.tag as i64;
+    for (v in info.variants)
+        if (v.value == tag)
+            return v.payload, (&n.kind as *u8) + info.fields[1].offset;
+    return null, null;
+}
+
+// a copy of `n` and everything under it, all given `color` (unless it's
+// negative)
+pub fn clone_node(n: *Node, color: i32) -> *Node {
+    if (n == null)
+        return null;
+    let copy = new(n.*);
+    if (color >= 0)
+        copy.color = color;
+    let info, at = parts(copy);
+    if (info == null)
+        return copy;
+    let node_ptr, node_list = type_info(*Node), type_info([]*Node);
+    for (f in info.fields) {
+        if (f.info == node_ptr) {
+            let slot = (at + f.offset) as **Node;
+            slot.* = clone_node(slot.*, color);
+        } else if (f.info == node_list) {
+            let slot = (at + f.offset) as *[]*Node;
+            let items = new([]*Node, slot.len);
+            for (i in 0..items.len)
+                items[i] = clone_node(slot.*[i], color);
+            slot.* = items;
+        }
+    }
+    return copy;
+}
+
+// `n`'s children in the order the C++ compiler kept them (type, lhs, rhs,
+// extra, then the list): what walks over a tree go through
+pub fn children(n: *Node) -> [..]*Node {
+    let s = old_shape(n);
+    let out: [..]*Node;
+    out.allocator = context.temp_allocator;
+    for (c in .[s.declared, s.lhs, s.rhs, s.extra])
+        if (c != null)
+            array_add(&out, c);
+    for (c in s.list)
+        if (c != null)
+            array_add(&out, c);
+    return out;
+}
+
+// a string's text as a literal, escaped: what #text and #location make
+pub fn quote_string(bytes: string) -> string {
+    let out: [..]u8;
+    array_add(&out, '"');
+    for (c in bytes) {
+        if (c == '"' || c == '\\') {
+            array_add(&out, '\\');
+            array_add(&out, c);
+        } else if (c == '\n') {
+            append_string(&out, "\\n");
+        } else if (c == '\t') {
+            append_string(&out, "\\t");
+        } else if (c < 32 || c >= 127) {
+            print_to(&out, "\\x%{02x}", c);
+        } else {
+            array_add(&out, c);
+        }
+    }
+    array_add(&out, '"');
+    return out as string;
+}
+
+extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+
+// C's %g: what the C++ compiler's dumps printed floats with
+pub fn format_g(f: f64) -> string {
+    let buffer: [64]u8 = ---;
+    snprintf(buffer.ptr, buffer.len as usize, "%g", f);
+    return copy_string(from_cstring(buffer.ptr));
+}
+
+// A copy of a resolved declaration for a generic instance: names that
+// referred to nodes inside it now refer to the copies (each instance gets
+// its own locals and its own type parameters). A node met twice is copied
+// once: a function's type parameters are in its parameters' types and in
+// its list of them.
+pub fn clone_instance(n: *Node) -> *Node {
+    let copies: Map(*Node, *Node);
+    let copy = clone_tree(n, &copies);
+    // a template naming itself (recursion, `next: *Node(T)`) still means
+    // the template, which instantiates for whatever types that use has
+    map_remove(&copies, n);
+    remap(copy, &copies);
+    map_free(&copies);
+    return copy;
+}
+
+fn clone_tree(n: *Node, copies: *Map(*Node, *Node)) -> *Node {
+    if (n == null)
+        return null;
+    let done = map_get(copies, n) or_else null;
+    if (done != null)
+        return done;
+    let copy = new(n.*);
+    map_put(copies, n, copy);
+    let info, at = parts(copy);
+    if (info == null)
+        return copy;
+    let node_ptr, node_list = type_info(*Node), type_info([]*Node);
+    for (f in info.fields) {
+        if (f.info == node_ptr) {
+            let slot = (at + f.offset) as **Node;
+            slot.* = clone_tree(slot.*, copies);
+        } else if (f.info == node_list) {
+            let slot = (at + f.offset) as *[]*Node;
+            let items = new([]*Node, slot.len);
+            for (i in 0..items.len)
+                items[i] = clone_tree(slot.*[i], copies);
+            slot.* = items;
+        }
+    }
+    return copy;
+}
+
+fn remap(n: *Node, copies: *Map(*Node, *Node)) {
+    if (n == null)
+        return;
+    if (n.decl != null) {
+        let copy = map_get(copies, n.decl) or_else null;
+        if (copy != null)
+            n.decl = copy;
+    }
+    let info, at = parts(n);
+    if (info == null)
+        return;
+    let node_ptr, node_list = type_info(*Node), type_info([]*Node);
+    for (f in info.fields) {
+        if (f.info == node_ptr) {
+            remap(((at + f.offset) as **Node).*, copies);
+        } else if (f.info == node_list) {
+            for (item in ((at + f.offset) as *[]*Node).*)
+                remap(item, copies);
+        }
+    }
 }

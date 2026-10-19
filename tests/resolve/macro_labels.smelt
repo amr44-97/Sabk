@@ -1,0 +1,13 @@
+// a macro's labels are its own, like its names: its `outer` and the
+// caller's don't clash, and each `break outer` leaves its own loop (the
+// C++ resolver didn't color labels, and reported a clash here)
+fn twice() #expand {
+    outer: for (i in 0..2) { break outer; }
+}
+
+fn f() {
+    outer: for (j in 0..2) {
+        twice();
+        break outer;
+    }
+}

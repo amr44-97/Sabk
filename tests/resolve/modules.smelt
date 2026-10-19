@@ -1,0 +1,14 @@
+import "std/io";
+import "std/mem" as m;
+import "lib/util";
+
+fn main() -> i32 {
+    io.print("hi\n");
+    let arena: m.Arena;
+    let alloc: Allocator = context.allocator;
+    let p = m.alloc(16, alloc);
+    let pair = m.Pair.{ .a = 1, .b = util.helper() };
+    let c = util.Color.Green;
+    let w: *io.Writer = null;
+    return util.LIMIT;
+}

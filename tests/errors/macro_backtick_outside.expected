@@ -1,0 +1,6 @@
+[error]: a backtick only works inside an `#expand` function at [tests/errors/macro_backtick_outside.smelt:3:6]
+     3 |     `x = 2;
+       |      ^
+[error]: a backtick only works inside an `#expand` function at [tests/errors/macro_backtick_outside.smelt:4:10]
+     4 |     `let y = 3;
+       |          ^

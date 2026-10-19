@@ -1,0 +1,3 @@
+pub fn open() {}
+fn secret() {}
+pub let value: i32 = 1;

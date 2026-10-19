@@ -1,0 +1,3 @@
+[error]: module `tests/errors/lib/priv.smelt` has no member `close` at [tests/errors/resolve_no_member.smelt:2:15]
+     2 | fn f() { priv.close(); }
+       |               ^

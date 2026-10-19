@@ -1,0 +1,14 @@
+struct Vec2 { x: f32; y: f32; }
+
+fn make(a: Allocator = context.allocator) -> *Vec2 {
+    return new(Vec2, a);
+}
+
+fn f() {
+    let saved = context.allocator;
+    context.allocator = context.temp_allocator;
+    let v = new(Vec2);
+    let w = make();
+    let arr = new([16]u8, saved);
+    let m = AllocatorMode.Free;
+}

@@ -1,0 +1,3 @@
+[error]: can't `break` out of a `defer` at [tests/errors/resolve_break_in_defer.smelt:1:33]
+     1 | fn f() { while (true) { defer { break; } } }
+       |                                 ^

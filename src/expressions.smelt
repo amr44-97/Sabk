@@ -1,0 +1,1378 @@
+// The checker's conversions and expressions.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/mem";
+import "std/str";
+import "ast";
+import "const";
+import "lexer";
+import "module";
+import "resolve";
+import "token";
+import "types";
+import "check";
+import "statements";
+import "patterns";
+import "generics";
+import "comptime";
+import "formats";
+
+/* ------------------------------------------------------------ conversions */
+
+// can a value of type `from` be used where `to` is expected, without `as`?
+pub fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
+    if (from == to)
+        return true;
+    if (to == c.any_type && to != null)
+        return from.kind != .Void && from.kind != .GenericFn;
+    switch (from.kind) {
+    case .UntypedInt:
+        if (to.kind == .Int)
+            return e.cval.kind == .Int && fits(e.cval.i, to);
+        return to.kind == .Float;
+    case .UntypedFloat:
+        return to.kind == .Float;
+    case .UntypedString: // text, or a C string; bytes take `as []u8`
+        return to == c.types.string_ || to == ptr_to(&c.types, c.types.u8);
+    case .Null:
+        return to.kind == .Ptr || to.kind == .Rawptr || to.kind == .Fn || to.kind == .Slice;
+    case .Int:
+        // pointer-sized integers are at most 64 bits on every target
+        if ((from == c.types.usize && to == c.types.u64) || (from == c.types.isize && to == c.types.i64))
+            return true;
+        // widening that can't lose information
+        return to.kind == .Int && to.bits > from.bits && (to.is_signed || !from.is_signed);
+    case .Float:
+        return to.kind == .Float && to.bits > from.bits;
+    case .Ptr:
+        if (to.kind == .Rawptr)
+            return true;
+        // *[N]T -> []T; bytes and text convert both ways only with `as`,
+        // as in Jai
+        return to.kind == .Slice && !to.is_string && from.elem.kind == .Array && from.elem.elem == to.elem;
+    case .Array:
+        // [N]T -> []T: a view of the array (of a copy, for a temporary)
+        return to.kind == .Slice && !to.is_string && from.elem == to.elem;
+    case .Growable:
+        // [..]T -> []T: a view of its elements, wherever they are
+        return to.kind == .Slice && !to.is_string && from.elem == to.elem;
+    case .Enum:
+        // a failure enum -> Error: which enum, and which variant
+        return to.is_failure && widens_to_error(from);
+    default:
+        return false;
+    }
+}
+
+// a plain enum with a 0 variant (its success) becomes an Error
+pub fn widens_to_error(from: *Type) -> bool {
+    if (from.kind != .Enum || from.is_failure || from.part.len > 0)
+        return false;
+    for (v in enum_variants(from.decl))
+        if (v.cval.kind == .Int && i128_is_zero(v.cval.i))
+            return true;
+    return false;
+}
+
+// the number an enum's Errors carry, given the first time one is made; 0
+// (reported at `at`) when its variants don't fit in an Error's 32 bits
+pub fn error_id(c: *Checker, at: *Node, from: *Type) -> u32 {
+    let known, found = map_get(&c.error_ids, from);
+    if (found)
+        return known;
+    let id: u32 = 0;
+    let ok = true;
+    for (v in enum_variants(from.decl))
+        ok = ok && v.cval.kind == .Int && i128_fits(v.cval.i, 32, false);
+    if (ok) {
+        array_add(&c.error_enums, from);
+        id = c.error_enums.len as u32;
+    } else {
+        error(c, at.tok, tformat("% can't become an `Error`: its variants' values must be between 0 and 4294967295",
+                                 qt(from)));
+    }
+    map_put(&c.error_ids, from, id);
+    return id;
+}
+
+// `e`, a failure enum's value, becomes an Error: a constant one is folded
+// (so a case label stays a constant), anything else converted when it runs
+pub fn widen_to_error(c: *Checker, e: *Node) {
+    let id = error_id(c, e, e.ty);
+    if (id == 0)
+        return;
+    if (e.cval.kind == .Int) {
+        if (!i128_is_zero(e.cval.i))
+            e.cval.i = i128_u(((id as u64) << 32) | (e.cval.i.lo & 0xffffffff));
+        e.ty = c.error_type;
+    } else {
+        e.conv = c.error_type;
+    }
+}
+
+// converts `e` to `to` or reports why it can't be
+pub fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
+    let from = e.ty;
+    if (from.kind == .Error || to.kind == .Error)
+        return true;
+    // any value becomes an Any: a pointer to a copy of it, and its type
+    if (to == c.any_type && from != c.any_type && from.kind != .GenericFn) {
+        // a void call written as a value to print is a mistake; a void
+        // that a generic's T stands for is a value like any other
+        if (from.kind == .Void && e.kind.tag == .Call && c.current_instance == null) {
+            error(c, e.tok, "this returns nothing, so there's no value to pass as an `Any`");
+            return false;
+        }
+        if (from.kind == .Null)
+            e.ty = c.types.rawptr;
+        else if (is_untyped(from))
+            default_type(c, e);
+        if (e.ty.kind == .Error)
+            return true;
+        e.conv = c.any_type;
+        array_add(&c.type_infos, e.ty);
+        return true;
+    }
+    if (from.kind == .GenericFn)
+        return pick_instance(c, e, to);
+    if (can_coerce(c, e, from, to)) {
+        if (is_untyped(from)) {
+            e.ty = to;
+            if (to.kind == .Float && e.cval.kind == .Int)
+                e.cval = float_const(i128_to_f64(e.cval.i));
+        } else if (to.is_failure) {
+            widen_to_error(c, e);
+        } else if (from != to) {
+            e.conv = to; // the code generator writes the conversion out
+        }
+        return true;
+    }
+    if (from.kind == .UntypedInt && to.kind == .Int && e.cval.kind == .Int) {
+        error(c, e.tok, tformat("the constant % doesn't fit in %", i128_to_string(e.cval.i), qt(to)));
+    } else if (to.kind == .Fn && e.decl != null && e.decl.kind is .Fn{is_extern: true}) {
+        error(c, e.tok, tformat("% is an `extern` function, which uses the C calling convention, so it can't be used as a %",
+                                q(e.tok.text), qt(to)));
+    } else {
+        let qto, qfrom = q2(to, from);
+        let bytes = slice_of(&c.types, c.types.u8);
+        let hint = "";
+        if ((from.is_string || from.kind == .UntypedString) && to == bytes) {
+            hint = tformat("; the same memory converts with `% as []u8`", text_of(e));
+        } else if (to.is_string && (from == bytes || from == growable_of(&c.types, c.types.u8))) {
+            hint = tformat("; the same memory converts with `% as string`", text_of(e));
+        } else if (to.is_string && from.kind == .Array && from.elem == c.types.u8) {
+            hint = tformat("; view it as text with `%[..] as string`", text_of(e));
+        } else if (to.is_failure && from.is_tagged) {
+            hint = "; a tagged enum doesn't become an `Error`, only a plain enum with a variant equal to 0, like `None`";
+        } else if (to.is_failure && from.kind == .Enum) {
+            hint = "; only an enum with a variant equal to 0 (its success, like `None`) becomes an `Error`";
+        } else if (from.is_failure && to.kind == .Enum) {
+            let variants = enum_variants(to.decl);
+            let example = if (variants.len > 1) variants[1].tok.text else "None";
+            hint = tformat("; an `Error` doesn't turn back into % on its own: compare it, like `% == %.%`",
+                           qt(to), text_of(e), to.name, example);
+        }
+        error(c, e.tok, tformat("expected %, found %{}%", qto, qfrom, hint));
+        explain_pointer_index(c, e);
+    }
+    return false;
+}
+
+// `p[i]` on a `*[N]T` or `*[..]T` is the i-th array from `p`, as in C.
+// When one turns up where an element was meant, say how to index the array
+// instead.
+pub fn explain_pointer_index(c: *Checker, e: *Node) {
+    let n = ungroup(e);
+    let object: *Node = null;
+    switch (n.kind) {
+    case .Index{object: o}: object = o;
+    case .Slice{object: o}: object = o;
+    default: return;
+    }
+    if (object.ty == null || object.ty.kind != .Ptr ||
+        (object.ty.elem.kind != .Array && object.ty.elem.kind != .Growable))
+        return;
+    let written = "p[i]";
+    let meant = "p.*[i]";
+    let base = "p";
+    if (n.span.len > 0) { // n.tok is the `[`
+        let at = (n.tok.text.ptr as isize) - (n.span.ptr as isize);
+        base = n.span[..at];
+        written = text_of(n);
+        meant = tformat("%.*%", base, n.span[at..]);
+    }
+    note(c, n.tok, tformat("`%` indexes the pointer, so it's a whole %; to index the array `%` points at, write `%`",
+                           written, qt(object.ty.elem), base, meant));
+}
+
+// gives an untyped expression its default type: `let x = 5;` is an isize
+pub fn default_type(c: *Checker, e: *Node) -> *Type {
+    switch (e.ty.kind) {
+    case .GenericFn:
+        error(c, e.tok, tformat("% is generic; give the variable a function type to say which instance to use",
+                                q(e.tok.text)));
+        e.ty = c.types.error;
+    case .UntypedInt:
+        if (e.cval.kind == .Int && !fits(e.cval.i, c.types.isize)) {
+            let hint = if (fits(e.cval.i, c.types.u64)) "; give it a type: `let x: u64 = ...`" else ", or in any other";
+            error(c, e.tok, tformat("the constant % doesn't fit in `isize`, the default integer type%",
+                                    i128_to_string(e.cval.i), hint));
+            e.ty = c.types.error;
+        } else {
+            coerce(c, e, c.types.isize);
+        }
+    case .UntypedFloat:
+        e.ty = c.types.f64;
+    case .UntypedString:
+        e.ty = c.types.string_;
+    case .Null:
+        error(c, e.tok, "can't tell which type `null` should have here, add a type: `let p: *T = null;`");
+        e.ty = c.types.error;
+    default:
+    }
+    return e.ty;
+}
+
+// can `n` be assigned to (and have its address taken)?
+pub fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
+    switch (n.kind) {
+    case .Grouped{inner}:
+        return assignable(c, inner, why);
+    case .Identifier, .Member:
+        let d = n.decl;
+        if (d != null) {
+            switch (d.kind) {
+            case .Let, .Param, .Binding:
+                return true;
+            case .Const:
+                why.* = tformat("% is a constant", q(n.tok.text));
+            case .ForIn:
+                why.* = tformat("the loop variable % is read-only", q(n.tok.text));
+            case .Fn:
+                why.* = tformat("% is a function", q(n.tok.text));
+            default:
+                why.* = tformat("% isn't a variable", q(n.tok.text));
+            }
+            return false;
+        }
+        if (n.kind is .Member{object}) {
+            // An array's and a slice's fields (`.len`, `.ptr`) and a tagged
+            // enum's `.tag` are read-only, through a pointer too: `p.len`
+            // with `p: *[4]i32` or `*[]i32` is as read-only as `s.len`.
+            // Only a growable array's fields can be set. (A design choice
+            // that may change: making a slice's fields writable would be
+            // decided here.)
+            let base = object.ty;
+            let t = if (base.kind == .Ptr) base.elem else base;
+            if (t.kind == .Slice || t.kind == .Array || t.is_tagged) {
+                why.* = tformat("% is read-only", q(n.tok.text));
+                return false;
+            }
+            if (base.kind == .Ptr)
+                return true; // p.x writes through the pointer
+            return assignable(c, object, why);
+        }
+        why.* = "it isn't a variable";
+        return false;
+    case .Index{object}:
+        if (object.ty.kind == .Array)
+            return assignable(c, object, why);
+        return true; // slices and pointers point at memory elsewhere
+    case .Deref, .Context:
+        return true;
+    default:
+        why.* = "it's a temporary value";
+        return false;
+    }
+}
+
+/* ------------------------------------------------------------ expressions */
+
+pub fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    if (n.is_baked)
+        return n.ty;
+    // several values are only taken where the caller of check_expr said so
+    let several_ok = c.several_ok_for == n;
+    c.several_ok_for = null;
+    let t = c.types.error;
+    switch (n.kind) {
+    case .Values{items}:
+        // a, b: a tuple, its values converted to what's expected
+        let elems: [..]*Type;
+        let fits_expected = expected != null && expected.is_tuple && expected.fields.len == items.len;
+        let ok = true;
+        for (i in 0..items.len) {
+            let item = items[i];
+            let want: *Type = if (fits_expected) expected.fields[i].ty else null;
+            let it = check_expr(c, item, want);
+            if (it.kind != .Error && want != null)
+                ok = coerce(c, item, want) && ok;
+            else if (it.kind != .Error)
+                it = default_type(c, item);
+            ok = ok && it.kind != .Error;
+            array_add(&elems, if (want != null) want else item.ty);
+        }
+        if (ok)
+            t = tuple_of(&c.types, elems);
+
+    case .OrReturn:
+        t = check_or_return(c, n);
+    case .OrElse:
+        t = check_or_else(c, n);
+    case .Run:
+        t = check_run(c, n, expected);
+    case .Is:
+        t = check_is(c, n);
+    case .Switch{gives_value: true}:
+        t = check_switch(c, n, true, expected);
+    case .If{gives_value: true}:
+        t = check_if_expr(c, n, expected);
+
+    case .Block{stmts, label, gives_value: true}:
+        // label: { ... break label = value; }: the breaks give its value
+        map_put(&c.value_types, n, expected);
+        for (s in stmts)
+            check_stmt(c, s);
+        let given = map_get(&c.value_types, n) or_else null;
+        if (!always_returns(n, n))
+            error(c, label.tok, tformat("this block can reach its end without giving a value; end it with `break % = value;`",
+                                        label.tok.text));
+        else if (given == null)
+            error(c, label.tok, tformat("this block never gives a value: no `break % = value;` in it", label.tok.text));
+        if (given != null)
+            t = given;
+
+    case .TypeInfo{of, is_type}:
+        let info: *Type = null;
+        if (!is_type) { // type_info(value): its type's; it isn't evaluated
+            info = check_expr(c, of, null);
+            if (is_untyped(info))
+                info = default_type(c, of);
+        } else {
+            info = type_from_node(c, of);
+            of.ty = info;
+        }
+        if (info.kind == .Error)
+            break;
+        array_add(&c.type_infos, info);
+        t = ptr_to(&c.types, c.type_info_type);
+
+    case .Spread{value}:
+        error(c, n.tok, "`..` passes a slice as a function's `..` parameter, and only as its last argument");
+        check_expr(c, value, null);
+
+    case .EnumShorthand:
+        // .Red: a variant of the enum the context expects
+        let name = n.tok.text;
+        if (starts_with(name, "."))
+            name = name[1..];
+        if (expected == null) {
+            error(c, n.tok, tformat("can't tell which enum `.%` is from here; write the enum too, like `Color.%`",
+                                    name, name));
+            break;
+        }
+        if (expected.is_tagged) {
+            t = variant_value(c, n, expected, name, null);
+            break;
+        }
+        if (expected.kind != .Enum) {
+            if (expected.kind != .Error)
+                error(c, n.tok, tformat("`.%` is an enum value, but % is expected here", name, qt(expected)));
+            break;
+        }
+        t = enum_variant(c, n, expected, name);
+
+    case .Number:
+        t = c.types.untyped_int;
+        let value, _ = integer_value(n.tok.text);
+        n.cval = int_const(i128_u(value));
+    case .Float:
+        t = c.types.untyped_float;
+        n.cval = float_const(float_value(n.tok.text));
+    case .String{quoted}:
+        let text = if (quoted.len > 0) quoted else n.tok.text;
+        let _, bad, ok = decode_escapes(text[1..text.len - 1]);
+        if (!ok)
+            error(c, n.tok, tformat("invalid escape `%` in string literal", bad));
+        else
+            t = c.types.untyped_string;
+    case .Char:
+        // 'a', '\n', '\x41'
+        let text = n.tok.text;
+        let value, bad, ok = decode_escapes(text[1..text.len - 1]);
+        if (!ok) {
+            error(c, n.tok, tformat("invalid escape `%` in char literal", bad));
+            break;
+        }
+        if (value.len != 1) {
+            error(c, n.tok, tformat("a char literal must hold exactly one character, % holds %", text, value.len));
+            break;
+        }
+        t = c.types.u8;
+        n.cval = int_const(i128(value[0] as i64));
+    case .Bool:
+        t = c.types.bool_;
+        n.cval = bool_const(n.tok.kind == .True);
+    case .Null:
+        t = c.types.null_;
+    case .Context:
+        t = c.context_type;
+
+    case .Identifier:
+        if (n.decl != null)
+            t = value_of_decl(c, n, n.decl);
+
+    case .Grouped{inner}:
+        t = check_expr(c, inner, expected);
+        n.cval = inner.cval;
+
+    case .Binary:
+        t = check_binary(c, n);
+    case .Unary, .Deref:
+        t = check_unary(c, n);
+    case .Member:
+        t = check_member(c, n);
+    case .Call:
+        t = check_call(c, n, expected);
+    case .Index:
+        t = check_index(c, n);
+    case .Slice:
+        t = check_slice(c, n);
+    case .StructInit:
+        t = check_struct_init(c, n, expected);
+    case .Cast:
+        t = check_cast(c, n);
+
+    case .ArrayLiteral{elem, items}:
+        // i64.[a, b, c] is a [3]i64; .[a, b, c] takes its type from the
+        // context or its elements
+        if (elem != null) {
+            let et = type_from_node(c, elem);
+            t = if (et.kind == .Error) check_items_for_error(c, n)
+                else check_array_items(c, n, array_type_of(&c.types, et, items.len as u64));
+        } else {
+            t = check_open_literal(c, n, expected);
+        }
+
+    case .MacroExpansion{stmts, result}:
+        // the type is set first: returns inside the body are checked
+        // against it
+        t = if (result != null) type_from_node(c, result) else c.types.void_;
+        if (t.is_tuple) {
+            error(c, result.tok, "an `#expand` function returns one value at most");
+            t = c.types.error;
+        }
+        n.ty = t;
+        array_add(&c.expanding, n);
+        for (s in stmts)
+            check_stmt(c, s);
+        let returns = false;
+        for (s in stmts)
+            returns = returns || always_returns(s, null);
+        if (t.kind != .Void && t.kind != .Error && !returns)
+            error(c, n.decl.tok, tformat("% returns % but can reach the end of its body without returning a value",
+                                         q(n.decl.tok.text), qt(t)));
+        c.expanding.len--;
+
+    case .TypeCompare{lhs, rhs}:
+        // T == []u8: types are interned, so the same type is the same
+        // pointer. A generic struct without its types matches any of its
+        // instances: `T == Map` is true for every Map(K, V).
+        let ta = any_instance(lhs);
+        let tb = any_instance(rhs);
+        let a: *Type = if (ta != null) null else type_from_node(c, lhs);
+        let b: *Type = if (tb != null) null else type_from_node(c, rhs);
+        if ((a != null && a.kind == .Error) || (b != null && b.kind == .Error))
+            break;
+        let same = if (ta != null && tb != null) ta == tb
+                   else if (ta != null) of_template(b, ta)
+                   else if (tb != null) of_template(a, tb)
+                   else a == b;
+        t = c.types.bool_;
+        n.cval = bool_const(same == (n.tok.kind == .EqualEq));
+
+    case .SizeOf{of, is_type}:
+        let size_of: *Type = null;
+        if (!is_type) { // sizeof(value)
+            size_of = check_expr(c, of, null);
+            if (is_untyped(size_of))
+                size_of = default_type(c, of);
+        } else {
+            size_of = type_from_node(c, of);
+        }
+        if (size_of.kind == .Error)
+            break;
+        layout(c, size_of); // void: 0
+        t = c.types.untyped_int; // a constant, like a literal: it fits any integer
+        n.cval = int_const(i128_u(size_of.size));
+
+    case .New:
+        t = check_new(c, n, expected);
+
+    default:
+    }
+    if (t.is_tuple && !several_ok) {
+        if (n.kind is .Values{items})
+            error(c, items[1].tok, tformat("% where one is expected", count_values(items.len)));
+        else
+            error(c, call_site(n), tformat("% gives %, %, where one is expected; take them apart with `let a, b = ...`",
+                                           callee_name(n), count_values(t.fields.len), qt(t)));
+        t = c.types.error;
+    }
+    n.ty = t;
+    return t;
+}
+
+// a side of `T == Map`: a generic struct named without its types, which
+// matches any of its instances
+fn any_instance(side: *Node) -> *Node {
+    let args: []*Node;
+    switch (side.kind) {
+    case .TypeName{args: a}: args = a;
+    case .TypeMember{args: a}: args = a;
+    default: return null;
+    }
+    if (args.len == 0 && side.decl != null && is_template(side.decl))
+        return side.decl;
+    return null;
+}
+
+fn of_template(t: *Type, templ: *Node) -> bool {
+    return (t.kind == .Struct || t.kind == .Union) && t.decl != null && t.decl.generic == templ;
+}
+
+// new(T [, allocator]), new([]T, n [, allocator]), new(value [, allocator])
+fn check_new(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    let nw: NodeKindNew;
+    if (n.kind is .New{declared, value, first, second})
+        nw = .{ .declared = declared, .value = value, .first = first, .second = second };
+    if (nw.value != null) { // new(Point.{ .x = 1 }): a pointer to a copy of the value
+        let of: *Type = null;
+        if (is_contextual(nw.value)) {
+            if (expected == null || expected.kind != .Ptr) {
+                error(c, nw.value.tok, "can't tell what `new(.{ ... })` makes here; write the type, like `new(Point.{ ... })`");
+                check_items_for_error(c, nw.value);
+                return c.types.error;
+            }
+            of = check_expr(c, nw.value, expected.elem);
+        } else if (is_open_literal(nw.value)) { // new(.[1, 2]): the context's
+            of = check_expr(c, nw.value, if (expected != null && expected.kind == .Ptr) expected.elem else null);
+        } else {
+            of = check_expr(c, nw.value, null);
+        }
+        if (of.kind == .Error)
+            return c.types.error;
+        if (of.kind == .Slice) {
+            error(c, nw.value.tok, "`new` of a slice literal would allocate only the slice; to allocate its elements use `new([]T, n)` and copy them in");
+            return c.types.error;
+        }
+        if (nw.first != null) {
+            check_expr(c, nw.first, c.allocator_type);
+            coerce(c, nw.first, c.allocator_type);
+        }
+        if (nw.second != null)
+            error(c, nw.second.tok, "`new(value)` takes one allocator at most");
+        return ptr_to(&c.types, of);
+    }
+    let of = type_from_node(c, nw.declared);
+    if (of.kind == .Slice) {
+        // new([]T, length [, allocator]): a zeroed slice
+        if (nw.first == null) {
+            error(c, n.tok, "`new` of a slice needs a length: `new([]T, n)`");
+            return c.types.error;
+        }
+        if (check_length(c, nw.first, "a length") && nw.second != null) {
+            check_expr(c, nw.second, c.allocator_type);
+            coerce(c, nw.second, c.allocator_type);
+        }
+        return of;
+    }
+    // new(T [, allocator])
+    if (nw.first != null) {
+        check_expr(c, nw.first, c.allocator_type);
+        coerce(c, nw.first, c.allocator_type);
+    }
+    if (nw.second != null)
+        error(c, nw.second.tok, "`new(T)` takes one allocator at most; only `new([]T, n)` takes a length");
+    if (of.kind == .Void)
+        error(c, nw.declared.tok, "can't allocate `void`");
+    else if (of.kind != .Error)
+        return ptr_to(&c.types, of);
+    return c.types.error;
+}
+
+struct NodeKindNew {
+    declared: *Node;
+    value: *Node;
+    first: *Node;
+    second: *Node;
+}
+
+// Is `t`, the last value of what `or_return` or `or_else` is used on, one
+// that says whether it failed? A bool (false: it failed) or an enum (any
+// value but 0: it failed, and says how).
+fn check_failure_flag(c: *Checker, n: *Node, t: *Type, what: string) -> bool {
+    if (t.kind == .Bool || t.kind == .Error)
+        return true;
+    if (t.kind == .Enum) {
+        for (v in enum_variants(t.decl))
+            if (v.cval.kind == .Int && i128_is_zero(v.cval.i))
+                return true;
+        error(c, n.tok, tformat("% treats %'s 0 as success, but % has no variant equal to 0; add one first, like `None`",
+                                q(what), qt(t), qt(t)));
+        return false;
+    }
+    let hint = if (is_option(c, t)) "; a missing value isn't a failure: give a fallback with `or_else`, or match it with `is .Some(x)`" else "";
+    error(c, n.tok, tformat("% needs the last value to say whether it failed: a `bool` (false: it failed) or an enum (anything but its 0: it failed); found %{}%",
+                            q(what), qt(t), hint));
+    return false;
+}
+
+fn last_field(t: *Type) -> *Type { return t.fields[t.fields.len - 1].ty; }
+
+// f() or_return: f's values without the last; when the last says f
+// failed, the function returns it (its other results as `let x: T;` starts)
+fn check_or_return(c: *Checker, n: *Node) -> *Type {
+    let inner: *Node = null;
+    if (n.kind is .OrReturn{value})
+        inner = value;
+    c.several_ok_for = inner;
+    let t = check_expr(c, inner, null);
+    if (t.kind == .Error)
+        return t;
+    if (is_untyped(t))
+        t = default_type(c, inner);
+    let flag = if (t.is_tuple) last_field(t) else t;
+    if (!check_failure_flag(c, n, flag, "or_return"))
+        return c.types.error;
+    if (c.current_fn == null || c.in_run > 0) {
+        error(c, n.tok, "`or_return` can only be used in a function's body");
+        return c.types.error;
+    }
+    let ret = c.current_fn.ty.ret;
+    let name = q(c.current_fn.tok.text);
+    let ret_flag = if (ret.is_tuple) last_field(ret) else ret;
+    let is_main = c.current_fn.tok.text == "main" && c.res.modules.len > 0 && c.mod == c.res.modules[0];
+    // a failure of any enum passes on as an Error, but a bool doesn't say
+    // what failed (not where a module's own `Error` hides the prelude's)
+    let any_type_hint = "";
+    if (flag.kind != .Bool && !map_has(&c.mod.scope, ScopeKey.{ .name = "Error" })) {
+        any_type_hint = if (is_main) "; to pass failures of any type on, make it `fn main() -> Error`"
+                        else tformat("; to pass failures of any type on, make % `Error`",
+                                     if (ret.is_tuple) "its last result" else "it");
+    }
+    if (ret.kind == .Void) {
+        error(c, n.tok, tformat("`or_return` returns % from %, but % doesn't return anything%",
+                                qt(flag), name, name, any_type_hint));
+        return c.types.error;
+    }
+    if (ret_flag.is_failure && flag.kind == .Bool) {
+        error(c, n.tok, "`or_return` can't pass a `bool` on as an `Error`: a `bool` doesn't say what failed; check it with `if`, or give a fallback with `or_else`");
+        return c.types.error;
+    }
+    if (ret_flag.is_failure && widens_to_error(flag)) {
+        if (error_id(c, n, flag) == 0)
+            return c.types.error;
+    } else if (ret_flag != flag && ret_flag.kind != .Error) {
+        error(c, n.tok, tformat("`or_return` returns % from %, but %'s % is %{}%", qt(flag), name, name,
+                                if (ret.is_tuple) "last result" else "result", qt(ret_flag),
+                                if (ret_flag.kind == .Bool) "" else any_type_hint));
+        return c.types.error;
+    }
+    if (!t.is_tuple)
+        return c.types.void_;
+    if (t.fields.len == 2)
+        return t.fields[0].ty;
+    let rest: [..]*Type;
+    for (i in 0..t.fields.len - 1)
+        array_add(&rest, t.fields[i].ty);
+    return tuple_of(&c.types, rest);
+}
+
+// the prelude's Option(T), written ?T
+pub fn is_option(c: *Checker, t: *Type) -> bool {
+    return t.is_tagged && t.decl.generic != null && t.decl.generic == c.option_decl;
+}
+
+// what a ?T holds when it's Some: T
+pub fn option_value(t: *Type) -> *Type { return t.decl.instance_args[0]; }
+
+// f() or_else fallback: f's value, or the fallback when f's last value
+// says it failed; or a ?T's value, or a pointer that isn't null
+fn check_or_else(c: *Checker, n: *Node) -> *Type {
+    let inner: *Node = null;
+    let fallback: *Node = null;
+    if (n.kind is .OrElse{value, fallback: f})
+        inner, fallback = value, f;
+    c.several_ok_for = inner;
+    let t = check_expr(c, inner, null);
+    if (t.kind == .Error) {
+        check_expr(c, fallback, null);
+        return t;
+    }
+    if (is_option(c, t) || t.kind == .Ptr || t.kind == .Rawptr) {
+        let value = if (is_option(c, t)) option_value(t) else t;
+        let ft = check_expr(c, fallback, value);
+        if (ft.kind == .Error)
+            return c.types.error;
+        return if (coerce(c, fallback, value)) value else c.types.error;
+    }
+    if (!t.is_tuple || t.fields.len != 2) {
+        let gives = if (t.is_tuple) count_values(t.fields.len) else tformat("%, %", count_values(1), qt(t));
+        error(c, n.tok, tformat("`or_else` needs an option (`?T`), a pointer, or a value and whether it's valid (two values, like `get_env(\"HOME\") or_else \"/\"`); % gives %",
+                                callee_name(inner), gives));
+        check_expr(c, fallback, null);
+        return c.types.error;
+    }
+    let value = t.fields[0].ty;
+    let ok = check_failure_flag(c, n, t.fields[1].ty, "or_else");
+    let ft = check_expr(c, fallback, value);
+    if (ft.kind != .Error)
+        ok = coerce(c, fallback, value) && ok;
+    return if (ok) value else c.types.error;
+}
+
+pub fn value_of_decl(c: *Checker, n: *Node, d: *Node) -> *Type {
+    if (untaken(c, n, d))
+        return c.types.error;
+    switch (d.kind) {
+    case .Fn{is_extern, is_macro}:
+        if (is_macro)
+            return c.types.error;
+        // extern functions use the C calling convention, which our function
+        // types don't describe: as a value one is an opaque C function
+        // pointer
+        if (is_extern && n != c.extern_callee) {
+            decl_type(c, d);
+            return c.types.rawptr;
+        }
+        // a generic function: its instance is picked by the function type
+        // it's converted to (see coerce)
+        if (is_template(d))
+            return c.types.generic_fn;
+        return decl_type(c, d);
+    case .Let, .Param, .ForIn, .Binding:
+        return decl_type(c, d);
+    case .Const:
+        let t = decl_type(c, d);
+        n.cval = d.cval;
+        return t;
+    case .Variant:
+        // only reachable as a bare name inside the enum: `B = A + 1`
+        n.cval = d.cval;
+        return c.types.untyped_int;
+    default:
+        // types and modules: the resolver already reported the misuse
+        return c.types.error;
+    }
+}
+
+// gives two checked operands a common type, converting untyped constants
+pub fn unify(c: *Checker, n: *Node, lhs: *Node, rhs: *Node) -> *Type {
+    let l, r = lhs.ty, rhs.ty;
+    if (l.kind == .Error || r.kind == .Error)
+        return c.types.error;
+    if (l == r)
+        return l;
+
+    if (is_untyped(l) && is_untyped(r)) {
+        if (is_numeric(l) && is_numeric(r))
+            return c.types.untyped_float; // int and float mix
+    } else if (is_untyped(l)) {
+        if (coerce(c, lhs, r))
+            return r;
+        explain_pointer_index(c, rhs);
+        return c.types.error;
+    } else if (is_untyped(r)) {
+        if (coerce(c, rhs, l))
+            return l;
+        explain_pointer_index(c, lhs);
+        return c.types.error;
+    } else if (can_coerce(c, lhs, l, r)) {
+        if (r.is_failure)
+            widen_to_error(c, lhs);
+        else
+            lhs.conv = r;
+        return r;
+    } else if (can_coerce(c, rhs, r, l)) {
+        if (l.is_failure)
+            widen_to_error(c, rhs);
+        else
+            rhs.conv = l;
+        return l;
+    }
+    let ql, qr = q2(l, r);
+    error(c, n.tok, tformat("mismatched types % and % for %", ql, qr, q(n.tok.text)));
+    explain_pointer_index(c, lhs);
+    explain_pointer_index(c, rhs);
+    return c.types.error;
+}
+
+fn is_comparison(op: BinaryOp) -> bool {
+    return op == .Lt || op == .Gt || op == .LtEq || op == .GtEq || op == .EqEq || op == .NotEq;
+}
+
+// the type type_info(T) is of, when it's known now
+fn info_of(e: *Node) -> *Type {
+    if (e.conv != null)
+        return null;
+    if (e.kind is .TypeInfo{of})
+        return of.ty;
+    return null;
+}
+
+fn is_text(t: *Type) -> bool { return t.is_string || t.kind == .UntypedString; }
+
+fn check_binary(c: *Checker, n: *Node) -> *Type {
+    let op_name = q(n.tok.text);
+    let op = BinaryOp.Add;
+    let lhs: *Node = null;
+    let rhs: *Node = null;
+    if (n.kind is .Binary{op: o, lhs: a, rhs: b})
+        op, lhs, rhs = o, a, b;
+
+    if (op == .And || op == .Or) {
+        let l = check_expr(c, lhs, null);
+        let r = check_expr(c, rhs, null);
+        if (l.kind != .Bool && l.kind != .Error) {
+            error(c, lhs.tok, tformat("% needs `bool` operands, found %", op_name, qt(l)));
+            return c.types.error;
+        }
+        if (r.kind != .Bool && r.kind != .Error) {
+            error(c, rhs.tok, tformat("% needs `bool` operands, found %", op_name, qt(r)));
+            return c.types.error;
+        }
+        if (lhs.cval.kind == .Bool && rhs.cval.kind == .Bool) {
+            let x, y = lhs.cval.i.lo != 0, rhs.cval.i.lo != 0;
+            n.cval = bool_const(if (op == .And) x && y else x || y);
+        }
+        return if (l.kind == .Error || r.kind == .Error) c.types.error else c.types.bool_;
+    }
+
+    if (op == .Shl || op == .Shr) {
+        // the result has the left operand's type; the amount can be any
+        // integer
+        let l = check_expr(c, lhs, null);
+        let r = check_expr(c, rhs, null);
+        if (l.kind == .Error || r.kind == .Error)
+            return c.types.error;
+        if (!is_int_like(l)) {
+            error(c, lhs.tok, tformat("% needs an integer, found %", op_name, qt(l)));
+            return c.types.error;
+        }
+        if (!is_int_like(r)) {
+            error(c, rhs.tok, tformat("a shift amount must be an integer, found %", qt(r)));
+            return c.types.error;
+        }
+        if (r.kind == .UntypedInt)
+            coerce(c, rhs, c.types.u32);
+        let a, b = lhs.cval, rhs.cval;
+        if (b.kind == .Int && l.kind == .Int && !i128_lt(b.i, i128(l.bits as i64))) {
+            error(c, rhs.tok, tformat("shifting a % by % bits always gives 0", qt(l), i128_to_string(b.i)));
+        } else if (a.kind == .Int && b.kind == .Int && i128_lt(b.i, i128(64))) {
+            let amount = i128_to_i64(b.i);
+            let v = if (op == .Shl) i128_shl(a.i, amount) else i128_shr(a.i, amount);
+            if (l.kind == .Int)
+                v = wrap(v, l);
+            n.cval = int_const(v);
+        }
+        return l;
+    }
+
+    // `c == .Red`: a side that takes its type from context gets the other's
+    let l: *Type = null;
+    let r: *Type = null;
+    if (is_contextual(lhs) && !is_contextual(rhs)) {
+        r = check_expr(c, rhs, null);
+        l = check_expr(c, lhs, r);
+    } else {
+        l = check_expr(c, lhs, null);
+        r = check_expr(c, rhs, l);
+    }
+    if (l.kind == .Error || r.kind == .Error)
+        return c.types.error;
+
+    // p + n, n + p, p - n and q - p count in what the pointers point at
+    if ((op == .Add || op == .Sub) && (is_pointer_like(l) || is_pointer_like(r)))
+        return pointer_arithmetic(c, n, l, r);
+
+    // arithmetic on a typed non-number fails here, before unify() tries to
+    // convert the other side to it
+    let arithmetic = op == .Add || op == .Sub || op == .Mul || op == .Div;
+    if (arithmetic) {
+        for (side in .[lhs, rhs]) {
+            let st = side.ty;
+            if (is_numeric(st) || is_untyped(st))
+                continue;
+            let hint = if (st.kind == .Ptr) "; a pointer only moves by `+` and `-`" else "";
+            error(c, n.tok, tformat("% needs numbers, found %{}%", op_name, qt(st), hint));
+            explain_pointer_index(c, side);
+            return c.types.error;
+        }
+    }
+
+    // bytes and text don't mix on their own, so say how to compare as text
+    if ((op == .EqEq || op == .NotEq) && lhs.ty != null && rhs.ty != null) {
+        let bytes = slice_of(&c.types, c.types.u8);
+        let side: *Node = if (lhs.ty == bytes && is_text(rhs.ty)) lhs
+                          else if (rhs.ty == bytes && is_text(lhs.ty)) rhs
+                          else null;
+        if (side != null) {
+            error(c, side.tok, tformat("`%` doesn't compare bytes with text; compare them as text: `% as string`",
+                                       n.tok.text, text_of(side)));
+            return c.types.error;
+        }
+    }
+    let t = unify(c, n, lhs, rhs);
+    if (t.kind == .Error)
+        return t;
+
+    let ok = false;
+    let needs = "";
+    if (op == .EqEq || op == .NotEq) {
+        // "a" == "b": as two strings (bytes compare as text with `as string`)
+        if (t.kind == .UntypedString) {
+            coerce(c, lhs, c.types.string_);
+            coerce(c, rhs, c.types.string_);
+            t = c.types.string_;
+        }
+        ok = is_numeric(t) || t.kind == .Bool || t.kind == .Enum || t.kind == .Ptr || t.kind == .Rawptr ||
+             t.kind == .Fn || t.kind == .Null || t.is_string; // strings: by their contents
+        needs = "numbers, bools, enums, pointers or strings";
+    } else if (is_comparison(op)) {
+        // an Error's number says which enum, not an order
+        ok = is_numeric(t) || (t.kind == .Enum && !t.is_failure) || t.kind == .Ptr;
+        needs = "numbers, enums or pointers";
+    } else if (op == .Mod || op == .BitAnd || op == .BitOr || op == .BitXor) {
+        ok = is_int_like(t);
+        needs = "integers";
+    } else {
+        ok = is_numeric(t);
+        needs = "numbers";
+    }
+    if (!ok) {
+        let hint = if (t.is_string) "; order strings with compare_strings(a, b) from std/str"
+                   else if (t.is_failure) "; an `Error` has no order: compare it with `==` or `!=`"
+                   else "";
+        error(c, n.tok, tformat("% needs %, found %{}%", op_name, needs, qt(t), hint));
+        return c.types.error;
+    }
+
+    let result = if (is_comparison(op)) c.types.bool_ else t;
+
+    // type_info(A) == type_info(B): one TypeInfo per type, so it's known now
+    if ((op == .EqEq || op == .NotEq) && info_of(lhs) != null && info_of(rhs) != null) {
+        let same = info_of(lhs) == info_of(rhs);
+        n.cval = bool_const(if (op == .EqEq) same else !same);
+        return result;
+    }
+
+    // constant folding
+    let a, b = lhs.cval, rhs.cval;
+    if (a.kind == .None || b.kind == .None)
+        return result;
+
+    if (a.kind == .Float || b.kind == .Float) {
+        let x, y = as_float(a), as_float(b);
+        switch (op) {
+        case .Add: n.cval = float_const(x + y);
+        case .Sub: n.cval = float_const(x - y);
+        case .Mul: n.cval = float_const(x * y);
+        case .Div: n.cval = float_const(x / y);
+        case .Lt: n.cval = bool_const(x < y);
+        case .Gt: n.cval = bool_const(x > y);
+        case .LtEq: n.cval = bool_const(x <= y);
+        case .GtEq: n.cval = bool_const(x >= y);
+        case .EqEq: n.cval = bool_const(x == y);
+        case .NotEq: n.cval = bool_const(x != y);
+        default:
+        }
+        return result;
+    }
+
+    let x, y = a.i, b.i;
+    if ((op == .Div || op == .Mod) && i128_is_zero(y)) {
+        error(c, rhs.tok, "division by zero");
+        return c.types.error;
+    }
+    let v = i128(0);
+    switch (op) {
+    case .Add: v = i128_add(x, y);
+    case .Sub: v = i128_sub(x, y);
+    case .Mul: v = i128_mul(x, y);
+    case .Div: v = i128_div(x, y);
+    case .Mod: v = i128_mod(x, y);
+    case .BitAnd: v = i128_and(x, y);
+    case .BitOr: v = i128_or(x, y);
+    case .BitXor: v = i128_xor(x, y);
+    case .Lt: n.cval = bool_const(i128_lt(x, y)); return result;
+    case .Gt: n.cval = bool_const(i128_lt(y, x)); return result;
+    case .LtEq: n.cval = bool_const(!i128_lt(y, x)); return result;
+    case .GtEq: n.cval = bool_const(!i128_lt(x, y)); return result;
+    case .EqEq: n.cval = bool_const(i128_eq(x, y)); return result;
+    case .NotEq: n.cval = bool_const(!i128_eq(x, y)); return result;
+    default: return result;
+    }
+    if (t.kind == .Int && !fits(v, t)) {
+        error(c, n.tok, tformat("this constant expression overflows % (%)", qt(t), i128_to_string(v)));
+        return c.types.error;
+    }
+    n.cval = int_const(v);
+    return result;
+}
+
+fn check_unary(c: *Checker, n: *Node) -> *Type {
+    let operand: *Node = null;
+    let op = UnaryOp.Not;
+    let is_deref = false;
+    switch (n.kind) {
+    case .Unary{op: o, operand: e}:
+        op = o;
+        operand = e;
+    case .Deref{pointer}:
+        is_deref = true;
+        operand = pointer;
+    default: return c.types.error;
+    }
+    let t = check_expr(c, operand, null);
+    if (t.kind == .Error)
+        return t;
+    let k = operand.cval;
+
+    if (is_deref) {
+        if (t.kind == .Ptr)
+            return t.elem;
+        if (t.kind == .Rawptr) // a void: no bytes to read (`*T`, T = void)
+            return c.types.void_;
+        error(c, n.tok, tformat("can't dereference %, it isn't a pointer", qt(t)));
+        return c.types.error;
+    }
+
+    switch (op) {
+    case .Neg:
+        if (!is_numeric(t)) {
+            error(c, n.tok, tformat("`-` needs a number, found %", qt(t)));
+            return c.types.error;
+        }
+        if (t.kind == .Int && !t.is_signed) {
+            error(c, n.tok, tformat("can't negate the unsigned type %", qt(t)));
+            return c.types.error;
+        }
+        if (k.kind == .Int) {
+            if (t.kind == .Int && !fits(i128_neg(k.i), t)) {
+                error(c, n.tok, tformat("this constant expression overflows %", qt(t)));
+                return c.types.error;
+            }
+            n.cval = int_const(i128_neg(k.i));
+        } else if (k.kind == .Float) {
+            n.cval = float_const(-k.f);
+        }
+        return t;
+
+    case .BitNot:
+        if (!is_int_like(t)) {
+            error(c, n.tok, tformat("`~` needs an integer, found %", qt(t)));
+            return c.types.error;
+        }
+        if (k.kind == .Int)
+            n.cval = int_const(if (t.kind == .Int) wrap(i128_not(k.i), t) else i128_not(k.i));
+        return t;
+
+    case .Not:
+        if (t.kind != .Bool) {
+            error(c, n.tok, tformat("`!` needs a `bool`, found %", qt(t)));
+            return c.types.error;
+        }
+        if (k.kind == .Bool)
+            n.cval = bool_const(k.i.lo == 0);
+        return t;
+
+    case .AddressOf:
+        let why = "";
+        if (operand.decl != null && operand.decl.kind.tag == .Fn) {
+            error(c, n.tok, tformat("a function is already a pointer, use % without `&`", q(operand.tok.text)));
+            return c.types.error;
+        }
+        if (!assignable(c, operand, &why)) {
+            error(c, n.tok, tformat("can't take the address of this: %", why));
+            return c.types.error;
+        }
+        return ptr_to(&c.types, t);
+
+    default:
+        return c.types.error;
+    }
+}
+
+fn check_member(c: *Checker, n: *Node) -> *Type {
+    let name = n.tok.text;
+    let object: *Node = null;
+    if (n.kind is .Member{object: o})
+        object = o;
+
+    // enum variants: `Color.Red`, also through an alias or another module
+    let type_decl: *Node = null;
+    if (n.decl != null && n.decl.kind.tag == .Variant)
+        type_decl = object.decl;
+    else if (n.decl == null && is_decl_of_type(object.decl))
+        type_decl = object.decl;
+    if (type_decl != null) {
+        if (is_template(type_decl)) {
+            error(c, n.tok, generic_variant_hint(type_decl, name));
+            return c.types.error;
+        }
+        let t = decl_type(c, type_decl);
+        object.ty = t;
+        if (t.kind == .Error)
+            return t;
+        if (t.kind == .Enum)
+            return enum_variant(c, n, t, name);
+        if (t.is_tagged)
+            return variant_value(c, n, t, name, null);
+        error(c, n.tok, tformat("can't access % on the type %, only on a value", q(name), qt(t)));
+        return c.types.error;
+    }
+
+    // module members: `io.print`, `util.LIMIT`
+    if (n.decl != null)
+        return value_of_decl(c, n, n.decl);
+    if (object.decl != null && object.decl.kind.tag == .Import)
+        return c.types.error; // the resolver reported the bad member
+
+    let t = check_expr(c, object, null);
+    if (t.kind == .Error)
+        return t;
+    let through_ptr = t.kind == .Ptr;
+    if (through_ptr) // p.x is (*p).x
+        t = t.elem;
+
+    if (t.is_tagged) {
+        if (name == "tag")
+            return t.fields[0].ty;
+        let example = t.fields[1].ty.fields[0].name;
+        error(c, n.tok, tformat("% is a tagged enum: its only field is `tag`. A variant's value comes from a `switch`, with `case .%(x):`",
+                                qt(t), example));
+        return c.types.error;
+    }
+
+    switch (t.kind) {
+    case .Struct, .Union:
+        for (f in t.fields)
+            if (f.name == name)
+                return f.ty;
+        error(c, n.tok, tformat("% has no field %", qt(t), q(name)));
+        return c.types.error;
+    case .Array:
+        if (name == "len") {
+            n.cval = int_const(i128_u(t.len));
+            return c.types.isize;
+        }
+        if (name == "ptr") { // &a[0]: the array has to be in memory, like &a
+            let why = "";
+            if (!through_ptr && !assignable(c, object, &why)) {
+                error(c, n.tok, tformat("can't take `.ptr` of this array: %", why));
+                return c.types.error;
+            }
+            return ptr_to(&c.types, t.elem);
+        }
+    case .Slice:
+        if (name == "len")
+            return c.types.isize;
+        if (name == "ptr")
+            return ptr_to(&c.types, t.elem);
+    case .Growable: // all four can be assigned
+        if (name == "len" || name == "cap")
+            return c.types.isize;
+        if (name == "ptr")
+            return ptr_to(&c.types, t.elem);
+        if (name == "allocator")
+            return c.allocator_type;
+    default:
+    }
+    error(c, n.tok, tformat("% has no member %", qt(t), q(name)));
+    return c.types.error;
+}
+
+fn call_args(n: *Node) -> []*Node {
+    if (n.kind is .Call{args})
+        return args;
+    return .[];
+}
+
+fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    let callee: *Node = null;
+    if (n.kind is .Call{callee: e})
+        callee = e;
+
+    // a tagged enum's value: Expr.Number(1), or .Number(1) where an Expr
+    // is expected
+    if (callee.kind is .Member{object} && callee.decl != null && callee.decl.kind.tag == .Variant &&
+        is_decl_of_type(object.decl)) {
+        if (is_template(object.decl)) {
+            error(c, callee.tok, generic_variant_hint(object.decl, callee.tok.text));
+            check_items_for_error(c, n);
+            return c.types.error;
+        }
+        let t = decl_type(c, object.decl);
+        object.ty = t;
+        if (t.is_tagged)
+            return variant_value(c, n, t, callee.tok.text, n);
+    }
+    if (callee.kind.tag == .EnumShorthand && expected != null && expected.is_tagged) {
+        let name = callee.tok.text;
+        return variant_value(c, n, expected, if (starts_with(name, ".")) name[1..] else name, n);
+    }
+
+    // a declared function, whose defaults (and type parameters) are known
+    let fun: *Node = if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl else null;
+    if (fun != null)
+        pack_variadic(c, n, fun); // a `..xs` left over is reported when it's checked
+    let args = call_args(n);
+
+    let t: *Type = null;
+    if (fun != null && is_template(fun)) {
+        // the value arguments' types decide the type parameters; `.{...}`,
+        // `.Red` and `[...]` wait for the instance to say what they are (a
+        // `[...]` decides itself when nothing else does)
+        for (i in 0..args.len)
+            if (!is_type_arg(fun, i) && !is_contextual(args[i]) && !is_open_literal(args[i]))
+                check_expr(c, args[i], null);
+        if (!check_arg_count(c, n, fun, fn_params(fun).len, false))
+            return c.types.error;
+        let instance = instantiate_call(c, n, fun, expected);
+        if (instance == null)
+            return c.types.error;
+        n.decl = instance; // the code generator calls the instance
+        fun = instance;
+        t = instance.ty;
+        callee.ty = t;
+        let k = 0;
+        for (i in 0..args.len) {
+            if (is_type_arg(fun, i))
+                continue;
+            if (args[i].ty == null && (is_contextual(args[i]) || is_open_literal(args[i])))
+                check_expr(c, args[i], if (k < t.params.len) t.params[k] else null);
+            k++;
+        }
+    } else {
+        if (fun != null)
+            c.extern_callee = callee;
+        t = check_expr(c, callee, null);
+        c.extern_callee = null;
+        // each argument is checked expecting its parameter's type; past the
+        // parameters of a variadic function there's none, and when the
+        // callee is broken the arguments only get checked for their own
+        // errors
+        for (i in 0..args.len) {
+            let want = c.types.error;
+            if (t.kind == .Fn)
+                want = if (i < t.params.len) t.params[i] else null;
+            check_expr(c, args[i], want);
+        }
+        if (t.kind == .Error)
+            return t;
+        if (t.kind != .Fn) {
+            error(c, callee.tok, tformat("% isn't a function, its type is %", q(callee.tok.text), qt(t)));
+            return c.types.error;
+        }
+        check_arg_count(c, n, fun, t.params.len, t.is_variadic);
+    }
+
+    // the defaults this call uses, checked the first time an instance needs
+    // them (a non-generic function's are checked with its signature)
+    if (fun != null && fun.generic != null) {
+        let params = fn_params(fun);
+        for (i in args.len..params.len) {
+            let p = params[i];
+            let value = value_of(p);
+            if (value == null || value.ty != null)
+                continue;
+            let saved = c.current_instance;
+            c.current_instance = fun;
+            check_expr(c, value, p.ty);
+            coerce(c, value, p.ty);
+            c.current_instance = saved;
+        }
+    }
+
+    let param = 0; // index into the value parameters, t.params
+    for (i in 0..args.len) {
+        let arg = args[i];
+        if (is_type_arg(fun, i))
+            continue;
+        if (param < t.params.len) {
+            coerce(c, arg, t.params[param]);
+            param++;
+        } else if (arg.ty.kind == .UntypedString) {
+            coerce(c, arg, ptr_to(&c.types, c.types.u8)); // C varargs want C strings
+        } else if (arg.ty.kind == .UntypedInt && arg.cval.kind == .Int && fits(arg.cval.i, c.types.i32)) {
+            coerce(c, arg, c.types.i32); // C's int, so `printf("%d", 5)` works
+        } else {
+            default_type(c, arg);
+        }
+    }
+    if (fun != null && fun.kind is .Fn{format: true})
+        check_format_call(c, n, fun);
+    return t.ret;
+}
+
+fn is_type_arg(fun: *Node, i: isize) -> bool {
+    if (fun == null)
+        return false;
+    let params = fn_params(fun);
+    return i < params.len && is_type_param(params[i]);
+}
+
+// f(a, b, c) where f's last parameter is `args: ..T`: the arguments from
+// there on become one slice, `.{b, c}`; `f(a, ..xs)` passes xs itself
+fn pack_variadic(c: *Checker, n: *Node, fun: *Node) {
+    let params = fn_params(fun);
+    if (params.len == 0 || !is_variadic_param(params[params.len - 1]))
+        return;
+    let at = params.len - 1;
+    switch (n.kind) {
+    case .Call{args: &list}:
+        if (list.len <= at)
+            return; // none: the parameter's default, an empty slice
+        if (list.len == at + 1 && list.*[at].kind is .Spread{value}) {
+            list.*[at] = value;
+            return;
+        }
+        let first = list.*[at];
+        let pack = new_node(first.tok, .ArrayLiteral(null, clone_slice(list.*[at..])));
+        map_put(&c.packs, pack, true);
+        pack.color = first.color;
+        let kept: [..]*Node;
+        array_append(&kept, list.*[..at]);
+        array_add(&kept, pack);
+        list.* = kept;
+    default:
+    }
+}
+
+// `count` parameters, some with defaults when `fn` is known
+fn check_arg_count(c: *Checker, n: *Node, fun: *Node, count: isize, variadic: bool) -> bool {
+    let required = count;
+    if (fun != null)
+        for (p in fn_params(fun))
+            if (value_of(p) != null)
+                required--;
+    let name = if (fun != null) q(fun.tok.text) else "this function";
+    let given = call_args(n).len;
+    if (given < required) {
+        error(c, n.tok, tformat("% needs %{}%, got %", name, if (required == count) "" else "at least ",
+                                arguments(required), given));
+        return false;
+    }
+    if (given > count && !variadic) {
+        error(c, call_args(n)[count].tok, tformat("% takes %, got %", name, arguments(count), given));
+        return false;
+    }
+    return true;
+}
+
+fn arguments(k: isize) -> string {
+    return tformat("% %", k, if (k == 1) "argument" else "arguments");
+}

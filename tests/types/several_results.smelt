@@ -1,0 +1,34 @@
+// the types of several results, and of what takes them apart
+enum Error { None, Bad }
+
+fn divide(a: i64, b: i64) -> (i64, i64) { return a / b, a % b; }
+
+fn first(xs: []$T) -> (T, bool) {
+    if (xs.len == 0) {
+        let none: T;
+        return none, false;
+    }
+    return xs[0], true;
+}
+
+fn parse(s: string) -> (u8, Error) {
+    if (s.len == 0) return 0, .Bad;
+    return s[0], .None;
+}
+
+fn twice(s: string) -> (u16, Error) {
+    let c = parse(s) or_return;
+    return c as u16 * 2, .None;
+}
+
+fn main() {
+    let q, r = divide(7, 2);
+    let x = first(f32.[1.5]) or_else 0;
+    let a, b = 1, "two";
+    let f: fn(i64, i64) -> (i64, i64) = divide;
+    q, r = f(9, 4);
+    let wide: i64;
+    let small: u8;
+    small, _ = parse("a");
+    wide, _ = divide(small, 1);
+}

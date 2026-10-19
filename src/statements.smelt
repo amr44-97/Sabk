@@ -1,0 +1,687 @@
+// The checker's statements, and the statements and expressions that take
+// or give several values: `let a, b = f();`, `a, b = b, a;`, `return a, b;`.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/str";
+import "ast";
+import "const";
+import "resolve";
+import "types";
+import "check";
+import "patterns";
+import "expressions";
+import "generics";
+
+pub fn check_cond(c: *Checker, n: *Node) {
+    let t = check_expr(c, n, null);
+    if (t.kind == .Bool || t.kind == .Error)
+        return;
+    let hint = "";
+    if (is_int_like(t))
+        hint = ", compare it explicitly: `x != 0`";
+    else if (t.kind == .Ptr || t.kind == .Rawptr)
+        hint = ", compare it explicitly: `p != null`";
+    error(c, n.tok, tformat("a condition must be a `bool`, found %{}%", qt(t), hint));
+}
+
+// `.{}`, void's one value
+pub fn is_unit_literal(e: *Node) -> bool {
+    if (e.kind is .StructInit{declared, items})
+        return declared == null && items.len == 0;
+    return false;
+}
+
+pub fn check_stmt(c: *Checker, n: *Node) {
+    switch (n.kind) {
+    case .Block{stmts}:
+        for (s in stmts)
+            check_stmt(c, s);
+
+    case .Let, .Const:
+        n.check_state = 1;
+        check_var(c, n);
+        n.check_state = 2;
+
+    case .LetValues:
+        check_let_values(c, n);
+
+    case .ExprStmt{value, dropped}:
+        if (value.kind.tag == .Run)
+            c.run_statement = value;
+        // a call's results can be dropped, however many; `_ = x;` drops
+        // anything
+        if (value.kind.tag == .Call || value.kind.tag == .OrReturn || dropped)
+            c.several_ok_for = value;
+        let t = check_expr(c, value, null);
+        if (t.kind == .Error || dropped)
+            return;
+        let tag = value.kind.tag;
+        if (tag != .Call && tag != .MacroExpansion && tag != .Run && tag != .OrReturn)
+            error(c, value.tok, "this expression does nothing; only calls can be used as statements");
+        else if (t.kind != .Void)
+            check_dropped(c, value, t);
+
+    case .Assign:
+        check_assign(c, n);
+
+    case .Inc{target}:
+        check_step(c, n, target);
+    case .Dec{target}:
+        check_step(c, n, target);
+
+    case .Return:
+        check_return(c, n);
+
+    case .Defer{stmt}:
+        check_stmt(c, stmt);
+
+    case .If{cond, then, else_}:
+        check_cond(c, cond);
+        check_stmt(c, then);
+        if (else_ != null)
+            check_stmt(c, else_);
+
+    case .StaticIf{cond}:
+        // only the branch taken is checked: the other may not even make
+        // sense for these types
+        let t = check_expr(c, cond, null);
+        if (t.kind == .Error)
+            return;
+        if (t.kind != .Bool) {
+            error(c, cond.tok, tformat("`#if` needs a `bool` condition, found %", qt(t)));
+            return;
+        }
+        if (cond.cval.kind != .Bool) {
+            error(c, cond.tok, "`#if` needs a condition known at compile time; this one is only known when the program runs, so use a plain `if`");
+            return;
+        }
+        n.cval = cond.cval;
+        let taken = static_if_branch(n);
+        if (taken != null)
+            check_stmt(c, taken);
+
+    case .While{cond, body}:
+        check_cond(c, cond);
+        check_stmt(c, body);
+    case .DoWhile{body, cond}:
+        check_cond(c, cond);
+        check_stmt(c, body);
+
+    case .For(f):
+        if (f.init != null)
+            check_stmt(c, f.init);
+        if (f.cond != null)
+            check_cond(c, f.cond);
+        if (f.step != null)
+            check_stmt(c, f.step);
+        check_stmt(c, f.body);
+
+    case .ForIn:
+        check_for_in(c, n);
+
+    case .Switch:
+        check_switch(c, n, false, null);
+
+    case .Continue{value}:
+        if (value != null && n.decl != null) { // continue state = .Next: the switch's type
+            let t: *Type = null;
+            if (n.decl.kind is .Switch{value: subject})
+                t = subject.ty;
+            if (t != null && t.kind != .Error) {
+                check_expr(c, value, t);
+                coerce(c, value, t);
+            }
+        }
+
+    case .Break{value}:
+        if (value != null && n.decl != null) // break name = value: a block's or switch's
+            give_value(c, n.decl, value);
+
+    default:
+    }
+}
+
+// x++ and x--
+fn check_step(c: *Checker, n: *Node, target: *Node) {
+    let t = check_expr(c, target, null);
+    if (t.kind == .Error)
+        return;
+    let why = "";
+    let immovable = why_immovable(t);
+    if (!assignable(c, target, &why))
+        error(c, n.tok, tformat("can't modify this: %", why));
+    else if (immovable.len > 0)
+        error(c, n.tok, tformat("can't move this pointer: %", immovable));
+    else if (t.kind != .Int && t.kind != .Float && t.kind != .Ptr)
+        error(c, n.tok, tformat("% needs a number or a pointer, found %", q(n.tok.text), qt(t)));
+}
+
+fn check_return(c: *Checker, n: *Node) {
+    // the resolver set decl to the macro expansion this returns from
+    let ret = if (n.decl != null) n.decl.ty else c.current_fn.ty.ret;
+    let name = q(if (n.decl != null) n.decl.decl.tok.text else c.current_fn.tok.text);
+    let value: *Node = null;
+    if (n.kind is .Return{value: v})
+        value = v;
+    if (value != null && value.kind.tag == .Values) {
+        leave_out_void(c, n, ret);
+        if (n.kind is .Return{value: v})
+            value = v;
+    }
+    if (value != null && !check_result_count(c, value, ret, name))
+        return;
+    if (value != null) {
+        // return a, b; or return g(), with g's results (or a broken result
+        // type, already reported)
+        if (ret.is_tuple || ret.kind == .Error)
+            c.several_ok_for = value;
+        // returning void: a void expression, or `.{}`, its one value
+        if (ret.kind == .Void && is_contextual(value) && !is_unit_literal(value)) {
+            error(c, value.tok, tformat("% doesn't return a value", name));
+            return;
+        }
+        let t = check_expr(c, value, ret);
+        if (ret.kind == .Void) {
+            if (t.kind != .Void && t.kind != .Error)
+                error(c, value.tok, tformat("% doesn't return a value", name));
+        } else if (ret.is_tuple && !t.is_tuple && t.kind != .Error) {
+            error(c, value.tok, tformat("% returns %, %, found one value", name,
+                                        count_values(ret.fields.len), qt(ret)));
+        } else {
+            coerce(c, value, ret);
+        }
+    } else if (ret.kind != .Void && ret.kind != .Error) {
+        error(c, n.tok, tformat("% must return a value of type %", name, qt(ret)));
+    }
+}
+
+// one of the values a labeled block or switch expression gives: of the
+// type its context wants, or the first value's
+pub fn give_value(c: *Checker, target: *Node, value: *Node) {
+    let want = map_get(&c.value_types, target) or_else null;
+    let t = check_expr(c, value, want);
+    if (t.kind == .Error)
+        return;
+    if (want == null)
+        map_put(&c.value_types, target, if (is_untyped(t)) default_type(c, value) else t);
+    else
+        coerce(c, value, want);
+}
+
+// a name, or a field of one through any number of pointers: checking it
+// twice is harmless
+fn is_plain(n: *Node) -> bool {
+    let e = n;
+    while (true) {
+        switch (e.kind) {
+        case .Grouped{inner}: e = inner;
+        case .Deref{pointer}: e = pointer;
+        case .Member{object}:
+            if (e.decl != null)
+                return true;
+            e = object;
+        case .Identifier: return true;
+        default: return false;
+        }
+    }
+    return false;
+}
+
+// `return result, err;` where the function's type leaves a void result
+// out: the void values go too. Only `.{}` and plain names and fields can
+// go (checking them twice is harmless), so nothing with an effect is lost.
+fn leave_out_void(c: *Checker, n: *Node, ret: *Type) {
+    let value: *Node = null;
+    if (n.kind is .Return{value: v})
+        value = v;
+    let items = items_of(value);
+    let want: isize = if (ret.is_tuple) ret.fields.len else if (ret.kind == .Void) 0 else 1;
+    if (items.len <= want || ret.kind == .Error)
+        return;
+    let kept: [..]*Node;
+    for (item in items) {
+        if (is_unit_literal(item) || (is_plain(item) && check_expr(c, item, null).kind == .Void))
+            continue;
+        array_add(&kept, item);
+    }
+    if (kept.len != want || kept.len == items.len)
+        return; // the count is reported as it was written
+    switch (n.kind) {
+    case .Return{value: &slot}:
+        if (kept.len == 0)
+            slot.* = null; // `return .{};` where void is returned
+        else if (kept.len == 1)
+            slot.* = kept[0];
+        else if (value.kind is .Values{items: &list})
+            list.* = kept;
+    default:
+    }
+}
+
+// `return a, b;` against what the function returns: the number of values
+// (a call returning several is checked by its type)
+fn check_result_count(c: *Checker, v: *Node, ret: *Type, name: string) -> bool {
+    let want: isize = if (ret.is_tuple) ret.fields.len else 1;
+    if (v.kind.tag != .Values || ret.kind == .Error)
+        return true;
+    let items = items_of(v);
+    if (ret.kind == .Void || items.len != want) {
+        let at = if (want < items.len - 1) want else items.len - 1;
+        let says = if (ret.kind == .Void) " doesn't return a value" else tformat(" returns %", count_values(want));
+        error(c, items[at].tok, tformat("%{}%, found %", name, says, count_values(items.len)));
+        for (item in items)
+            if (!is_contextual(item)) // `.None` has nothing to go by now
+                check_expr(c, item, null);
+        return false;
+    }
+    return true;
+}
+
+// the n-th, for messages: "1st", "2nd"
+fn nth(i: isize) -> string {
+    let n = i + 1;
+    if (i % 100 >= 10 && i % 100 <= 12)
+        return tformat("%th", n);
+    return switch (i % 10) {
+    case 0: tformat("%st", n);
+    case 1: tformat("%nd", n);
+    case 2: tformat("%rd", n);
+    default: tformat("%th", n);
+    };
+}
+
+// `f();` as a statement, where f is #nodiscard: its result can't be
+// dropped without saying so
+pub fn check_dropped(c: *Checker, call: *Node, t: *Type) {
+    let fun: *Node = null;
+    let name = "";
+    let at = call.tok;
+    switch (call.kind) {
+    case .Call{callee}:
+        if (callee.decl != null && callee.decl.kind.tag == .Fn) {
+            fun = callee.decl;
+            name = callee.tok.text;
+            at = callee.tok;
+        }
+    case .MacroExpansion:
+        fun = call.decl;
+        name = fun.tok.text;
+    default:
+    }
+    if (fun == null || !(fun.kind is .Fn{nodiscard: true}))
+        return;
+    let it = if (t.is_tuple) "them" else "it";
+    let what = if (t.is_tuple) "its results" else tformat("its %", qt(t));
+    error(c, at, tformat("% is `#nodiscard`, and this drops %; use %, or drop % on purpose with `_ = %(...);`",
+                         q(name), what, it, it, name));
+}
+
+// "`divide`", or "this" when the callee has no name
+pub fn callee_name(n: *Node) -> string {
+    let e = n;
+    while (true) {
+        if (e.kind is .OrReturn{value})
+            e = value;
+        else if (e.kind is .Grouped{inner})
+            e = inner;
+        else
+            break;
+    }
+    if (e.kind is .Call{callee} && (callee.kind.tag == .Identifier || callee.kind.tag == .Member))
+        return q(callee.tok.text);
+    return "this";
+}
+
+// The results a call's callee spells out, void ones too: `-> (T, IoError)`
+// with T = void spells two, though the call gives one. False when the
+// callee isn't a function or a value whose type is written out.
+fn spelled_results(c: *Checker, n: *Node, out: *[..]*Type) -> bool {
+    let call = ungroup(n);
+    if (call.kind.tag != .Call)
+        return false;
+    let callee: *Node = call.decl; // an instance
+    if (callee == null && call.kind is .Call{callee: lhs})
+        callee = lhs.decl;
+    if (callee == null)
+        return false;
+    let result: *Node = null;
+    if (callee.kind.tag == .Fn) {
+        result = declared_of(callee);
+    } else {
+        let declared = declared_of(callee);
+        if (declared != null && declared.kind is .TypeFn{result: r}) // f: fn() -> ...
+            result = r;
+    }
+    if (result == null || !(result.kind is .TypeTuple))
+        return false;
+    for (e in items_of_tuple(result))
+        array_add(out, type_from_node(c, e));
+    return true;
+}
+
+fn items_of_tuple(n: *Node) -> []*Node {
+    if (n.kind is .TypeTuple{items})
+        return items;
+    return .[];
+}
+
+// `let a, b = f();` with f's void result left out of its type: do the
+// names, typed as f spells its results, match what f gives? Each void name
+// then takes nothing
+fn names_void_results(c: *Checker, v: *Node, t: *Type, names: isize, spelled: *[..]*Type) -> bool {
+    let count: isize = if (t.is_tuple) t.fields.len else if (t.kind == .Void) 0 else 1;
+    if (names <= count || !spelled_results(c, v, spelled) || spelled.len != names)
+        return false;
+    let voids = 0;
+    for (s in spelled.*)
+        if (s.kind == .Void)
+            voids++;
+    return names - voids == count;
+}
+
+// let a, b = x, y;  let q, r = divide(a, b);
+fn check_let_values(c: *Checker, n: *Node) {
+    let names: []*Node;
+    let v: *Node = null;
+    if (n.kind is .LetValues{names: ns, values})
+        names, v = ns, values;
+    if (v.kind is .Values{items}) {
+        if (items.len != names.len) {
+            let at = if (items.len > names.len) items[names.len].tok else names[items.len].tok;
+            error(c, at, tformat("% names but %", names.len, count_values(items.len)));
+            for (item in items)
+                check_expr(c, item, null);
+            fail_names(c, names);
+            return;
+        }
+        // each name gets its value, as if declared one after the other
+        for (i in 0..names.len) {
+            switch (names[i].kind) {
+            case .Let{value: &slot}: slot.* = items[i];
+            default:
+            }
+            names[i].check_state = 1;
+            check_var(c, names[i]);
+            names[i].check_state = 2;
+        }
+        switch (n.kind) {
+        case .LetValues{values: &slot}: slot.* = null;
+        default:
+        }
+        return;
+    }
+    c.several_ok_for = v;
+    let t = check_expr(c, v, null);
+    if (t.kind == .Error) {
+        fail_names(c, names);
+        return;
+    }
+    let count: isize = if (t.is_tuple) t.fields.len else 1;
+    let spelled: [..]*Type;
+    if (count != names.len && names_void_results(c, v, t, names.len, &spelled)) {
+        // the void ones are void, the others take the results in order
+        let j = 0;
+        for (i in 0..names.len) {
+            if (spelled[i].kind == .Void) {
+                names[i].ty = c.types.void_;
+            } else if (t.is_tuple) {
+                names[i].ty = t.fields[j].ty;
+                j++;
+            } else {
+                names[i].ty = t;
+            }
+            names[i].check_state = 2;
+        }
+        return;
+    }
+    if (count != names.len) {
+        let shown = if (t.is_tuple) tformat(", %", qt(t)) else "";
+        error(c, call_site(v), tformat("% names, but % gives %{}%", names.len, callee_name(v),
+                                       count_values(count), shown));
+        fail_names(c, names);
+        return;
+    }
+    for (i in 0..names.len) {
+        names[i].ty = t.fields[i].ty;
+        names[i].check_state = 2;
+    }
+}
+
+fn fail_names(c: *Checker, names: []*Node) {
+    for (d in names) {
+        d.ty = c.types.error;
+        d.check_state = 2;
+    }
+}
+
+// a, b = b, a;  q, r = divide(a, b);  `_` drops a value
+fn check_assign_values(c: *Checker, n: *Node) {
+    let targets: []*Node;
+    let v: *Node = null;
+    if (n.kind is .Assign{target, value}) {
+        targets = items_of(target);
+        v = value;
+    }
+    let want: [..]*Type; // each target's type; null for `_`
+    let ok = true;
+    for (target in targets) {
+        if (is_discard(target)) {
+            array_add(&want, null);
+            continue;
+        }
+        let t = check_expr(c, target, null);
+        let why = "";
+        if (t.kind != .Error && !assignable(c, target, &why)) {
+            error(c, target.tok, tformat("can't assign to this: %", why));
+            t = c.types.error;
+        }
+        ok = ok && t.kind != .Error;
+        array_add(&want, t);
+    }
+
+    if (v.kind is .Values{items}) {
+        if (items.len != targets.len) {
+            let at = if (items.len > targets.len) items[targets.len].tok else targets[items.len].tok;
+            error(c, at, tformat("% targets but %", targets.len, count_values(items.len)));
+            for (item in items)
+                check_expr(c, item, null);
+            return;
+        }
+        // every value is worked out before any target changes: a, b = b, a
+        let elems: [..]*Type;
+        for (i in 0..targets.len) {
+            let item = items[i];
+            let t = check_expr(c, item, want[i]);
+            if (want[i] != null && want[i].kind != .Error) {
+                coerce(c, item, want[i]);
+                array_add(&elems, want[i]);
+            } else {
+                array_add(&elems, if (t.kind == .Error) t else default_type(c, item));
+            }
+            ok = ok && elems[elems.len - 1].kind != .Error && t.kind != .Error;
+        }
+        if (ok)
+            v.ty = tuple_of(&c.types, elems);
+        return;
+    }
+
+    c.several_ok_for = v;
+    let t = check_expr(c, v, null);
+    if (t.kind == .Error || !ok)
+        return;
+    let count: isize = if (t.is_tuple) t.fields.len else 1;
+    // void targets take nothing when f's void result is left out of its type
+    let slots = result_slots(want, count);
+    let taking = 0;
+    for (s in slots)
+        if (s >= 0)
+            taking++;
+    if (taking != count) {
+        let shown = if (t.is_tuple) tformat(", %", qt(t)) else "";
+        error(c, call_site(v), tformat("% targets, but % gives %{}%", targets.len, callee_name(v),
+                                       count_values(count), shown));
+        return;
+    }
+    n.convs = new([]*Type, targets.len);
+    for (i in 0..targets.len) {
+        if (slots[i] < 0)
+            continue;
+        let from = if (t.is_tuple) t.fields[slots[i]].ty else t;
+        let to = want[i];
+        if (to == null || from == to)
+            continue;
+        if (can_coerce(c, v, from, to) && to != c.any_type) {
+            n.convs[i] = to; // the code generator writes the conversion out
+            continue;
+        }
+        let qto, qfrom = q2(to, from);
+        error(c, targets[i].tok, tformat("%'s % value is %, which can't be assigned to %",
+                                         callee_name(v), nth(i), qfrom, qto));
+    }
+}
+
+// p + n, n + p, p - n: n of what p points at, the way p[n] counts, so
+// p + n is &p[n]. q - p: how many of them lie between p and q, an isize.
+pub fn pointer_arithmetic(c: *Checker, n: *Node, l: *Type, r: *Type) -> *Type {
+    let op = q(n.tok.text);
+    let is_add = n.kind is .Binary{op: .Add};
+    let is_sub = n.kind is .Binary{op: .Sub};
+    let lhs: *Node = null;
+    let rhs: *Node = null;
+    if (n.kind is .Binary{lhs: a, rhs: b})
+        lhs, rhs = a, b;
+    let both = is_pointer_like(l) && is_pointer_like(r);
+    if (both && is_add) {
+        error(c, n.tok, "can't add two pointers; `q - p` counts what's between them, and `p + n` moves a pointer");
+        return c.types.error;
+    }
+    if (both) {
+        let why = why_immovable(l);
+        if (why.len > 0) {
+            error(c, n.tok, tformat("can't subtract these pointers: %", why));
+            return c.types.error;
+        }
+        if (l != r) {
+            error(c, n.tok, tformat("`-` between pointers needs them to point at the same type, found % and %",
+                                    qt(l), qt(r)));
+            return c.types.error;
+        }
+        return c.types.isize;
+    }
+    let ptr = if (is_pointer_like(l)) l else r;
+    let count = if (ptr == l) rhs else lhs;
+    let count_type = if (ptr == l) r else l;
+    if (ptr == r && is_sub) {
+        error(c, n.tok, "can't subtract a pointer from a number; `p - n` moves the pointer back");
+        return c.types.error;
+    }
+    let why = why_immovable(ptr);
+    if (why.len > 0) {
+        error(c, n.tok, tformat("can't move this pointer: %", why));
+        return c.types.error;
+    }
+    if (!is_count(count_type)) {
+        error(c, count.tok, tformat("a pointer moves by a whole number of values, so % needs an integer here, found %",
+                                    op, qt(count_type)));
+        return c.types.error;
+    }
+    if (count_type.kind == .UntypedInt)
+        coerce(c, count, c.types.isize);
+    return ptr;
+}
+
+fn check_assign(c: *Checker, n: *Node) {
+    let target: *Node = null;
+    let value: *Node = null;
+    if (n.kind is .Assign{target: t, value: v})
+        target, value = t, v;
+    if (target.kind.tag == .Values) {
+        check_assign_values(c, n);
+        return;
+    }
+    if (value.kind is .Values{items}) {
+        error(c, items[1].tok, tformat("one target, but %", count_values(items.len)));
+        check_expr(c, target, null);
+        for (item in items)
+            check_expr(c, item, null);
+        return;
+    }
+    let t = check_expr(c, target, null);
+    let vt = check_expr(c, value, t);
+    if (t.kind == .Error || vt.kind == .Error)
+        return;
+
+    let why = "";
+    if (!assignable(c, target, &why)) {
+        error(c, n.tok, tformat("can't assign to this: %", why));
+        return;
+    }
+
+    let op = n.tok.text;
+    if (op == "=") {
+        if (!coerce(c, value, t))
+            explain_pointer_index(c, target);
+    } else if (op == "<<=" || op == ">>=") {
+        if (t.kind != .Int)
+            error(c, n.tok, tformat("% needs an integer, found %", q(op), qt(t)));
+        else if (!is_int_like(vt))
+            error(c, value.tok, tformat("a shift amount must be an integer, found %", qt(vt)));
+    } else if ((op == "+=" || op == "-=") && is_pointer_like(t)) {
+        // p += n: moves p by n of what it points at
+        let immovable = why_immovable(t);
+        if (immovable.len > 0)
+            error(c, n.tok, tformat("can't move this pointer: %", immovable));
+        else if (!is_count(vt))
+            error(c, value.tok, tformat("a pointer moves by a whole number of values, so % needs an integer, found %",
+                                        q(op), qt(vt)));
+        else if (vt.kind == .UntypedInt)
+            coerce(c, value, c.types.isize);
+    } else {
+        let ints_only = op == "%=" || op == "&=" || op == "|=" || op == "^=";
+        let ok = if (ints_only) t.kind == .Int else is_numeric(t);
+        if (!ok)
+            error(c, n.tok, tformat("% needs %, found %", q(op), if (ints_only) "an integer" else "a number", qt(t)));
+        else
+            coerce(c, value, t);
+    }
+}
+
+fn check_for_in(c: *Checker, n: *Node) {
+    let iterable: *Node = null;
+    let range_end: *Node = null;
+    let body: *Node = null;
+    if (n.kind is .ForIn{iterable: it, range_end: e, body: b})
+        iterable, range_end, body = it, e, b;
+    let var = c.types.error;
+    if (range_end != null) {
+        // for (i in a..b)
+        check_expr(c, iterable, null);
+        check_expr(c, range_end, null);
+        let t = unify(c, n, iterable, range_end);
+        if (t.kind == .UntypedInt) {
+            default_type(c, iterable);
+            t = default_type(c, range_end);
+        }
+        if (t.kind == .Int)
+            var = t;
+        else if (t.kind != .Error)
+            error(c, iterable.tok, tformat("a range needs integers, found %", qt(t)));
+    } else {
+        // for (x in xs)
+        let t = check_expr(c, iterable, null);
+        if (t.kind == .UntypedString) // for (c in "abc"): a string's bytes
+            t = default_type(c, iterable);
+        if (t.kind == .Array || t.kind == .Slice || t.kind == .Growable)
+            var = t.elem;
+        else if (t.kind == .Ptr && (t.elem.kind == .Array || t.elem.kind == .Growable))
+            error(c, iterable.tok, tformat("can't iterate over a pointer; to iterate over the array it points at, write `%.*`",
+                                           text_of(iterable)));
+        else if (t.kind != .Error)
+            error(c, iterable.tok, tformat("can't iterate over %, only arrays, slices and ranges", qt(t)));
+    }
+    n.ty = var;
+    n.check_state = 2;
+    check_stmt(c, body);
+}

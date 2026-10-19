@@ -1,0 +1,9 @@
+[error]: `x` is not a type at [tests/errors/literal_element_type.smelt:6:13]
+     6 |     let v = x.[1, 2];              // a variable
+       |             ^
+[error]: `make` is not a type at [tests/errors/literal_element_type.smelt:7:13]
+     7 |     let w = make().[1];            // a call
+       |             ^
+[error]: `*` here applies to the whole literal; for an array of pointers, put the element type in parentheses: `(*T).[ ... ]` at [tests/errors/literal_element_type.smelt:8:14]
+     8 |     let ps = *Point.[p];           // `*` applies to the literal
+       |              ^

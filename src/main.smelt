@@ -2,12 +2,19 @@
 //
 //   smelt --tokens file.smelt     print the tokens of a file
 //   smelt --ast file.smelt        print its syntax tree
+//   smelt --resolve file.smelt    print every module's tree, with names
+//                                 linked to their declarations
+//   smelt --types file.smelt      print every module's tree with types and
+//                                 constants, then every generic instance
+//   --std <dir>                   the standard library (default: std next
+//                                 to the compiler)
 //
 // The rest of the compiler is still the C++ one in ../the-compiler.
 
 import "std/io";
 import "std/os";
 import "std/fmt";
+import "std/path";
 import "std/str";
 import "std/array";
 import "source";
@@ -15,40 +22,88 @@ import "token";
 import "lexer";
 import "parser";
 import "ast";
+import "module";
+import "resolve";
+import "check";
+import "generics";
 
 extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
 
+enum Mode { None, Tokens, Ast, Resolve, Types }
+
 fn usage() -> i32 {
-    eprintln("usage: smelt --tokens|--ast <file>");
+    eprintln("usage: smelt --tokens|--ast|--resolve|--types [--std <dir>] <file>");
     return 1;
 }
 
 fn main() -> i32 {
     let argv = args();
-    let tokens_mode, ast_mode = false, false;
+    let mode = Mode.None;
     let path = "";
-    for (arg in argv[1..]) {
+    let std_dir = path_normalize(path_join(path_dir(argv[0]), "std"));
+    let i: isize = 1;
+    while (i < argv.len) {
+        let arg = argv[i];
+        i++;
         if (arg == "--tokens")
-            tokens_mode = true;
+            mode = .Tokens;
         else if (arg == "--ast")
-            ast_mode = true;
-        else if (arg.len > 0 && arg[0] == '-' || path.len > 0)
+            mode = .Ast;
+        else if (arg == "--resolve")
+            mode = .Resolve;
+        else if (arg == "--types")
+            mode = .Types;
+        else if (arg == "--std" && i < argv.len) {
+            std_dir = argv[i];
+            i++;
+        } else if (arg.len > 0 && arg[0] == '-' || path.len > 0)
             return usage();
         else
             path = arg;
     }
-    if ((!tokens_mode && !ast_mode) || path.len == 0)
+    if (mode == .None || path.len == 0)
         return usage();
+
+    if (mode == .Types) {
+        let r = make_resolver(std_dir);
+        let c = make_checker(&r);
+        r.checker = &c;
+        if (!resolve_program(&r, path) || !check_program(&c))
+            return 1;
+        for (m in r.modules) {
+            println("MODULE %", m.path);
+            dump(m.root);
+        }
+        for (instance in c.instances) {
+            println("INSTANCE %", describe_instance(&c, instance));
+            dump(instance);
+        }
+        return 0;
+    }
+
+    if (mode == .Resolve) {
+        let r = make_resolver(std_dir);
+        // `#insert` and top-level `#if`s check code while resolving
+        let c = make_checker(&r);
+        r.checker = &c;
+        if (!resolve_program(&r, path))
+            return 1;
+        for (m in r.modules) {
+            println("MODULE %", m.path);
+            dump(m.root);
+        }
+        return 0;
+    }
 
     let src, err = load_source(path);
     if (err != .None) {
-        eprintln("%: %", path, io_error_message(err));
+        eprintln("%: %", path, system_error_text(err));
         return 1;
     }
     let tokens, ok = lex(&src);
     if (!ok)
         return 1;
-    if (tokens_mode) {
+    if (mode == .Tokens) {
         dump_tokens(tokens);
         return 0;
     }

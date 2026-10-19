@@ -1,0 +1,6 @@
+import "lib/badmacro";
+fn m() #expand {}
+fn f() {
+    let a = m;
+    let b = badmacro.broken;
+}

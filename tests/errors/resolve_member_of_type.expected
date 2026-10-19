@@ -1,0 +1,3 @@
+[error]: can't access `x` on the type `Vec2`, only on a value at [tests/errors/resolve_member_of_type.smelt:2:23]
+     2 | fn f() { let a = Vec2.x; }
+       |                       ^

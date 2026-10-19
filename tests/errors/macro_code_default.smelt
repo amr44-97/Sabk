@@ -1,0 +1,2 @@
+fn m(body: Code = 1) #expand {}
+fn f() { m(); }

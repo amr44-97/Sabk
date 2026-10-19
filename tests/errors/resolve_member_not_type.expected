@@ -1,0 +1,3 @@
+[error]: `priv.value` is not a type at [tests/errors/resolve_member_not_type.smelt:2:13]
+     2 | let x: priv.value;
+       |             ^

@@ -1,0 +1,2 @@
+import "lib/priv";
+fn f() { priv.secret(); }

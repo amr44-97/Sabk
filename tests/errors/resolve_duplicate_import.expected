@@ -1,0 +1,6 @@
+[error]: `priv` is already declared in this module at [tests/errors/resolve_duplicate_import.smelt:2:8]
+     2 | import "lib/priv";
+       |        ^
+[note]: the first declaration is here at [tests/errors/resolve_duplicate_import.smelt:1:8]
+     1 | import "lib/priv";
+       |        ^

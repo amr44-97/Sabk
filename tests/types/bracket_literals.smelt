@@ -1,0 +1,12 @@
+struct Point { x: i64; y: i64; }
+fn sum(xs: []i64) -> i64 { return 0; }
+fn f(small: u8) {
+    let a = .[1, 2];
+    let b = .[1, 2.5];
+    let c = .[small, 7];
+    let d = .[.[1, 2], .[1.5, 2]];
+    let e: []i64 = .[1, 2];
+    let g = .[Point.{ .x = 1 }, .{ .y = 2 }];
+    let arr: [2]i64 = .[3, 4];
+    let total = sum(arr);
+}

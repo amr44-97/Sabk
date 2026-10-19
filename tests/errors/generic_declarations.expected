@@ -1,0 +1,6 @@
+[error]: an `extern` function can't be generic at [tests/errors/generic_declarations.smelt:1:11]
+     1 | extern fn c_generic(x: $T);
+       |           ^
+[error]: an `#expand` function can't be generic at [tests/errors/generic_declarations.smelt:2:22]
+     2 | fn macro_generic(x: $T) #expand {}
+       |                      ^

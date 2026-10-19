@@ -1,0 +1,119 @@
+MODULE tests/types/conversions.smelt
+ROOT
+  STRUCT `S` : S
+    STRUCT_FIELD `v` : i32
+      type: TYPE_NAME `i32` -> builtin : i32
+  ENUM `E` : E
+    type: TYPE_NAME `u16` -> builtin : u16
+    ENUM_VARIANT `X` : E = 0
+    ENUM_VARIANT `Y` : E = 1
+  FUN_DECL `puts` [extern] : fn(*u8) -> i32
+    type: TYPE_NAME `i32` -> builtin : i32
+    FUN_PARAM `s` : *u8
+      type: TYPE_PTR `*` : *u8
+        lhs: TYPE_NAME `u8` -> builtin : u8
+  FUN_DECL `free` [extern] : fn(*void)
+    FUN_PARAM `p` : *void
+      type: TYPE_PTR `*` : *void
+        lhs: TYPE_NAME `void` -> builtin : void
+  FUN_DECL `f` : fn(i8, u16, f32, *S)
+    rhs: BLOCK
+      VAR_DECL `w1` : i16
+        type: TYPE_NAME `i16` -> builtin : i16
+        lhs: IDENTIFIER `a` -> FUN_PARAM `a` 6:6 : i8
+      VAR_DECL `w2` : i32
+        type: TYPE_NAME `i32` -> builtin : i32
+        lhs: IDENTIFIER `b` -> FUN_PARAM `b` 6:13 : u16
+      VAR_DECL `w3` : u64
+        type: TYPE_NAME `u64` -> builtin : u64
+        lhs: IDENTIFIER `b` -> FUN_PARAM `b` 6:13 : u16
+      VAR_DECL `w4` : f64
+        type: TYPE_NAME `f64` -> builtin : f64
+        lhs: IDENTIFIER `x` -> FUN_PARAM `x` 6:21 : f32
+      VAR_DECL `raw` : *void
+        type: TYPE_PTR `*` : *void
+          lhs: TYPE_NAME `void` -> builtin : void
+        lhs: IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
+      EXPR_STMT `free`
+        lhs: CALL `(` : void
+          lhs: IDENTIFIER `free` -> FUN_DECL `free` tests/types/conversions.smelt:4:11 : fn(*void)
+          IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
+      VAR_DECL `none` : *S
+        type: TYPE_PTR `*` : *S
+          lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S
+        lhs: NULL_LITERAL : *S
+      VAR_DECL `fp` : fn(i32)
+        type: TYPE_FN : fn(i32)
+          TYPE_NAME `i32` -> builtin : i32
+        lhs: NULL_LITERAL : fn(i32)
+      VAR_DECL `empty` : []i32
+        type: TYPE_SLICE `[` : []i32
+          lhs: TYPE_NAME `i32` -> builtin : i32
+        lhs: NULL_LITERAL : []i32
+      VAR_DECL `arr` : [4]i32
+        type: TYPE_ARRAY `[` : [4]i32
+          lhs: TYPE_NAME `i32` -> builtin : i32
+          rhs: NUMBER_LITERAL `4` : untyped int = 4
+      VAR_DECL `sl` : []i32
+        type: TYPE_SLICE `[` : []i32
+          lhs: TYPE_NAME `i32` -> builtin : i32
+        lhs: ADDRESS_OF `&` : *[4]i32
+          lhs: IDENTIFIER `arr` -> VAR_DECL `arr` 16:9 : [4]i32
+      EXPR_STMT `puts`
+        lhs: CALL `(` : i32
+          lhs: IDENTIFIER `puts` -> FUN_DECL `puts` tests/types/conversions.smelt:3:11 : fn(*u8) -> i32
+          STRING_LITERAL `"c string"` : *u8
+      VAR_DECL `cs` : *u8
+        type: TYPE_PTR `*` : *u8
+          lhs: TYPE_NAME `u8` -> builtin : u8
+        lhs: STRING_LITERAL `"also"` : *u8
+      VAR_DECL `back` : *S
+        lhs: CAST : *S
+          type: TYPE_PTR `*` : *S
+            lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S
+          lhs: IDENTIFIER `raw` -> VAR_DECL `raw` 11:9 : *void
+      VAR_DECL `addr` : usize
+        lhs: CAST : usize
+          type: TYPE_NAME `usize` -> builtin : usize
+          lhs: IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
+      VAR_DECL `p2` : *S
+        lhs: CAST : *S
+          type: TYPE_PTR `*` : *S
+            lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S
+          lhs: IDENTIFIER `addr` -> VAR_DECL `addr` 21:9 : usize
+      VAR_DECL `e` : E
+        lhs: CAST : E = 1
+          type: TYPE_NAME `E` -> ENUM `E` tests/types/conversions.smelt:2:6 : E
+          lhs: NUMBER_LITERAL `1` : u16 = 1
+      VAR_DECL `n` : u16
+        lhs: CAST : u16 = 1
+          type: TYPE_NAME `u16` -> builtin : u16
+          lhs: MEMBER `Y` -> ENUM_VARIANT `Y` tests/types/conversions.smelt:2:18 : E = 1
+            lhs: IDENTIFIER `E` -> ENUM `E` tests/types/conversions.smelt:2:6 : E
+      VAR_DECL `ok` : i32
+        lhs: ADD `+` : i32
+          lhs: GROUPED_EXPR `(` : i32
+            lhs: CAST : i32
+              type: TYPE_NAME `i32` -> builtin : i32
+              lhs: IDENTIFIER `a` -> FUN_PARAM `a` 6:6 : i8
+          rhs: GROUPED_EXPR `(` : i32
+            lhs: CAST : i32
+              type: TYPE_NAME `i32` -> builtin : i32
+              lhs: IDENTIFIER `b` -> FUN_PARAM `b` 6:13 : u16
+      VAR_DECL `c` : u8
+        lhs: CAST : u8 = 1
+          type: TYPE_NAME `u8` -> builtin : u8
+          lhs: BOOL_LITERAL `true` : bool = true
+      VAR_DECL `fl` : f64
+        lhs: CAST : f64
+          type: TYPE_NAME `f64` -> builtin : f64
+          lhs: IDENTIFIER `a` -> FUN_PARAM `a` 6:6 : i8
+    FUN_PARAM `a` : i8
+      type: TYPE_NAME `i8` -> builtin : i8
+    FUN_PARAM `b` : u16
+      type: TYPE_NAME `u16` -> builtin : u16
+    FUN_PARAM `x` : f32
+      type: TYPE_NAME `f32` -> builtin : f32
+    FUN_PARAM `s` : *S
+      type: TYPE_PTR `*` : *S
+        lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.smelt:1:8 : S

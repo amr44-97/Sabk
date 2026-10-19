@@ -337,3 +337,50 @@ pub fn float_value(text: string) -> f64 {
     buffer[text.len] = 0;
     return strtod(buffer.ptr, null);
 }
+
+// A string or char literal's body (without its quotes) with its escapes
+// decoded; on a bad escape, false and the escape
+pub fn decode_escapes(body: string) -> (string, string, bool) {
+    let out: [..]u8;
+    let i: isize = 0;
+    while (i < body.len) {
+        if (body[i] != '\\') {
+            array_add(&out, body[i]);
+            i++;
+            continue;
+        }
+        let c: u8 = if (i + 1 < body.len) body[i + 1] else 0;
+        switch (c) {
+        case 'n': array_add(&out, '\n');
+        case 't': array_add(&out, '\t');
+        case 'r': array_add(&out, '\r');
+        case '0': array_add(&out, 0);
+        case '\\': array_add(&out, '\\');
+        case '\'': array_add(&out, '\'');
+        case '"': array_add(&out, '"');
+        case 'x':
+            if (i + 3 < body.len && is_hex(body[i + 2]) && is_hex(body[i + 3])) {
+                array_add(&out, (hex_value(body[i + 2]) * 16 + hex_value(body[i + 3])) as u8);
+                i += 4;
+                continue;
+            }
+            return out as string, body[i..min_index(i + 4, body.len)], false;
+        default:
+            return out as string, body[i..min_index(i + 2, body.len)], false;
+        }
+        i += 2;
+    }
+    return out as string, "", true;
+}
+
+fn is_hex(c: u8) -> bool { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
+
+fn hex_value(c: u8) -> i32 {
+    if (is_digit(c))
+        return (c - '0') as i32;
+    if (c >= 'a')
+        return (c - 'a' + 10) as i32;
+    return (c - 'A' + 10) as i32;
+}
+
+fn min_index(a: isize, b: isize) -> isize { return if (a < b) a else b; }

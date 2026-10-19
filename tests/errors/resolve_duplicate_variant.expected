@@ -1,0 +1,6 @@
+[error]: `A` is already declared in this enum at [tests/errors/resolve_duplicate_variant.smelt:1:16]
+     1 | enum E { A, B, A }
+       |                ^
+[note]: the first declaration is here at [tests/errors/resolve_duplicate_variant.smelt:1:10]
+     1 | enum E { A, B, A }
+       |          ^

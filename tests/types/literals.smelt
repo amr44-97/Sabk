@@ -1,0 +1,26 @@
+const A = 10;
+const B = A * 3 + 1;           // untyped 31
+const F = 1.5 * 2;             // untyped float 3
+const MIX = 1 + 0.5;           // untyped float 1.5
+const SMALL: u8 = 250;
+const SHIFTED = 1 << 10;
+const NOT = ~0;
+const NOT8: u8 = ~(0 as u8);
+const CMP = A > 5 && B != 31;
+const WRAP = 300 as u8;        // explicit casts wrap like C: 44
+const NEG = -128 as i8;
+const TRUNC = 3.9 as i32;
+const CH = 'a';
+const NL = '\n';
+const HEX = '\x41';
+const QUOTE = '\'';
+
+fn f() {
+    let i = 5;          // i32
+    let x = 2.5;        // f64
+    let s = "text";     // []u8
+    let u: u64 = A;
+    let g: f32 = A;
+    let flag = true;
+    let big: i64 = 1 << 40;
+}

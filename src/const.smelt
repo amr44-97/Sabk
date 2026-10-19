@@ -1,0 +1,215 @@
+// Values known at compile time. Integers are 128 bits wide, so every value
+// of every integer type fits, with room left to see a constant expression
+// overflow its type; floats are f64, as C computes them.
+
+import "std/array";
+import "std/fmt";
+import "std/str";
+
+// a 128-bit two's complement integer: `hi` has the sign
+pub struct I128 {
+    lo: u64;
+    hi: i64;
+}
+
+pub fn i128(v: i64) -> I128 { return .{ .lo = v as u64, .hi = if (v < 0) -1 else 0 }; }
+pub fn i128_u(v: u64) -> I128 { return .{ .lo = v, .hi = 0 }; }
+
+pub fn i128_is_neg(a: I128) -> bool { return a.hi < 0; }
+pub fn i128_is_zero(a: I128) -> bool { return a.lo == 0 && a.hi == 0; }
+pub fn i128_eq(a: I128, b: I128) -> bool { return a.lo == b.lo && a.hi == b.hi; }
+
+// -1, 0 or 1
+pub fn i128_cmp(a: I128, b: I128) -> i32 {
+    if (a.hi != b.hi)
+        return if (a.hi < b.hi) -1 else 1;
+    if (a.lo != b.lo)
+        return if (a.lo < b.lo) -1 else 1;
+    return 0;
+}
+pub fn i128_lt(a: I128, b: I128) -> bool { return i128_cmp(a, b) < 0; }
+
+pub fn i128_add(a: I128, b: I128) -> I128 {
+    let lo = a.lo + b.lo;
+    let carry: i64 = if (lo < a.lo) 1 else 0;
+    return .{ .lo = lo, .hi = ((a.hi as u64) + (b.hi as u64) + (carry as u64)) as i64 };
+}
+
+pub fn i128_sub(a: I128, b: I128) -> I128 {
+    let borrow: u64 = if (a.lo < b.lo) 1 else 0;
+    return .{ .lo = a.lo - b.lo, .hi = ((a.hi as u64) - (b.hi as u64) - borrow) as i64 };
+}
+
+pub fn i128_neg(a: I128) -> I128 { return i128_sub(i128(0), a); }
+pub fn i128_not(a: I128) -> I128 { return .{ .lo = ~a.lo, .hi = ~a.hi }; }
+pub fn i128_and(a: I128, b: I128) -> I128 { return .{ .lo = a.lo & b.lo, .hi = a.hi & b.hi }; }
+pub fn i128_or(a: I128, b: I128) -> I128 { return .{ .lo = a.lo | b.lo, .hi = a.hi | b.hi }; }
+pub fn i128_xor(a: I128, b: I128) -> I128 { return .{ .lo = a.lo ^ b.lo, .hi = a.hi ^ b.hi }; }
+
+// the full 128-bit product of two u64s
+fn mul_wide(a: u64, b: u64) -> I128 {
+    let mask: u64 = 0xffffffff;
+    let a0, a1 = a & mask, a >> 32;
+    let b0, b1 = b & mask, b >> 32;
+    let p00, p01, p10, p11 = a0 * b0, a0 * b1, a1 * b0, a1 * b1;
+    let middle = (p00 >> 32) + (p01 & mask) + (p10 & mask);
+    let lo = (p00 & mask) | (middle << 32);
+    let hi = p11 + (p01 >> 32) + (p10 >> 32) + (middle >> 32);
+    return .{ .lo = lo, .hi = hi as i64 };
+}
+
+// wraps past 128 bits, as the C++ compiler's __int128 did
+pub fn i128_mul(a: I128, b: I128) -> I128 {
+    let low = mul_wide(a.lo, b.lo);
+    let cross = (a.hi as u64) * b.lo + a.lo * (b.hi as u64);
+    return .{ .lo = low.lo, .hi = ((low.hi as u64) + cross) as i64 };
+}
+
+// shifts by 0..127
+pub fn i128_shl(a: I128, n: i64) -> I128 {
+    if (n <= 0)
+        return a;
+    if (n >= 128)
+        return i128(0);
+    if (n >= 64)
+        return .{ .lo = 0, .hi = (a.lo << (n - 64)) as i64 };
+    return .{ .lo = a.lo << n, .hi = (((a.hi as u64) << n) | (a.lo >> (64 - n))) as i64 };
+}
+
+// arithmetic: the sign is kept
+pub fn i128_shr(a: I128, n: i64) -> I128 {
+    if (n <= 0)
+        return a;
+    if (n >= 128)
+        return i128(if (a.hi < 0) -1 else 0);
+    if (n >= 64)
+        return .{ .lo = (a.hi >> (n - 64)) as u64, .hi = a.hi >> 63 };
+    return .{ .lo = (a.lo >> n) | ((a.hi as u64) << (64 - n)), .hi = a.hi >> n };
+}
+
+// unsigned division: quotient and remainder of two 128-bit magnitudes
+fn udivmod(a: I128, b: I128) -> (I128, I128) {
+    let q = i128(0);
+    let r = i128(0);
+    let i: i64 = 127;
+    while (i >= 0) {
+        r = i128_shl(r, 1);
+        let bit = if (i >= 64) ((a.hi as u64) >> (i - 64)) & 1 else (a.lo >> i) & 1;
+        r.lo = r.lo | bit;
+        if (!ult(r, b)) {
+            r = i128_sub(r, b);
+            if (i >= 64)
+                q.hi = ((q.hi as u64) | ((1 as u64) << (i - 64))) as i64;
+            else
+                q.lo = q.lo | ((1 as u64) << i);
+        }
+        i--;
+    }
+    return q, r;
+}
+
+// a < b, as unsigned numbers
+fn ult(a: I128, b: I128) -> bool {
+    let ah, bh = a.hi as u64, b.hi as u64;
+    if (ah != bh)
+        return ah < bh;
+    return a.lo < b.lo;
+}
+
+fn abs128(a: I128) -> I128 { return if (i128_is_neg(a)) i128_neg(a) else a; }
+
+// rounds toward zero, as C does; b isn't 0
+pub fn i128_div(a: I128, b: I128) -> I128 {
+    let q, _ = udivmod(abs128(a), abs128(b));
+    return if (i128_is_neg(a) != i128_is_neg(b)) i128_neg(q) else q;
+}
+
+// the sign of a, as in C
+pub fn i128_mod(a: I128, b: I128) -> I128 {
+    let _, r = udivmod(abs128(a), abs128(b));
+    return if (i128_is_neg(a)) i128_neg(r) else r;
+}
+
+pub fn i128_to_string(a: I128) -> string {
+    if (i128_is_zero(a))
+        return "0";
+    let digits: [..]u8;
+    let v = abs128(a);
+    let ten = i128(10);
+    while (!i128_is_zero(v)) {
+        let q, r = udivmod(v, ten);
+        array_add(&digits, ('0' + r.lo) as u8);
+        v = q;
+    }
+    let out: [..]u8;
+    if (i128_is_neg(a))
+        array_add(&out, '-');
+    let i = digits.len;
+    while (i > 0) {
+        i--;
+        array_add(&out, digits[i]);
+    }
+    array_free(&digits);
+    return out as string;
+}
+
+// does `v` fit in an integer type of `bits` bits?
+pub fn i128_fits(v: I128, bits: i32, signed: bool) -> bool {
+    if (signed) {
+        let limit = i128_shl(i128(1), (bits - 1) as i64);
+        return !i128_lt(v, i128_neg(limit)) && i128_lt(v, limit);
+    }
+    return !i128_is_neg(v) && i128_lt(v, i128_shl(i128(1), bits as i64));
+}
+
+// `v` wrapped into an integer type of `bits` bits, as a C cast does
+pub fn i128_wrap(v: I128, bits: i32, signed: bool) -> I128 {
+    let lo = v.lo;
+    if (bits < 64)
+        lo = lo & (((1 as u64) << bits) - 1);
+    let top = (lo >> (bits - 1)) & 1;
+    if (!signed || top == 0)
+        return i128_u(lo);
+    if (bits < 64)
+        lo = lo | ~(((1 as u64) << bits) - 1); // sign-extended to 64 bits
+    return i128(lo as i64);
+}
+
+pub fn i128_to_i64(a: I128) -> i64 { return a.lo as i64; }
+
+// ---- constants
+
+pub enum ConstKind { None, Int, Float, Bool }
+
+pub struct Const {
+    kind: ConstKind;
+    i: I128;      // Int; Bool as 0 or 1
+    f: f64;       // Float
+}
+
+pub fn int_const(v: I128) -> Const { return .{ .kind = .Int, .i = v }; }
+pub fn bool_const(b: bool) -> Const { return .{ .kind = .Bool, .i = i128(if (b) 1 else 0) }; }
+pub fn float_const(f: f64) -> Const { return .{ .kind = .Float, .f = f }; }
+
+// an integer constant as a float
+pub fn i128_to_f64(a: I128) -> f64 {
+    if (i128_is_neg(a))
+        return -i128_to_f64(i128_neg(a));
+    return (a.hi as f64) * 18446744073709551616.0 + (a.lo as f64);
+}
+
+// a float truncated toward zero (C's cast), for constant casts
+pub fn f64_to_i128(f: f64) -> I128 {
+    if (f < 0.0)
+        return i128_neg(f64_to_i128(-f));
+    let high = f / 18446744073709551616.0;
+    if (high >= 1.0) {
+        let h = high as u64;
+        return .{ .lo = (f - (h as f64) * 18446744073709551616.0) as u64, .hi = h as i64 };
+    }
+    return i128_u(f as u64);
+}
+
+pub fn as_float(c: Const) -> f64 {
+    return if (c.kind == .Float) c.f else i128_to_f64(c.i);
+}

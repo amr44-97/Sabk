@@ -1,0 +1,2 @@
+fn forever(n: i32) #expand { forever(n + 1); }
+fn f() { forever(0); }

@@ -1,0 +1,6 @@
+[error]: `x` is already declared in this struct at [tests/errors/resolve_duplicate_field.smelt:1:20]
+     1 | struct S { x: i32; x: f32; }
+       |                    ^
+[note]: the first declaration is here at [tests/errors/resolve_duplicate_field.smelt:1:12]
+     1 | struct S { x: i32; x: f32; }
+       |            ^

@@ -1,0 +1,32 @@
+// A bit operator or shift next to a different operator needs parentheses:
+// C's order is kept, so no C habit changes meaning, and the spots where C
+// surprises are errors. One error per expression; names are still resolved
+// after them.
+enum E { A, B }
+
+fn mixed(word: u64, k: u64, n: u64, align: u64, a: u64, b: u64, c: u64, e: E, x: bool) {
+    let r1 = word >> 8 * k & 0xFF;
+    let r2 = n + align - 1 & ~(align - 1);
+    let r3 = a | b + c;
+    let r4 = 1 << n + 1;
+    let r5 = a & 7 == 0;
+    let r6 = a & b | c;
+    let r7 = a << 1 >> 2;
+    let r8 = e is .A | 1;
+    let r9 = x && a & 1 == 0 || x;
+}
+
+fn fine(word: u64, k: u64, a: u64, b: u64, c: u64, x: bool) {
+    let r1 = a | b | c;                     // one operator, chained
+    let r2 = ~a & b;                        // prefix operators bind tighter
+    let r3 = (word >> (8 * k)) & 0xFF;
+    let r4 = a + b * c - 1;                 // arithmetic keeps C's order
+    let r5 = a & b as u64;                  // so does `as`
+    let r6 = (a & 7) == 0 && x || !x;       // && and || mix freely
+    switch (a) {
+    case 1 | 2: return;                 // a constant
+    default:
+    }
+}
+
+fn still_resolved() { let s = no_such_name; }

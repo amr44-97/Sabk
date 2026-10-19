@@ -1,0 +1,157 @@
+// Calls of `#format` functions: a format known at compile time must match
+// its values.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/str";
+import "ast";
+import "token";
+import "types";
+import "check";
+
+// One `%{spec}` (the text between the braces), by the rules of std/fmt's
+// parse_format_spec, which this must match: [<>^][+][0][width][.digits]
+// [kind]. Its kind (0 if none), and why it isn't one, if it isn't.
+fn parse_spec(spec: string) -> (u8, string) {
+    let i: isize = 0;
+    if (i < spec.len && (spec[i] == '<' || spec[i] == '>' || spec[i] == '^'))
+        i++;
+    if (i < spec.len && spec[i] == '+')
+        i++;
+    if (i < spec.len && spec[i] == '0')
+        i++;
+    while (i < spec.len && is_digit(spec[i]))
+        i++;
+    if (i < spec.len && spec[i] == '.') {
+        i++;
+        if (i == spec.len || !is_digit(spec[i]))
+            return 0, "a `.` needs the precision's digits after it";
+        while (i < spec.len && is_digit(spec[i]))
+            i++;
+    }
+    let kind: u8 = 0;
+    if (i < spec.len) {
+        if (index_of_char("xXboefc", spec[i]) < 0)
+            return 0, tformat("`%` isn't a kind; the kinds are x X b o (integers), e f (floats) and c (a u8)",
+                              spec[i..i + 1]);
+        kind = spec[i];
+        i++;
+    }
+    if (i != spec.len)
+        return 0, tformat("`%` is left over; the order is [align][+][0][width][.precision][kind]", spec[i..]);
+    return kind, "";
+}
+
+fn is_digit(c: u8) -> bool { return c >= '0' && c <= '9'; }
+
+struct Hole {
+    pos: isize;
+    len: isize;
+    spec: string;
+}
+
+fn plural(n: isize, one: string, many: string) -> string {
+    return tformat("% %", n, if (n == 1) one else many);
+}
+
+// A call of a `#format` function whose format is known at compile time
+// and whose values are written out: the `%`s and the values must match,
+// each `%{spec}` must parse, and its kind must suit its value.
+pub fn check_format_call(c: *Checker, n: *Node, fun: *Node) {
+    let at = fn_params(fun).len - 1; // the ..Any parameter
+    let args = items_of(n);
+    if (at == 0 || args.len <= at || !map_has(&c.packs, args[at]))
+        return; // no values (printed as it is), or `..args` passed on
+    let values = items_of(args[at]);
+    if (values.len == 0)
+        return;
+    let arg = args[at - 1];
+    let literal = ungroup(arg);
+    if ((literal.kind.tag == .Identifier || literal.kind.tag == .Member) && literal.decl != null &&
+        literal.decl.kind is .Const{value} && value != null)
+        literal = value;
+    let quoted = "";
+    switch (literal.kind) {
+    case .String{quoted: text}: quoted = text;
+    default: return; // only known when the program runs
+    }
+    // written right here: errors can point inside it
+    let in_source = literal == arg && quoted.len == 0;
+    let raw = if (quoted.len > 0) quoted else literal.tok.text;
+
+    let holes: [..]Hole;
+    let i: isize = 1;
+    while (i + 1 < raw.len) { // inside the quotes
+        if (raw[i] == '\\') {
+            i += 2; // an escape: not a `%`
+            continue;
+        }
+        if (raw[i] != '%') {
+            i++;
+            continue;
+        }
+        if (raw[i + 1] == '%') {
+            i += 2;
+            continue;
+        }
+        if (raw[i + 1] == '{') {
+            let close = i + 2;
+            while (close < raw.len && raw[close] != '}')
+                close++;
+            if (close >= raw.len - 1) {
+                i++; // `%{` never closed: just text
+                continue;
+            }
+            array_add(&holes, Hole.{ .pos = i, .len = close - i + 1, .spec = raw[i + 2..close] });
+            i = close + 1;
+            continue;
+        }
+        array_add(&holes, Hole.{ .pos = i, .len = 1 });
+        i++;
+    }
+
+    if (values.len < holes.len) {
+        let missing = holes[values.len];
+        error(c, inside(arg, in_source, missing.pos, missing.len),
+              tformat("this `%%` has no value: the format has %, but % given",
+                      plural(holes.len, "`%`", "`%`s"), plural(values.len, "value is", "values are")));
+    } else if (values.len > holes.len) {
+        error(c, values[holes.len].tok, tformat("this value has no `%%` in the format: it has %, for %",
+                                                plural(holes.len, "`%`", "`%`s"), plural(values.len, "value", "values")));
+        note(c, arg.tok, "the format");
+    }
+
+    for (k in 0..holes.len) {
+        let hole = holes[k];
+        if (hole.len == 1)
+            continue;
+        let kind, why = parse_spec(hole.spec);
+        if (why.len > 0) {
+            error(c, inside(arg, in_source, hole.pos, hole.len), tformat("`%%{%}` isn't a format: %", hole.spec, why));
+            continue;
+        }
+        if (kind == 0 || k >= values.len)
+            continue;
+        // the kind must suit the value; inside a struct or array it applies
+        // to the numbers it holds, so those aren't checked
+        let t = values[k].ty;
+        if (t == null || t.kind == .Error)
+            continue;
+        let integer = index_of_char("xXboc", kind) >= 0;
+        let suits = t.kind == .Int || (!integer && t.kind == .Float) || t.kind == .Struct || t.kind == .Union ||
+                    t.kind == .Array || t.kind == .Growable || (t.kind == .Slice && !t.is_string);
+        if (!suits)
+            error(c, inside(arg, in_source, hole.pos, hole.len),
+                  tformat("`%%{%}` formats %, but its value is %", hole.spec,
+                          if (integer) "an integer" else "a number", qt(t)));
+    }
+}
+
+// a token for the literal's raw[pos..pos+len], or the whole argument
+fn inside(arg: *Node, in_source: bool, pos: isize, len: isize) -> Token {
+    let t = arg.tok;
+    if (in_source)
+        t.text = arg.tok.text[pos..pos + len];
+    return t;
+}

@@ -1,0 +1,4 @@
+fn f() {
+    #insert body;
+    let t = #text(body);
+}

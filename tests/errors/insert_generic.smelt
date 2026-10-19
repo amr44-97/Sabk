@@ -1,0 +1,8 @@
+// a generic struct's field defaults can't #insert code yet (generic
+// functions can: their code is made for each instance)
+struct Box($T) {
+    value: T;
+    count: i32 = #insert "1";
+}
+
+fn main() {}

@@ -1,0 +1,6 @@
+fn f() {
+    { let inner = 1; }
+    let x = inner;
+    for (i in 0..3) {}
+    let y = i;
+}

@@ -1,0 +1,115 @@
+MODULE tests/types/control.smelt
+ROOT
+  ENUM `Dir` : Dir
+    ENUM_VARIANT `Up` : Dir = 0
+    ENUM_VARIANT `Down` : Dir = 1
+  FUN_DECL `sign` : fn(i32) -> i32
+    type: TYPE_NAME `i32` -> builtin : i32
+    rhs: BLOCK
+      IF
+        lhs: LT `<` : bool
+          lhs: IDENTIFIER `x` -> FUN_PARAM `x` 3:9 : i32
+          rhs: NUMBER_LITERAL `0` : i32 = 0
+        rhs: RETURN
+          lhs: NEG `-` : i32 = -1
+            lhs: NUMBER_LITERAL `1` : untyped int = 1
+        extra: IF
+          lhs: GT `>` : bool
+            lhs: IDENTIFIER `x` -> FUN_PARAM `x` 3:9 : i32
+            rhs: NUMBER_LITERAL `0` : i32 = 0
+          rhs: RETURN
+            lhs: NUMBER_LITERAL `1` : i32 = 1
+          extra: RETURN
+            lhs: NUMBER_LITERAL `0` : i32 = 0
+    FUN_PARAM `x` : i32
+      type: TYPE_NAME `i32` -> builtin : i32
+  FUN_DECL `forever` : fn() -> i32
+    type: TYPE_NAME `i32` -> builtin : i32
+    rhs: BLOCK
+      WHILE
+        lhs: BOOL_LITERAL `true` : bool = true
+        rhs: BLOCK
+  FUN_DECL `forever2` : fn() -> i32
+    type: TYPE_NAME `i32` -> builtin : i32
+    rhs: BLOCK
+      FOR
+        rhs: BLOCK
+          IF
+            lhs: BOOL_LITERAL `true` : bool = true
+            rhs: CONTINUE
+        (none)
+        (none)
+        (none)
+  FUN_DECL `by_switch` : fn(Dir) -> i32
+    type: TYPE_NAME `i32` -> builtin : i32
+    rhs: BLOCK
+      SWITCH
+        lhs: IDENTIFIER `d` -> FUN_PARAM `d` 12:14 : Dir
+        CASE
+          rhs: BLOCK
+            RETURN
+              lhs: NUMBER_LITERAL `1` : i32 = 1
+          MEMBER `Up` -> ENUM_VARIANT `Up` tests/types/control.smelt:1:12 : Dir = 0
+            lhs: IDENTIFIER `Dir` -> ENUM `Dir` tests/types/control.smelt:1:6 : Dir
+        DEFAULT_CASE
+          rhs: BLOCK
+            RETURN
+              lhs: NUMBER_LITERAL `2` : i32 = 2
+    FUN_PARAM `d` : Dir
+      type: TYPE_NAME `Dir` -> ENUM `Dir` tests/types/control.smelt:1:6 : Dir
+  FUN_DECL `loops` : fn([]f32, *[3]u8)
+    rhs: BLOCK
+      FOR_IN `i` : isize
+        lhs: NUMBER_LITERAL `0` : isize = 0
+        rhs: BLOCK
+        extra: NUMBER_LITERAL `10` : isize = 10
+      VAR_DECL `n` : u64
+        type: TYPE_NAME `u64` -> builtin : u64
+        lhs: NUMBER_LITERAL `4` : u64 = 4
+      FOR_IN `j` : u64
+        lhs: NUMBER_LITERAL `0` : u64 = 0
+        rhs: BLOCK
+        extra: IDENTIFIER `n` -> VAR_DECL `n` 21:9 : u64
+      FOR_IN `x` : f32
+        lhs: IDENTIFIER `items` -> FUN_PARAM `items` 19:10 : []f32
+        rhs: BLOCK
+      FOR_IN `b` : u8
+        lhs: DEREF `*` : [3]u8
+          lhs: IDENTIFIER `grid` -> FUN_PARAM `grid` 19:24 : *[3]u8
+        rhs: BLOCK
+      FOR
+        rhs: BLOCK
+        VAR_DECL `k` : i8
+          type: TYPE_NAME `i8` -> builtin : i8
+          lhs: NUMBER_LITERAL `0` : i8 = 0
+        LT `<` : bool
+          lhs: IDENTIFIER `k` -> VAR_DECL `k` 25:14 : i8
+          rhs: NUMBER_LITERAL `5` : i8 = 5
+        INC `++`
+          lhs: IDENTIFIER `k` -> VAR_DECL `k` 25:14 : i8
+      DO_WHILE
+        lhs: GT `>` : bool
+          lhs: IDENTIFIER `n` -> VAR_DECL `n` 21:9 : u64
+          rhs: NUMBER_LITERAL `0` : u64 = 0
+        rhs: BLOCK
+          ASSIGN `-=`
+            lhs: IDENTIFIER `n` -> VAR_DECL `n` 21:9 : u64
+            rhs: NUMBER_LITERAL `1` : u64 = 1
+      SWITCH
+        lhs: IDENTIFIER `n` -> VAR_DECL `n` 21:9 : u64
+        CASE
+          rhs: BLOCK
+            BREAK
+          NUMBER_LITERAL `1` : u64 = 1
+          NUMBER_LITERAL `2` : u64 = 2
+          NUMBER_LITERAL `3` : u64 = 3
+        DEFAULT_CASE
+          rhs: BLOCK
+    FUN_PARAM `items` : []f32
+      type: TYPE_SLICE `[` : []f32
+        lhs: TYPE_NAME `f32` -> builtin : f32
+    FUN_PARAM `grid` : *[3]u8
+      type: TYPE_PTR `*` : *[3]u8
+        lhs: TYPE_ARRAY `[` : [3]u8
+          lhs: TYPE_NAME `u8` -> builtin : u8
+          rhs: NUMBER_LITERAL `3` : untyped int = 3

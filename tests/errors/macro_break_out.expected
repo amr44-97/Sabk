@@ -1,0 +1,6 @@
+[error]: `break` can't leave the `#expand` function it's in at [tests/errors/macro_break_out.smelt:1:21]
+     1 | fn stop() #expand { break; }
+       |                     ^
+[note]: in the expansion of `stop` here at [tests/errors/macro_break_out.smelt:3:20]
+     3 |     while (true) { stop(); }
+       |                    ^

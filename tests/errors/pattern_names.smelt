@@ -1,0 +1,21 @@
+// where `is` can name a variant's value, and what labels can name
+enum Shape { Circle(f64), Dot }
+
+fn names(s: Shape, n: i32) {
+    let a = s is .Circle(r);              // names only in an if or while
+    if (s is .Circle(r) || n > 0) {}      // ... joined with &&
+}
+
+fn labels(n: i32) {
+    outer: for (i in 0..3) {
+        outer: for (j in 0..3) {}         // the same name inside
+        break nowhere;                    // no such label
+        continue outer = 1;               // a loop takes no value
+    }
+    state: switch (n) {
+    case 0: continue state;               // a switch needs its next value
+    default:
+    }
+}
+
+fn main() {}

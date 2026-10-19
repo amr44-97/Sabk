@@ -9,6 +9,10 @@ build/smelt: $(wildcard src/*.smelt)
 test: build/smelt
 	@tests/run.sh
 
+# unit tests of single modules, checked against Python
+unit:
+	@$(SMELT) --run tests/unit/i128_test.smelt | python3 tests/unit/i128_check.py
+
 # --tokens and --ast on every .smelt file in ../the-compiler, against stage 0's
 compare: build/smelt
 	@tests/compare.sh
@@ -16,4 +20,4 @@ compare: build/smelt
 clean:
 	rm -rf build
 
-.PHONY: test compare clean
+.PHONY: test unit compare clean

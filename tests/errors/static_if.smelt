@@ -1,0 +1,5 @@
+fn pick(x: $T) -> i32 {
+    #if (T == 4) return 3;                // a type against a value
+    #if (T == i32) return x; else return mispelled;   // names checked in both
+    return 0;
+}

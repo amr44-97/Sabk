@@ -1,0 +1,21 @@
+[error]: `is` can only name a variant's value in an `if` or `while` condition (joined with `&&`), where it's known to match at [tests/errors/pattern_names.smelt:5:26]
+     5 |     let a = s is .Circle(r);              // names only in an if or while
+       |                          ^
+[error]: `is` can only name a variant's value in an `if` or `while` condition (joined with `&&`), where it's known to match at [tests/errors/pattern_names.smelt:6:22]
+     6 |     if (s is .Circle(r) || n > 0) {}      // ... joined with &&
+       |                      ^
+[error]: a loop, switch or block around this one is already named `outer` at [tests/errors/pattern_names.smelt:11:9]
+    11 |         outer: for (j in 0..3) {}         // the same name inside
+       |         ^
+[note]: it's named here at [tests/errors/pattern_names.smelt:10:5]
+    10 |     outer: for (i in 0..3) {
+       |     ^
+[error]: there's no loop, switch or block named `nowhere` around this at [tests/errors/pattern_names.smelt:12:15]
+    12 |         break nowhere;                    // no such label
+       |               ^
+[error]: `outer` is a loop: only a labeled switch takes a value with `continue` at [tests/errors/pattern_names.smelt:13:26]
+    13 |         continue outer = 1;               // a loop takes no value
+       |                          ^
+[error]: `continue state` runs the switch again, so it needs the next value: `continue state = value;` at [tests/errors/pattern_names.smelt:16:13]
+    16 |     case 0: continue state;               // a switch needs its next value
+       |             ^

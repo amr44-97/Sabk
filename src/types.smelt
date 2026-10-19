@@ -1,0 +1,268 @@
+// Types. They're interned: two types are the same exactly when their
+// pointers are equal.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/mem";
+import "std/str";
+import "ast";
+
+pub enum TypeKind {
+    Error,          // an expression that already failed to check; never reported twice
+    Void,
+    Bool,
+    Int,
+    Float,
+    Rawptr,         // *void
+    Ptr,
+    Array,
+    Slice,
+    Growable,       // [..]T: {ptr, len, cap, allocator}; its first two fields are a []T
+    Fn,
+    Struct,
+    Union,
+    Enum,
+    // the types of literals before they meet a concrete type
+    Null,
+    UntypedInt,
+    UntypedFloat,
+    UntypedString,
+    // a generic function used as a value, before a function type picks its
+    // instance
+    GenericFn,
+}
+
+pub struct Field {
+    name: string;
+    ty: *Type;
+    decl: *Node;
+    offset: u64;
+}
+
+pub struct Type {
+    kind: TypeKind;
+    name: string;           // builtins, structs, unions and enums
+    bits: i32;              // Int, Float
+    is_signed: bool;        // Int
+    elem: *Type;            // Ptr, Array, Slice, Growable; Enum: its backing integer
+    len: u64;               // Array
+    params: []*Type;        // Fn
+    ret: *Type;             // Fn
+    is_variadic: bool;
+    decl: *Node;            // Struct, Union, Enum
+    // a tagged enum (an enum whose variants hold values) is a Struct of
+    // `tag` (an Enum) and `payload` (a Union of the variants' values). Those
+    // two, and a variant's struct of fields, are parts of it: their decl is
+    // the enum's, and `part` names them ("Tag", "Payload", "variant_Binary")
+    is_tagged: bool;
+    part: string;
+    is_string: bool;        // `string`: a Slice of u8 that's its own type
+    // a function's several results, `(i64, bool)`: a Struct of fields _0,
+    // _1, ... with no decl. It's only a call's type: the values are taken
+    // apart right away, never stored or passed as one
+    is_tuple: bool;
+    is_failure: bool;       // the prelude's `Error`
+    fields: [..]Field;      // Struct, Union
+
+    // layout, computed by the checker on demand
+    layout_state: i32;      // 0: not computed, 1: in progress, 2: done
+    size: u64;
+    align: u64 = 1;
+}
+
+struct ArrayKey { elem: *Type; len: u64; }
+
+pub struct Types {
+    error: *Type;
+    void_: *Type;
+    bool_: *Type;
+    i8: *Type; i16: *Type; i32: *Type; i64: *Type; isize: *Type;
+    u8: *Type; u16: *Type; u32: *Type; u64: *Type; usize: *Type;
+    f32: *Type; f64: *Type;
+    rawptr: *Type;          // `*void`, any pointer
+    string_: *Type;         // laid out like []u8, but a type of its own
+    null_: *Type;
+    untyped_int: *Type;
+    untyped_float: *Type;
+    untyped_string: *Type;
+    generic_fn: *Type;
+    by_name: Map(string, *Type); // the builtin type names
+
+    ptrs: Map(*Type, *Type);
+    slices: Map(*Type, *Type);
+    growables: Map(*Type, *Type);
+    arrays: Map(ArrayKey, *Type);
+    fns: [..]*Type;
+    tuples: Map([]*Type, *Type);
+}
+
+fn make(kind: TypeKind, name: string = "") -> *Type {
+    let t = new(Type);
+    t.kind = kind;
+    t.name = name;
+    return t;
+}
+
+pub fn make_types() -> Types {
+    let ts: Types;
+    ts.error = make(.Error, "<error>");
+    ts.void_ = fn_named(&ts, .Void, "void");
+    ts.bool_ = fn_named(&ts, .Bool, "bool");
+    ts.i8 = int_type(&ts, "i8", 8, true);
+    ts.i16 = int_type(&ts, "i16", 16, true);
+    ts.i32 = int_type(&ts, "i32", 32, true);
+    ts.i64 = int_type(&ts, "i64", 64, true);
+    ts.isize = int_type(&ts, "isize", 64, true);
+    ts.u8 = int_type(&ts, "u8", 8, false);
+    ts.u16 = int_type(&ts, "u16", 16, false);
+    ts.u32 = int_type(&ts, "u32", 32, false);
+    ts.u64 = int_type(&ts, "u64", 64, false);
+    ts.usize = int_type(&ts, "usize", 64, false);
+    ts.f32 = fn_named(&ts, .Float, "f32");
+    ts.f32.bits = 32;
+    ts.f64 = fn_named(&ts, .Float, "f64");
+    ts.f64.bits = 64;
+    ts.rawptr = make(.Rawptr, "*void"); // the untyped pointer, C's void *
+    ts.string_ = fn_named(&ts, .Slice, "string");
+    ts.string_.elem = ts.u8;
+    ts.string_.is_string = true;
+    ts.null_ = make(.Null, "null");
+    ts.untyped_int = make(.UntypedInt, "untyped int");
+    ts.untyped_float = make(.UntypedFloat, "untyped float");
+    ts.untyped_string = make(.UntypedString, "untyped string");
+    ts.generic_fn = make(.GenericFn, "generic function");
+    return ts;
+}
+
+fn fn_named(ts: *Types, kind: TypeKind, name: string) -> *Type {
+    let t = make(kind, name);
+    map_put(&ts.by_name, name, t);
+    return t;
+}
+
+fn int_type(ts: *Types, name: string, bits: i32, signed: bool) -> *Type {
+    let t = fn_named(ts, .Int, name);
+    t.bits = bits;
+    t.is_signed = signed;
+    return t;
+}
+
+pub fn ptr_to(ts: *Types, elem: *Type) -> *Type {
+    if (elem.kind == .Void) // *void, also as *T with T = void
+        return ts.rawptr;
+    let found = map_get(&ts.ptrs, elem) or_else null;
+    if (found != null)
+        return found;
+    let t = make(.Ptr);
+    t.elem = elem;
+    map_put(&ts.ptrs, elem, t);
+    return t;
+}
+
+pub fn slice_of(ts: *Types, elem: *Type) -> *Type {
+    let found = map_get(&ts.slices, elem) or_else null;
+    if (found != null)
+        return found;
+    let t = make(.Slice);
+    t.elem = elem;
+    map_put(&ts.slices, elem, t);
+    return t;
+}
+
+pub fn growable_of(ts: *Types, elem: *Type) -> *Type {
+    let found = map_get(&ts.growables, elem) or_else null;
+    if (found != null)
+        return found;
+    let t = make(.Growable);
+    t.elem = elem;
+    map_put(&ts.growables, elem, t);
+    return t;
+}
+
+pub fn array_type_of(ts: *Types, elem: *Type, len: u64) -> *Type {
+    let key = ArrayKey.{ .elem = elem, .len = len };
+    let found = map_get(&ts.arrays, key) or_else null;
+    if (found != null)
+        return found;
+    let t = make(.Array);
+    t.elem = elem;
+    t.len = len;
+    map_put(&ts.arrays, key, t);
+    return t;
+}
+
+pub fn fn_type(ts: *Types, params: []*Type, ret: *Type, is_variadic: bool) -> *Type {
+    for (t in ts.fns)
+        if (same_types(t.params, params) && t.ret == ret && t.is_variadic == is_variadic)
+            return t;
+    let t = make(.Fn);
+    t.params = clone_slice(params);
+    t.ret = ret;
+    t.is_variadic = is_variadic;
+    array_add(&ts.fns, t);
+    return t;
+}
+
+fn same_types(a: []*Type, b: []*Type) -> bool {
+    if (a.len != b.len)
+        return false;
+    for (i in 0..a.len)
+        if (a[i] != b[i])
+            return false;
+    return true;
+}
+
+pub fn tuple_of(ts: *Types, elems: []*Type) -> *Type {
+    let found = map_get(&ts.tuples, elems) or_else null;
+    if (found != null)
+        return found;
+    let t = make(.Struct);
+    t.is_tuple = true;
+    let name: [..]u8;
+    array_add(&name, '(');
+    for (i in 0..elems.len) {
+        array_add(&t.fields, Field.{ .name = tformat("_%", i), .ty = elems[i] });
+        if (i > 0)
+            append_string(&name, ", ");
+        append_string(&name, type_name(elems[i]));
+    }
+    array_add(&name, ')');
+    t.name = name as string;
+    map_put(&ts.tuples, clone_slice(elems), t);
+    return t;
+}
+
+pub fn type_name(t: *Type) -> string {
+    switch (t.kind) {
+    case .Ptr: return tformat("*%", type_name(t.elem));
+    case .Slice: return if (t.is_string) "string" else tformat("[]%", type_name(t.elem));
+    case .Growable: return tformat("[..]%", type_name(t.elem));
+    case .Array: return tformat("[%]%", t.len, type_name(t.elem));
+    case .Fn:
+        let s: [..]u8;
+        append_string(&s, "fn(");
+        for (i in 0..t.params.len) {
+            if (i > 0)
+                append_string(&s, ", ");
+            append_string(&s, type_name(t.params[i]));
+        }
+        if (t.is_variadic)
+            append_string(&s, if (t.params.len == 0) "..." else ", ...");
+        array_add(&s, ')');
+        if (t.ret.kind != .Void)
+            print_to(&s, " -> %", type_name(t.ret));
+        return s as string;
+    default:
+        return t.name;
+    }
+}
+
+pub fn is_untyped(t: *Type) -> bool {
+    return t.kind == .UntypedInt || t.kind == .UntypedFloat ||
+           t.kind == .UntypedString || t.kind == .Null;
+}
+pub fn is_int_like(t: *Type) -> bool { return t.kind == .Int || t.kind == .UntypedInt; }
+pub fn is_numeric(t: *Type) -> bool {
+    return t.kind == .Int || t.kind == .Float || t.kind == .UntypedInt || t.kind == .UntypedFloat;
+}

@@ -1,0 +1,4 @@
+pub fn shared() {}
+pub fn only_left() {}
+pub struct Shape {}
+fn private_one() {}

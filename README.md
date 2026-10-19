@@ -7,14 +7,18 @@ It's a redesign as well as a port: the inside (tokens, the syntax tree,
 the dumps) may change, while what users see stays the same: programs'
 output, error messages, and the command line. `#run` keeps the bytecode VM.
 
-Done so far: the lexer (`smelt --tokens file`) and the parser (`smelt --ast
-file`).
+Done so far: the lexer (`smelt --tokens file`), the parser (`smelt --ast
+file`), the resolver (`smelt --resolve file`), which loads the imports,
+links names to their declarations and expands macros, and the type checker
+(`smelt --types file`), except for running `#run` (it needs the VM, not
+ported yet) and the memory warnings (escaping memory, memory traps).
+`std` is a link to `../the-compiler/std` for now.
 
 ```
 make            build build/smelt with ../the-compiler/smelt (SMELT=...)
 make test       the golden tests in tests/
-make compare    --tokens and --ast on every .smelt file in ../the-compiler,
-                against the C++ compiler's
+make compare    --tokens, --ast, --resolve and --types on every .smelt
+                file in ../the-compiler, against the C++ compiler's
 ```
 
 ## Layout
@@ -27,6 +31,18 @@ make compare    --tokens and --ast on every .smelt file in ../the-compiler,
 | `src/lexer.smelt` | text to tokens; number values |
 | `src/ast.smelt` | the syntax tree's nodes, and the `--ast` dump |
 | `src/parser.smelt` | tokens to a syntax tree |
+| `src/module.smelt` | modules, and the prelude (`src/prelude.smelt`, baked in by `#run`) |
+| `src/resolve.smelt` | loading imports, linking names, expanding macros |
+| `src/const.smelt` | compile-time values: 128-bit integers, floats, bools |
+| `src/types.smelt` | types, interned |
+| `src/check.smelt` | the type checker: declarations, types, layout, reporting |
+| `src/statements.smelt` | statements, and several results |
+| `src/patterns.smelt` | patterns, `switch`, `is`, and which values cases cover |
+| `src/expressions.smelt` | conversions and expressions |
+| `src/generics.smelt` | instances, indexing, literals, casts |
+| `src/comptime.smelt` | `#run`, `#insert` and `#if` conditions, type info, defaults |
+| `src/formats.smelt` | checking `#format` calls |
+| `src/memory.smelt` | memory warnings (not ported yet) |
 
 ## Differences from the C++ compiler
 
@@ -39,6 +55,19 @@ make compare    --tokens and --ast on every .smelt file in ../the-compiler,
   then, else_}`), instead of one struct with `lhs`, `rhs`, `extra`, `list`
   and flags. `--ast` still prints the old layout, mapping the parts back,
   so the two parsers can be compared.
+- Copying and walking a tree go through `NodeKind`'s type information (a
+  variant's `*Node` and `[]*Node` parts are its children), so a new kind
+  of node needs no code there.
+- A macro's labels get its color like its names do: the C++ resolver left
+  them uncolored, so a macro's `outer:` clashed with its caller's
+  (tests/resolve/macro_labels.smelt).
+- Constants are 128-bit (`I128`, two 64-bit halves) where the C++ used
+  `__int128`.
+- A tagged enum's value made by the checker is a `VariantValue` node.
+- Until the VM is ported, a `#run` whose value isn't already known is an
+  error. `make compare` shows the files that need one (6 for `--resolve`,
+  59 for `--types`, plus two build scripts); the escaping-memory and
+  memory-trap checks are the other differences.
 - Float constants are `f64`, not `long double`: `1e400` reads as `inf`
   (the C++ lexer kept `1e+400`). A literal out of `f64`'s range should be
   an error, once there's a parser to report it.

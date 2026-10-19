@@ -1,0 +1,7 @@
+import "lib/left" as l;
+import "lib/right";
+
+fn f() {
+    only_left();              // `as` imports are not flattened
+    private_one();            // private names are never visible
+}

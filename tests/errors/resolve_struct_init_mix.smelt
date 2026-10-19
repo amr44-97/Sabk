@@ -1,0 +1,2 @@
+struct P { x: i32; y: i32; }
+fn f() { let p = P.{ .x = 1, 2 }; }

@@ -1,0 +1,12 @@
+[error]: a backtick declaration only works in an `#expand` function that doesn't return a value at [tests/errors/macro_caller_decls.smelt:2:10]
+     2 |     `let leaked = 1;
+       |          ^
+[note]: in the expansion of `value` here at [tests/errors/macro_caller_decls.smelt:9:13]
+     9 |     let v = value();
+       |             ^
+[error]: a backtick `defer` must be at the top level of the `#expand` function at [tests/errors/macro_caller_decls.smelt:6:18]
+     6 |     if (true) { `defer f(); }
+       |                  ^
+[note]: in the expansion of `nested` here at [tests/errors/macro_caller_decls.smelt:10:5]
+    10 |     nested();
+       |     ^

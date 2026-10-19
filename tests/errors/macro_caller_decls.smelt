@@ -1,0 +1,11 @@
+fn value() -> i32 #expand {
+    `let leaked = 1;
+    return 1;
+}
+fn nested() #expand {
+    if (true) { `defer f(); }
+}
+fn f() {
+    let v = value();
+    nested();
+}

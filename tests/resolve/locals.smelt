@@ -1,0 +1,18 @@
+const X = 1;
+
+fn f(a: i32, b: *i32) -> i32 {
+    let x = X + a;
+    {
+        let x = x * 2;
+        let y: i32 = x;
+    }
+    for (i in 0..a) { x += i; }
+    for (let j = 0; j < x; j++) { if (j == 2) break; else continue; }
+    switch (x) { case 1: break; default: x = b.*; }
+    defer x = 0;
+    while (x > 0) { defer g(x); x--; }
+    return x;
+}
+fn g(v: i32) {}
+
+enum E { A, B = A + 1, C = B * 2 }

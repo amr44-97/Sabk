@@ -1,0 +1,3 @@
+import "left";           // not passed on to whoever imports right
+pub fn shared() {}
+pub struct Shape {}

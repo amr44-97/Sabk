@@ -1,0 +1,41 @@
+MODULE tests/resolve/macros.smelt
+ROOT
+  MACRO_DECL `add_to_total`
+    rhs: BLOCK
+      VAR_DECL `tmp`
+        lhs: MUL `*`
+          lhs: IDENTIFIER `n`
+          rhs: NUMBER_LITERAL `2`
+      ASSIGN `+=`
+        lhs: IDENTIFIER `total` [caller]
+        rhs: IDENTIFIER `tmp`
+      VAR_DECL `added` [caller]
+        lhs: IDENTIFIER `tmp`
+    FUN_PARAM `n`
+      type: TYPE_NAME `i32`
+  FUN_DECL `f`
+    rhs: BLOCK
+      VAR_DECL `total`
+        lhs: NUMBER_LITERAL `0`
+      VAR_DECL `tmp`
+        lhs: NUMBER_LITERAL `10`
+      EXPR_STMT `add_to_total`
+        lhs: MACRO_EXPANSION `add_to_total` [expansion 1] -> MACRO_DECL `add_to_total` tests/resolve/macros.smelt:2:4
+          lhs: IDENTIFIER `add_to_total` -> MACRO_DECL `add_to_total` tests/resolve/macros.smelt:2:4
+          VAR_DECL `n` [macro 1]
+            type: TYPE_NAME `i32` [macro 1] -> builtin
+            lhs: IDENTIFIER `tmp` -> VAR_DECL `tmp` 10:9
+          VAR_DECL `tmp` [macro 1]
+            lhs: MUL `*` [macro 1]
+              lhs: IDENTIFIER `n` [macro 1] -> VAR_DECL `n` 2:17
+              rhs: NUMBER_LITERAL `2` [macro 1]
+          ASSIGN `+=` [macro 1]
+            lhs: IDENTIFIER `total` [caller] [macro 1] -> VAR_DECL `total` 9:9
+            rhs: IDENTIFIER `tmp` [macro 1] -> VAR_DECL `tmp` 3:9
+          VAR_DECL `added` [caller] [macro 1]
+            lhs: IDENTIFIER `tmp` [macro 1] -> VAR_DECL `tmp` 3:9
+      ASSIGN `+=`
+        lhs: IDENTIFIER `total` -> VAR_DECL `total` 9:9
+        rhs: ADD `+`
+          lhs: IDENTIFIER `added` -> VAR_DECL `added` 5:10
+          rhs: IDENTIFIER `tmp` -> VAR_DECL `tmp` 10:9

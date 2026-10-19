@@ -1,0 +1,83 @@
+MODULE tests/types/generics.smelt
+ROOT
+  FUN_DECL `max` [generic]
+    type: TYPE_NAME `T` -> TYPE_PARAM `T` 1:12
+    rhs: BLOCK
+      IF
+        lhs: GT `>`
+          lhs: IDENTIFIER `a` -> FUN_PARAM `a` 1:8
+          rhs: IDENTIFIER `b` -> FUN_PARAM `b` 1:15
+        rhs: RETURN
+          lhs: IDENTIFIER `a` -> FUN_PARAM `a` 1:8
+      RETURN
+        lhs: IDENTIFIER `b` -> FUN_PARAM `b` 1:15
+    FUN_PARAM `a`
+      type: TYPE_PARAM `T`
+    FUN_PARAM `b`
+      type: TYPE_NAME `T` -> TYPE_PARAM `T` 1:12
+  STRUCT `Box` [generic]
+    STRUCT_FIELD `value`
+      type: TYPE_NAME `T` -> TYPE_PARAM `T` 2:13
+    type_param: TYPE_PARAM `T`
+  FUN_DECL `wrap` [generic]
+    type: TYPE_NAME `Box` -> STRUCT `Box` tests/types/generics.smelt:2:8
+      TYPE_NAME `T` -> TYPE_PARAM `T` 3:13
+    rhs: BLOCK
+      RETURN
+        lhs: STRUCT_INIT
+          type: TYPE_NAME `Box` -> STRUCT `Box` tests/types/generics.smelt:2:8
+            TYPE_NAME `T` -> TYPE_PARAM `T` 3:13
+          FIELD_INIT `value`
+            rhs: IDENTIFIER `x` -> FUN_PARAM `x` 3:9
+    FUN_PARAM `x`
+      type: TYPE_PARAM `T`
+  FUN_DECL `f` : fn()
+    rhs: BLOCK
+      VAR_DECL `small` : u8
+        type: TYPE_NAME `u8` -> builtin : u8
+        lhs: NUMBER_LITERAL `7` : u8 = 7
+      VAR_DECL `a` : u8
+        lhs: CALL `(` -> FUN_DECL `max` tests/types/generics.smelt:1:4 : u8
+          lhs: IDENTIFIER `max` -> FUN_DECL `max` tests/types/generics.smelt:1:4 : fn(u8, u8) -> u8
+          IDENTIFIER `small` -> VAR_DECL `small` 5:9 : u8
+          SUB `-` : u8 = 200
+            lhs: NUMBER_LITERAL `300` : untyped int = 300
+            rhs: NUMBER_LITERAL `100` : untyped int = 100
+      VAR_DECL `b` : Box(f64)
+        lhs: CALL `(` -> FUN_DECL `wrap` tests/types/generics.smelt:3:4 : Box(f64)
+          lhs: IDENTIFIER `wrap` -> FUN_DECL `wrap` tests/types/generics.smelt:3:4 : fn(f64) -> Box(f64)
+          FLOAT_LITERAL `1.5` : f64 = 1.5
+INSTANCE `max` with T = u8
+FUN_DECL `max` : fn(u8, u8) -> u8
+  type: TYPE_NAME `T` -> TYPE_PARAM `T` 1:12 : u8
+  rhs: BLOCK
+    IF
+      lhs: GT `>` : bool
+        lhs: IDENTIFIER `a` -> FUN_PARAM `a` 1:8 : u8
+        rhs: IDENTIFIER `b` -> FUN_PARAM `b` 1:15 : u8
+      rhs: RETURN
+        lhs: IDENTIFIER `a` -> FUN_PARAM `a` 1:8 : u8
+    RETURN
+      lhs: IDENTIFIER `b` -> FUN_PARAM `b` 1:15 : u8
+  FUN_PARAM `a` : u8
+    type: TYPE_PARAM `T` : u8
+  FUN_PARAM `b` : u8
+    type: TYPE_NAME `T` -> TYPE_PARAM `T` 1:12 : u8
+INSTANCE `wrap` with T = f64
+FUN_DECL `wrap` : fn(f64) -> Box(f64)
+  type: TYPE_NAME `Box` -> STRUCT `Box` tests/types/generics.smelt:2:8 : Box(f64)
+    TYPE_NAME `T` -> TYPE_PARAM `T` 3:13 : f64
+  rhs: BLOCK
+    RETURN
+      lhs: STRUCT_INIT : Box(f64)
+        type: TYPE_NAME `Box` -> STRUCT `Box` tests/types/generics.smelt:2:8 : Box(f64)
+          TYPE_NAME `T` -> TYPE_PARAM `T` 3:13 : f64
+        FIELD_INIT `value`
+          rhs: IDENTIFIER `x` -> FUN_PARAM `x` 3:9 : f64
+  FUN_PARAM `x` : f64
+    type: TYPE_PARAM `T` : f64
+INSTANCE `Box(f64)`
+STRUCT `Box` : Box(f64)
+  STRUCT_FIELD `value` : f64
+    type: TYPE_NAME `T` -> TYPE_PARAM `T` 2:13 : f64
+  type_param: TYPE_PARAM `T` : f64

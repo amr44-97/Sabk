@@ -1,0 +1,22 @@
+struct Padded { a: u8; b: i32; c: u8; }        // 12 bytes, align 4
+struct Nested { p: Padded; d: f64; }           // 24 bytes
+union Bits { byte: u8; wide: f64; }            // 8 bytes
+struct List { value: i32; next: *List; }       // a pointer to itself is fine
+struct Def { x: i32 = 7; y: f32; }
+
+const SIZES = usize.[
+    sizeof(Padded), sizeof(Nested), sizeof(Bits), sizeof([]u8),
+    sizeof([3]u16), sizeof(*List), sizeof(bool), sizeof(List),
+];
+
+fn f(l: *List, items: []i32, fixed: [3]u8) -> i32 {
+    let n = l.next.next.value;      // pointers are followed automatically
+    let d = Def.{ .y = 1.0 };
+    let pos = Def.{ 1, 2.0 };
+    let b = Bits.{ .wide = 0.5 };
+    l.value = items.len as i32;
+    let first = items.ptr;
+    let count = fixed.len;
+    let x = fixed[2];
+    return n + d.x;
+}

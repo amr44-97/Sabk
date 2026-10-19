@@ -1,0 +1,3 @@
+fn wrong_return(x: i32) -> $T { return x; }
+struct S { field: $T; }
+fn body(x: $T) { let y: $U = x; }

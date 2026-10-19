@@ -1,0 +1,10 @@
+import "std/mem";
+import "../resolve/lib/util";
+
+fn f() -> i32 {
+    let p = mem.alloc(16);
+    let pair = mem.Pair.{ .a = util.LIMIT, .b = 2 };
+    let c = util.Color.Green;
+    let arr: [util.LIMIT]u8;
+    return util.helper() + pair.a;
+}

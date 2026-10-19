@@ -1,0 +1,2 @@
+fn m(body: Code) #expand { let copy = body; }
+fn f() { m(1 + 2); }

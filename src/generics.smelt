@@ -1,0 +1,1095 @@
+// The checker's generics (instances and inferring their types), indexing
+// and slicing, literals, and casts.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/mem";
+import "std/str";
+import "ast";
+import "const";
+import "resolve";
+import "token";
+import "types";
+import "check";
+import "expressions";
+
+/* --------------------------------------------------------------- generics */
+
+// a type a type parameter could be, and the argument it came from (null
+// when it's found inside another type: nothing converts it)
+pub struct Candidate {
+    t: *Type;
+    arg: *Node;
+}
+
+pub struct Candidates {
+    of: Map(*Node, [..]Candidate);
+}
+
+fn add_candidate(found: *Candidates, tp: *Node, t: *Type, arg: *Node) {
+    let list = map_find(&found.of, tp);
+    if (list == null) {
+        let none: [..]Candidate;
+        map_put(&found.of, tp, none);
+        list = map_find(&found.of, tp);
+    }
+    array_add(list, Candidate.{ .t = t, .arg = arg });
+}
+
+fn candidates_of(found: *Candidates, tp: *Node) -> []Candidate {
+    let list = map_find(&found.of, tp);
+    if (list == null)
+        return .[];
+    return list.*;
+}
+
+// the type arguments a type name gives: List(i32)
+fn type_args(n: *Node) -> []*Node {
+    switch (n.kind) {
+    case .TypeName{args}: return args;
+    case .TypeMember{args}: return args;
+    default: return .[];
+    }
+}
+
+// a plain `T`: a name of a type parameter
+fn names_type_param(p: *Node) -> bool {
+    return (p.kind.tag == .TypeName || p.kind.tag == .TypeMember) && p.decl != null &&
+           p.decl.kind.tag == .TypeParam;
+}
+
+// Matches a parameter's type against an argument's type and records what
+// each type parameter would have to be: `[]$T` against `[]f32` says T = f32.
+fn infer(c: *Checker, pattern: *Node, actual_type: *Type, arg: *Node, found: *Candidates) {
+    if (pattern.kind.tag == .TypeParam) {
+        add_candidate(found, pattern, actual_type, arg);
+        return;
+    }
+    if (names_type_param(pattern)) {
+        add_candidate(found, pattern.decl, actual_type, arg); // a plain `T`
+        return;
+    }
+    let actual = actual_type;
+    if (actual.kind == .UntypedString)
+        actual = c.types.string_;
+    switch (pattern.kind) {
+    case .TypeName, .TypeMember:
+        // List($T) against List(i32)
+        let args = type_args(pattern);
+        if (args.len > 0 && (actual.kind == .Struct || actual.kind == .Union) &&
+            actual.decl.generic == pattern.decl)
+            for (i in 0..args.len)
+                infer(c, args[i], actual.decl.instance_args[i], null, found);
+    case .TypePointer{to}:
+        if (actual.kind == .Ptr)
+            infer(c, to, actual.elem, null, found);
+    case .TypeSlice{elem}: // an array or a growable array too
+        if (actual.kind == .Slice || actual.kind == .Array || actual.kind == .Growable)
+            infer(c, elem, actual.elem, null, found);
+        else if (actual.kind == .Ptr && actual.elem.kind == .Array)
+            infer(c, elem, actual.elem.elem, null, found); // &array
+    case .TypeArray{elem}:
+        if (actual.kind == .Array)
+            infer(c, elem, actual.elem, null, found);
+    case .TypeGrowable{elem}:
+        if (actual.kind == .Growable)
+            infer(c, elem, actual.elem, null, found);
+    case .TypeTuple{items}:
+        // the actual results leave out void ones, so a plain `T` with more
+        // of the pattern left than results is void: `($T, IoError)` against
+        // `IoError` says T = void
+        let got: [..]*Type;
+        if (actual.is_tuple) {
+            for (f in actual.fields)
+                array_add(&got, f.ty);
+        } else if (actual.kind != .Void) {
+            array_add(&got, actual);
+        }
+        let j = 0;
+        for (i in 0..items.len) {
+            let p = items[i];
+            let plain = p.kind.tag == .TypeParam || (names_type_param(p) && type_args(p).len == 0);
+            if (plain && items.len - i > got.len - j) {
+                infer(c, p, c.types.void_, null, found);
+            } else if (j < got.len) {
+                infer(c, p, got[j], null, found);
+                j++;
+            }
+        }
+    case .TypeFn{params, result}:
+        if (actual.kind == .Fn && actual.params.len == params.len) {
+            for (i in 0..params.len)
+                infer(c, params[i], actual.params[i], null, found);
+            if (result != null)
+                infer(c, result, actual.ret, null, found);
+        }
+    default:
+    }
+}
+
+// Picks the type of type parameter `tp`: the typed values found for it
+// agree with each other the way `a + b` does; then the context's type, if
+// it has one; untyped constants only decide when nothing else does. Returns
+// null when nothing says, without an error, and on a conflict, with one.
+fn choose_type(c: *Checker, tp: *Node, found: *Candidates, from_context: *Candidates, where: string) -> *Type {
+    let values = candidates_of(found, tp);
+    // A type found inside another one (T in *List(T)) has no `arg`:
+    // nothing converts it, so it decides, and the values must convert to it
+    let exact: *Type = null;
+    for (v in values)
+        if (v.arg == null && exact == null)
+            exact = v.t;
+    if (exact != null) {
+        for (v in values) {
+            if (v.t != exact && v.t.kind != .Error && exact.kind != .Error &&
+                !(v.arg != null && can_coerce(c, v.arg, v.t, exact))) {
+                error(c, if (v.arg != null) v.arg.tok else tp.tok,
+                      tformat("`%` can't be both % and % in %", tp.tok.text, qt(exact), qt(v.t), where));
+                return c.types.error;
+            }
+        }
+        return exact;
+    }
+    let chosen: *Type = null;
+    let untyped: *Type = null;
+    let untyped_arg: *Node = null;
+    for (v in values) {
+        if (is_untyped(v.t)) {
+            if (untyped == null || v.t.kind == .UntypedFloat) {
+                untyped = v.t;
+                untyped_arg = v.arg;
+            }
+            continue;
+        }
+        if (chosen == null || v.t == chosen || can_coerce(c, v.arg, v.t, chosen)) {
+            if (chosen == null)
+                chosen = v.t;
+        } else if (can_coerce(c, v.arg, chosen, v.t)) {
+            chosen = v.t;
+        } else {
+            error(c, if (v.arg != null) v.arg.tok else tp.tok,
+                  tformat("`%` can't be both % and % in %", tp.tok.text, qt(chosen), qt(v.t), where));
+            return c.types.error;
+        }
+    }
+    if (chosen != null)
+        return chosen;
+    let said = candidates_of(from_context, tp);
+    if (said.len > 0)
+        return said[0].t;
+    if (untyped != null) {
+        if (untyped.kind == .Null) {
+            error(c, untyped_arg.tok, tformat("can't tell what `%` is from `null` in %", tp.tok.text, where));
+            return c.types.error;
+        }
+        return switch (untyped.kind) {
+        case .UntypedInt: c.types.isize;
+        case .UntypedFloat: c.types.f64;
+        default: c.types.string_;
+        };
+    }
+    return null;
+}
+
+// the type parameters a type written in a generic function's signature
+// uses: T, for []T or *List(T)
+fn type_params_in(n: *Node, out: *[..]*Node) {
+    if (n == null)
+        return;
+    if (n.kind.tag == .TypeParam) {
+        array_add(out, n);
+        return;
+    }
+    if (names_type_param(n))
+        array_add(out, n.decl);
+    for (child in children(n))
+        type_params_in(child, out);
+}
+
+fn decided(found: *Candidates, tp: *Node) -> bool { return candidates_of(found, tp).len > 0; }
+
+// works out the type parameters of a call to a generic function and returns
+// the instance for them; `expected` is the type the call's context wants
+pub fn instantiate_call(c: *Checker, n: *Node, templ: *Node, expected: *Type) -> *Node {
+    let given: Map(*Node, *Type); // from `$T: Type` arguments
+    let found: Candidates;
+    let from_context: Candidates;
+    let callee: *Node = null;
+    let args: []*Node;
+    if (n.kind is .Call{callee: e, args: a})
+        callee, args = e, a;
+    let params = fn_params(templ);
+    for (i in 0..args.len) {
+        if (i >= params.len)
+            break;
+        let param = params[i];
+        let arg = args[i];
+        if (is_type_param(param)) {
+            if (arg.kind is .TypeExpr{declared} && declared == null)
+                continue; // left out: the context decides
+            let t = type_from_node(c, arg);
+            if (t.kind == .Error)
+                return null;
+            map_put(&given, declared_of(param), t);
+        } else {
+            if (arg.ty == null)
+                continue; // `.{...}` or `.Red`: typed once the instance is known
+            if (arg.ty.kind == .Error)
+                return null;
+            infer(c, declared_of(param), arg.ty, arg, &found);
+        }
+    }
+    // `let n: i64 = parse(s);`: the result type the context expects. Any
+    // value converts to an Any, so an Any expected says nothing.
+    let result = declared_of(templ);
+    if (expected != null && result != null && expected.kind != .Error && expected != c.any_type)
+        infer(c, result, expected, null, &from_context);
+    // a `[...]` waited to be checked as its parameter's type; where neither
+    // the other arguments nor the context decide a type parameter of that
+    // type, it decides itself, from its elements: largest(.[3, 9, 4]) is
+    // largest of a [3]isize
+    for (i in 0..args.len) {
+        if (i >= params.len)
+            break;
+        let param = params[i];
+        let arg = args[i];
+        if (is_type_param(param) || arg.ty != null || !is_open_literal(arg))
+            continue;
+        let used: [..]*Node;
+        type_params_in(declared_of(param), &used);
+        let open = false;
+        for (tp in used)
+            open = open || (!map_has(&given, tp) && !decided(&found, tp) && !decided(&from_context, tp));
+        if (!open)
+            continue;
+        if (check_expr(c, arg, null).kind == .Error)
+            return null;
+        infer(c, declared_of(param), arg.ty, arg, &found);
+    }
+
+    let name = q(templ.tok.text);
+    let chosen: [..]*Type;
+    for (tp in type_params_of(templ)) {
+        let t = map_get(&given, tp) or_else null;
+        if (t != null) {
+            array_add(&chosen, t);
+            continue;
+        }
+        t = choose_type(c, tp, &found, &from_context, tformat("this call of %", name));
+        if (t != null && t.kind == .Error)
+            return null;
+        if (t == null) {
+            let explicit_param = false;
+            for (p in params)
+                explicit_param = explicit_param || (is_type_param(p) && declared_of(p) == tp);
+            let says = if (explicit_param)
+                tformat("here; pass it, like `%{}%`, or give the result a type", templ.tok.text,
+                        if (params.len > 1) "(i32, ...)" else "(i32)")
+                else tformat("from the arguments of %", name);
+            error(c, n.tok, tformat("can't tell what `%` is %", tp.tok.text, says));
+            return null;
+        }
+        array_add(&chosen, t);
+    }
+    return instantiate(c, templ, chosen, callee.tok);
+}
+
+// `Box.{ .value = 1.5 }`: a generic struct's types from its field values
+// (or from the context), then the instance
+pub fn infer_struct_type(c: *Checker, n: *Node, templ: *Node, expected: *Type) -> *Type {
+    let found: Candidates;
+    let from_context: Candidates;
+    let ok = true;
+    let declared: *Node = null;
+    let items: []*Node;
+    if (n.kind is .StructInit{declared: d, items: i})
+        declared, items = d, i;
+    let fields = struct_fields_of(templ);
+    for (i in 0..items.len) {
+        let item = items[i];
+        let value = item_value(item);
+        if (is_contextual(value))
+            continue; // checked once the type is known
+        let t = check_expr(c, value, null);
+        ok = ok && t.kind != .Error;
+        let field: *Node = null;
+        if (item.kind.tag == .FieldInit) {
+            for (f in fields)
+                if (f.tok.text == item.tok.text)
+                    field = f;
+        } else if (i < fields.len) {
+            field = fields[i];
+        }
+        if (field != null && t.kind != .Error)
+            infer(c, declared_of(field), t, value, &found);
+    }
+    if (!ok)
+        return c.types.error;
+    let tps = type_params_of(templ);
+    if (expected != null && (expected.kind == .Struct || expected.kind == .Union) && expected.decl.generic == templ)
+        for (i in 0..tps.len)
+            add_candidate(&from_context, tps[i], expected.decl.instance_args[i], null);
+
+    let chosen: [..]*Type;
+    for (tp in tps) {
+        let t = choose_type(c, tp, &found, &from_context, q(templ.tok.text));
+        if (t != null && t.kind == .Error)
+            return t;
+        if (t == null) {
+            error(c, declared.tok, tformat("can't tell what `%` is for % from its fields; give it, like `%(i32).{ ... }`",
+                                           tp.tok.text, q(templ.tok.text), templ.tok.text));
+            return c.types.error;
+        }
+        array_add(&chosen, t);
+    }
+    let instance = instantiate(c, templ, chosen, declared.tok);
+    return if (instance != null && instance.ty != null) instance.ty else c.types.error;
+}
+
+// The instance of a generic function or struct for these types: a copy of
+// the resolved template with each type parameter bound. Made once per set
+// of types; a function's body is checked later, from `pending`.
+pub fn instantiate(c: *Checker, templ: *Node, args: []*Type, site: Token) -> *Node {
+    let key = InstanceKey.{ .templ = templ, .args = args };
+    let known = map_get(&c.instances_by_key, key) or_else null;
+    if (known != null)
+        return known;
+    let depth: i32 = 1;
+    if (c.current_instance != null)
+        depth = (map_get(&c.instance_depth, c.current_instance) or_else 0) + 1;
+    if (depth > MAX_INSTANCE_DEPTH) {
+        error(c, site, tformat("too many nested instances of %; does it instantiate itself forever?", q(templ.tok.text)));
+        return null;
+    }
+
+    ensure_resolved(c.res, templ); // copies are made of resolved templates
+    let instance = clone_instance(templ);
+    instance.generic = templ;
+    instance.instance_args = clone_slice(args);
+    let tps = type_params_of(instance);
+    for (i in 0..args.len) {
+        tps[i].ty = args[i];
+        tps[i].check_state = 2;
+    }
+    map_put(&c.instances_by_key, InstanceKey.{ .templ = templ, .args = instance.instance_args }, instance);
+    array_add(&c.instances, instance);
+    map_put(&c.instance_site, instance, site);
+    map_put(&c.instance_parent, instance, c.current_instance);
+    map_put(&c.instance_depth, instance, depth);
+
+    let saved = c.current_instance;
+    c.current_instance = instance;
+    if (map_has(&c.res.deferred_bodies, templ))
+        resolve_instance_body(c.res, instance);
+    decl_type(c, instance); // a function's signature, or a struct's fields
+    c.current_instance = saved;
+    if (instance.kind.tag == .Fn)
+        array_add(&c.pending, instance);
+    return instance;
+}
+
+// A generic function used as a value of function type `to`: the instance
+// whose type that is, found by matching the template's parameter and return
+// types against `to`. `sort_by(items, less_than)` uses it.
+pub fn pick_instance(c: *Checker, e: *Node, to: *Type) -> bool {
+    let templ = e.decl;
+    let name = q(templ.tok.text);
+    if (to.kind != .Fn) {
+        error(c, e.tok, tformat("expected %, found the generic function %", qt(to), name));
+        return false;
+    }
+    let found: Candidates;
+    let k = 0;
+    for (param in fn_params(templ)) {
+        if (is_type_param(param)) {
+            error(c, e.tok, tformat("% takes a type argument, so it can't be used as a value", name));
+            return false;
+        }
+        if (k < to.params.len)
+            infer(c, declared_of(param), to.params[k], null, &found);
+        k++;
+    }
+    let result = declared_of(templ);
+    if (result != null)
+        infer(c, result, to.ret, null, &found);
+    let chosen: [..]*Type;
+    for (tp in type_params_of(templ)) {
+        let values = candidates_of(&found, tp);
+        if (values.len == 0) {
+            error(c, e.tok, tformat("can't tell what `%` is when using % as %", tp.tok.text, name, qt(to)));
+            return false;
+        }
+        array_add(&chosen, values[0].t);
+    }
+    let instance = instantiate(c, templ, chosen, e.tok);
+    if (instance == null)
+        return false;
+    e.decl = instance; // the code generator names the instance
+    e.ty = instance.ty;
+    if (e.ty != to) {
+        error(c, e.tok, tformat("expected %, but % here would be %", qt(to), name, qt(e.ty)));
+        return false;
+    }
+    return true;
+}
+
+// `max` with T = i32, or `List(i32)`
+pub fn describe_instance(c: *Checker, instance: *Node) -> string {
+    let templ = instance.generic;
+    if (templ.kind.tag != .Fn)
+        return q(if (instance.ty != null) type_name(instance.ty) else templ.tok.text);
+    let s: [..]u8;
+    print_to(&s, "% with ", q(templ.tok.text));
+    let tps = type_params_of(templ);
+    for (i in 0..instance.instance_args.len) {
+        if (i > 0)
+            append_string(&s, ", ");
+        print_to(&s, "% = %", tps[i].tok.text, type_name(instance.instance_args[i]));
+    }
+    return s as string;
+}
+
+/* ------------------------------------------------------ indexing, slicing */
+
+pub fn check_index(c: *Checker, n: *Node) -> *Type {
+    let object: *Node = null;
+    let index: *Node = null;
+    if (n.kind is .Index{object: o, index: i})
+        object, index = o, i;
+    let t = check_expr(c, object, null);
+    let it = check_expr(c, index, null);
+    if (t.kind == .Error || it.kind == .Error)
+        return c.types.error;
+
+    if (!is_int_like(it)) {
+        error(c, index.tok, tformat("an index must be an integer, found %", qt(it)));
+        return c.types.error;
+    }
+    if (index.cval.kind == .Int && i128_is_neg(index.cval.i)) {
+        error(c, index.tok, "an index can't be negative");
+        return c.types.error;
+    }
+    if (it.kind == .UntypedInt)
+        coerce(c, index, c.types.isize);
+
+    if (indexes_growable_pointer(c, n, object, index, t))
+        return c.types.error;
+    switch (t.kind) {
+    case .Array:
+        if (index.cval.kind == .Int && !i128_lt(index.cval.i, i128_u(t.len))) {
+            error(c, index.tok, tformat("index % is past the end of %", i128_to_string(index.cval.i), qt(t)));
+            return c.types.error;
+        }
+        return t.elem;
+    case .Slice, .Growable, .Ptr:
+        return t.elem;
+    case .Rawptr:
+        error(c, n.tok, "can't index a `*void`, cast it to a pointer type first");
+        return c.types.error;
+    default:
+        error(c, n.tok, tformat("can't index %", qt(t)));
+        return c.types.error;
+    }
+}
+
+// p[i] or p[lo..hi] on a *[..]T steps over whole arrays, which is never
+// what's meant where `*[..]T` is written out: the elements are p.*[i]. In
+// a generic instance a *T may point into an array of them, and so may an
+// array's `.ptr`, so those index as pointers do.
+fn indexes_growable_pointer(c: *Checker, n: *Node, object: *Node, index: *Node, t: *Type) -> bool {
+    if (t.kind != .Ptr || t.elem.kind != .Growable || c.current_instance != null)
+        return false;
+    if (object.kind.tag == .Member && object.tok.text == "ptr")
+        return false;
+    let p = text_of(object);
+    let rest = text_of(n);
+    rest = if (starts_with(rest, p)) rest[p.len..] else "[i]";
+    let msg = tformat("`%` is a pointer to a %, so this would step over whole arrays; for its elements write `%.*%`",
+                      p, qt(t.elem), p, rest);
+    if (n.kind.tag == .Index) // the pointer arithmetic, when it's meant
+        msg = tformat("%, or `(% + %).*` to step the pointer", msg, p, text_of(index));
+    error(c, n.tok, msg);
+    return true;
+}
+
+// an index, slice bound or length: a non-negative integer; untyped
+// constants become isize
+pub fn check_length(c: *Checker, n: *Node, what: string) -> bool {
+    let t = check_expr(c, n, null);
+    if (t.kind == .Error)
+        return false;
+    if (!is_int_like(t)) {
+        error(c, n.tok, tformat("% must be an integer, found %", what, qt(t)));
+        return false;
+    }
+    if (n.cval.kind == .Int && i128_is_neg(n.cval.i)) {
+        error(c, n.tok, tformat("% can't be negative", what));
+        return false;
+    }
+    if (t.kind == .UntypedInt)
+        coerce(c, n, c.types.isize);
+    return true;
+}
+
+fn known_bound(b: *Node) -> bool { return b != null && b.cval.kind == .Int; }
+
+// x[lo..hi]: a slice of an array, slice or pointer
+pub fn check_slice(c: *Checker, n: *Node) -> *Type {
+    let object: *Node = null;
+    let lo: *Node = null;
+    let hi: *Node = null;
+    if (n.kind is .Slice{object: o, lo: l, hi: h})
+        object, lo, hi = o, l, h;
+    let t = check_expr(c, object, null);
+    let ok = t.kind != .Error;
+    for (bound in .[lo, hi])
+        if (bound != null)
+            ok = check_length(c, bound, "a slice bound") && ok;
+    if (!ok)
+        return c.types.error;
+    if (t.kind == .UntypedString)
+        t = default_type(c, object);
+
+    if (indexes_growable_pointer(c, n, object, lo, t))
+        return c.types.error;
+    let elem: *Type = null;
+    let len: i64 = -1; // known at compile time
+    switch (t.kind) {
+    case .Array:
+        // a constant array is in memory too, so it can be viewed
+        let base = object;
+        while (true) {
+            switch (base.kind) {
+            case .Grouped{inner}: base = inner; continue;
+            case .Member{object: o}: base = o; continue;
+            case .Index{object: o}: base = o; continue;
+            default:
+            }
+            break;
+        }
+        let constant = base.kind.tag == .Identifier && base.decl != null && base.decl.kind.tag == .Const &&
+                       is_place(object);
+        let why = "";
+        if (!constant && !assignable(c, object, &why)) {
+            error(c, n.tok, tformat("can't slice this array: %", why));
+            return c.types.error;
+        }
+        elem = t.elem;
+        len = t.len as i64;
+    case .Ptr:
+        elem = t.elem;
+        if (hi == null) {
+            error(c, n.tok, "slicing a pointer needs an end, there's no length to go up to: `p[lo..hi]`");
+            return c.types.error;
+        }
+    case .Slice, .Growable: // a view of some of its elements
+        elem = t.elem;
+    case .Rawptr:
+        error(c, n.tok, "can't slice a `*void`, cast it to a pointer type first");
+        return c.types.error;
+    default:
+        error(c, n.tok, tformat("can't slice %", qt(t)));
+        return c.types.error;
+    }
+
+    // bounds known at compile time are checked now
+    if (known_bound(lo) && known_bound(hi) && i128_lt(hi.cval.i, lo.cval.i)) {
+        error(c, lo.tok, tformat("the slice starts after it ends (% > %)", i128_to_string(lo.cval.i),
+                                 i128_to_string(hi.cval.i)));
+        return c.types.error;
+    }
+    for (bound in .[lo, hi]) {
+        if (len >= 0 && known_bound(bound) && i128_lt(i128(len), bound.cval.i)) {
+            error(c, bound.tok, tformat("% is past the end of %", i128_to_string(bound.cval.i), qt(t)));
+            return c.types.error;
+        }
+    }
+    return if (t.is_string) t else slice_of(&c.types, elem); // part of a string is one
+}
+
+// `Color.Red` or `.Red`: links `n` to the variant and gives it its value
+pub fn enum_variant(c: *Checker, n: *Node, t: *Type, name: string) -> *Type {
+    if (t.is_failure && name != "None") {
+        error(c, n.tok, tformat("`.%` doesn't say which enum it's from; an `Error` compares with a failure enum's variant written in full, like `IoError.%`",
+                                name, name));
+        return c.types.error;
+    }
+    for (v in enum_variants(t.decl)) {
+        if (v.tok.text != name)
+            continue;
+        // the enum's values are worked out in order, and one of them can
+        // need this one (`A = sizeof(S)` where S uses `.B`) before it's known
+        if (v.check_state != 2) {
+            error(c, n.tok, tformat("the value of % isn't known here yet: working it out needs this use of it",
+                                    q(tformat("%.%", t.name, name))));
+            return c.types.error;
+        }
+        n.decl = v;
+        n.cval = v.cval;
+        return t;
+    }
+    error(c, n.tok, tformat("enum % has no variant %", qt(t), q(name)));
+    return c.types.error;
+}
+
+// `.{...}` and `.Red` take their type from where they're used
+pub fn is_contextual(n: *Node) -> bool {
+    let e = ungroup(n);
+    switch (e.kind) {
+    case .StructInit{declared}: return declared == null;
+    case .EnumShorthand: return true;
+    case .Call{callee}: return callee.kind.tag == .EnumShorthand; // .V(1)
+    default: return false;
+    }
+}
+
+// can `n` be addressed: a variable, a field or element of one, `*p`?
+pub fn is_place(n: *Node) -> bool {
+    switch (n.kind) {
+    case .Grouped{inner}:
+        return is_place(inner);
+    case .Identifier:
+        if (n.decl != null)
+            return is_place_decl(n.decl);
+        return false;
+    case .Member{object}:
+        if (n.decl != null)
+            return is_place_decl(n.decl);
+        return object.ty.kind == .Ptr || is_place(object);
+    case .Index, .Deref:
+        return true;
+    default:
+        return false;
+    }
+}
+
+fn is_place_decl(d: *Node) -> bool {
+    switch (d.kind.tag) {
+    case .Let, .Binding, .Param, .Const: return true;
+    default: return false;
+    }
+}
+
+// .[a, b], written without its type
+pub fn is_open_literal(n: *Node) -> bool {
+    if (ungroup(n).kind is .ArrayLiteral{elem})
+        return elem == null;
+    return false;
+}
+
+/* --------------------------------------------------------------- literals */
+
+// An array or slice literal's elements, each checked as the element type.
+// When the context's type is broken it passes the error type down, which
+// `.{...}` and `.Red` accept without a second, misleading error.
+pub fn check_array_items(c: *Checker, n: *Node, t: *Type) -> *Type {
+    let items = items_of(n);
+    let sequence = t.kind == .Array || t.kind == .Slice;
+    for (item in items) {
+        check_expr(c, item, if (sequence) t.elem else c.types.error);
+        if (sequence)
+            coerce(c, item, t.elem);
+    }
+    if (t.kind == .Array && (items.len as u64) > t.len) {
+        error(c, items[t.len].tok, tformat("too many values for %", qt(t)));
+    } else if (t.kind == .Array && (items.len as u64) < t.len) {
+        let found = if (items.len == 0) "found none" else tformat("found %", items.len);
+        error(c, n.tok, tformat("% needs % values, %", qt(t), t.len, found));
+    }
+    return t;
+}
+
+// checks a literal's items after its type turned out wrong, for their own
+// errors
+pub fn check_items_for_error(c: *Checker, n: *Node) -> *Type {
+    for (item in items_of(n))
+        check_expr(c, item_value(item), c.types.error);
+    return c.types.error;
+}
+
+// .[a, b, c] without a type. With an array or slice expected, it's one of
+// those. Otherwise it's an array of what its elements agree on, the way the
+// two sides of `+` do: typed values decide, untyped constants follow them
+// (and default when nothing else decides), nested `.[...]` rows agree too.
+// `.[1, 2.5]` is a [2]f64, `.[.[1, 2], .[3, 4]]` a [2][2]isize.
+pub fn check_open_literal(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    if (expected != null && (expected.kind == .Array || expected.kind == .Slice || expected.kind == .Error))
+        return check_array_items(c, n, expected);
+    if (expected != null && expected.kind == .Growable) {
+        // its elements are on the heap, and nothing allocates without a call
+        error(c, n.tok, tformat("a growable array's elements are allocated, so a literal can't be one; copy it into one with `array_of(%)` (std/array)",
+                                if (n.span.len > 0) text_of(n) else ".[...]"));
+        check_open_items_for_error(c, n);
+        return c.types.error;
+    }
+    if (items_of(n).len == 0) {
+        error(c, n.tok, "can't tell what `.[]` holds here; give it a type, like `let xs: []i32 = .[];`");
+        return c.types.error;
+    }
+    let t = natural_type(c, n);
+    if (t == null) {
+        error(c, n.tok, "can't tell what this literal holds: its elements take their type from it; write the element type, like `Point.[ ... ]`, or give the variable a type");
+        check_open_items_for_error(c, n);
+        return c.types.error;
+    }
+    if (t.kind == .Error) {
+        check_open_items_for_error(c, n);
+        return c.types.error;
+    }
+    let concrete = default_elements(c, t);
+    if (concrete.kind == .Error) {
+        error(c, n.tok, "can't tell which type the `null`s in this literal have; write the element type, like `(*T).[ ... ]`");
+        check_open_items_for_error(c, n);
+        return c.types.error;
+    }
+    type_literal(c, n, concrete);
+    return concrete;
+}
+
+// What the elements of an open literal agree on, as an array type whose
+// innermost elements may still be untyped constants; null when nothing
+// says (no elements, or only `.{...}` and `.Red`). Nested open literals get
+// their own such type in `ty`, until type_literal gives them theirs.
+fn natural_type(c: *Checker, n: *Node) -> *Type {
+    let elem: *Type = null;
+    let failed = false;
+    let row_len: isize = -1; // the nested literals' length, which must agree
+    let items = items_of(n);
+    for (item in items) {
+        let it: *Type = null;
+        if (is_open_literal(item)) {
+            let row = items_of(ungroup(item)).len;
+            if (row_len >= 0 && row != row_len && !failed) {
+                let hint: *Type = null;
+                if (elem != null && default_elements(c, elem).kind != .Error)
+                    hint = default_elements(c, elem).elem;
+                error(c, item.tok, tformat("the rows have different lengths, % and %, so they can't make an array; to have slices, give it a type, like `let rows: [][]% = ...`",
+                                           row_len, row, if (hint != null) type_name(hint) else "T"));
+                failed = true;
+                continue;
+            }
+            row_len = row;
+            it = natural_type(c, ungroup(item));
+            item.ty = it;
+            if (it == null)
+                continue; // an empty row, or one of `.{...}`s: the others say
+        } else if (is_contextual(item)) {
+            continue; // checked once the element type is known
+        } else {
+            it = check_expr(c, item, null);
+        }
+        if (it.kind == .Error) {
+            failed = true;
+            continue;
+        }
+        if (failed)
+            continue;
+        if (elem == null) {
+            elem = it;
+            continue;
+        }
+        let both = agree(c, item, elem, it);
+        if (both == null) {
+            let a, b = default_elements(c, elem), default_elements(c, it);
+            if (a.kind == .Array && b.kind == .Array && a.len != b.len) {
+                error(c, item.tok, tformat("the rows have different lengths, % and %, so they can't make an array; to have slices, give it a type, like `let rows: [][]% = ...`",
+                                           a.len, b.len, type_name(a.elem)));
+            } else {
+                let qa, qb = q2(a, b);
+                error(c, item.tok, tformat("the elements don't agree: % and %", qa, qb));
+            }
+            failed = true;
+            continue;
+        }
+        elem = both;
+    }
+    if (failed)
+        return c.types.error;
+    if (elem == null)
+        return null;
+    return array_type_of(&c.types, elem, items.len as u64);
+}
+
+// does an untyped constant's type fit `t`?
+fn untyped_fits(c: *Checker, untyped: *Type, t: *Type) -> bool {
+    switch (untyped.kind) {
+    case .UntypedInt: return t.kind == .Int || t.kind == .Float;
+    case .UntypedFloat: return t.kind == .Float;
+    case .UntypedString:
+        return t.is_string || t == slice_of(&c.types, c.types.u8) || t == ptr_to(&c.types, c.types.u8);
+    case .Null: return t.kind == .Ptr || t.kind == .Rawptr || t.kind == .Fn || t.kind == .Slice;
+    default: return false;
+    }
+}
+
+// the type two elements agree on, or null: equal, one converts to the
+// other (an untyped constant follows a typed value; whether it fits is
+// checked when it's converted), or arrays of the same length that agree
+fn agree(c: *Checker, item: *Node, a: *Type, b: *Type) -> *Type {
+    if (a == b)
+        return a;
+    if (a.kind == .Array && b.kind == .Array) {
+        if (a.len != b.len)
+            return null;
+        let e = agree(c, item, a.elem, b.elem);
+        return if (e != null) array_type_of(&c.types, e, a.len) else null;
+    }
+    // a row and a slice of what its elements agree on: the slice
+    if ((a.kind == .Array && b.kind == .Slice) || (a.kind == .Slice && b.kind == .Array)) {
+        let slice = if (a.kind == .Slice) a else b;
+        let array = if (a == slice) b else a;
+        return if (agree(c, item, array.elem, slice.elem) == slice.elem) slice else null;
+    }
+    if (is_untyped(a) && is_untyped(b)) {
+        if (is_numeric(a) && is_numeric(b)) // 1 and 2.5
+            return if (a.kind == .UntypedFloat) a else b;
+        return null;
+    }
+    if (c.any_type != null && (a == c.any_type || b == c.any_type)) // anything is an Any
+        return c.any_type;
+    if (is_untyped(a))
+        return if (untyped_fits(c, a, b)) b else null;
+    if (is_untyped(b))
+        return if (untyped_fits(c, b, a)) a else null;
+    if (can_coerce(c, item, b, a))
+        return a;
+    if (can_coerce(c, item, a, b))
+        return b;
+    return null;
+}
+
+// `t` with its untyped constants given their default types (`[2]isize`
+// for [2]untyped int); the error type when one is a `null`
+fn default_elements(c: *Checker, t: *Type) -> *Type {
+    switch (t.kind) {
+    case .UntypedInt: return c.types.isize;
+    case .UntypedFloat: return c.types.f64;
+    case .UntypedString: return c.types.string_;
+    case .Null: return c.types.error;
+    case .Array:
+        let e = default_elements(c, t.elem);
+        return if (e.kind == .Error) e else array_type_of(&c.types, e, t.len);
+    default: return t;
+    }
+}
+
+// gives an open literal the type `t`, and each element t's element type
+fn type_literal(c: *Checker, n: *Node, t: *Type) {
+    n.ty = t;
+    for (item in items_of(n))
+        fit_element(c, item, t.elem);
+}
+
+// gives `item`, an element, the type `want`: an open literal becomes an
+// array or slice of it (or of its own elements, converted after: an Any),
+// and anything else is checked, if it waited, and converted
+fn fit_element(c: *Checker, item: *Node, want: *Type) {
+    if (!is_open_literal(item)) {
+        if (item.ty == null)
+            check_expr(c, item, want);
+        coerce(c, item, want);
+        return;
+    }
+    let inner = ungroup(item);
+    let own = want;
+    if (want.kind != .Array && want.kind != .Slice) {
+        if (inner.ty == null || default_elements(c, inner.ty).kind == .Error) {
+            check_open_items_for_error(c, inner);
+            return;
+        }
+        own = default_elements(c, inner.ty);
+    }
+    inner.ty = own;
+    for (x in items_of(inner))
+        fit_element(c, x, own.elem);
+    let g = item;
+    while (g != inner) {
+        g.ty = own;
+        if (g.kind is .Grouped{inner: next})
+            g = next;
+        else
+            break;
+    }
+    coerce(c, item, want);
+}
+
+// checks what an open literal's elements left unchecked, for their own
+// errors, after the literal's type turned out wrong
+fn check_open_items_for_error(c: *Checker, n: *Node) {
+    for (item in items_of(n)) {
+        if (is_open_literal(item))
+            check_open_items_for_error(c, ungroup(item));
+        else if (item.ty == null)
+            check_expr(c, item_value(item), c.types.error);
+    }
+}
+
+pub fn check_struct_init(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    let declared: *Node = null;
+    let items: []*Node;
+    if (n.kind is .StructInit{declared: d, items: i})
+        declared, items = d, i;
+    let t: *Type = null;
+    if (declared == null) {
+        // .{...}: whatever its context expects, which can also be an array
+        // or a slice
+        if (expected == null) {
+            error(c, n.tok, "can't tell what type `.{ }` has here; write the type, like `Point.{ ... }`");
+            return check_items_for_error(c, n);
+        }
+        t = expected;
+        if (t.kind == .Void) { // its only value
+            if (items.len > 0) {
+                error(c, items[0].tok, "`void` has no fields: its one value is `.{}`");
+                return check_items_for_error(c, n);
+            }
+            return t;
+        }
+        if (t.kind == .Array || t.kind == .Slice) {
+            // the same elements as an array literal, when they're short
+            // enough to show
+            let shown: [..]u8;
+            for (item in items) {
+                if (item.kind.tag == .FieldInit || item.span.len == 0) {
+                    shown.len = 0;
+                    append_string(&shown, "...");
+                    break;
+                }
+                if (shown.len > 0)
+                    append_string(&shown, ", ");
+                append_string(&shown, item.span);
+            }
+            let list = if (shown.len > 40) "..." else shown as string;
+            error(c, n.tok, tformat("`.{ }` makes a struct or union; % is written `.[%]`", qt(t), list));
+            return check_items_for_error(c, n);
+        }
+        if (t.kind != .Struct && t.kind != .Union) {
+            if (t.kind != .Error)
+                error(c, n.tok, tformat("`.{ }` makes a struct or union, but % is expected here", qt(t)));
+            return check_items_for_error(c, n);
+        }
+    } else if (declared.kind.tag == .TypeName || declared.kind.tag == .TypeMember) {
+        t = type_from_node(c, declared); // List(i32).{...}
+    } else if (declared.decl != null && is_template(declared.decl)) {
+        t = infer_struct_type(c, n, declared.decl, expected); // Box.{ .value = 1 }
+    } else {
+        t = if (is_decl_of_type(declared.decl)) decl_type(c, declared.decl) else c.types.error;
+    }
+    if (declared != null)
+        declared.ty = t;
+    if (t.is_tagged) {
+        let first = enum_variants(t.decl)[0];
+        error(c, if (declared != null) declared.tok else n.tok,
+              tformat("% is a tagged enum: make a value with one of its variants, like `%.%{}%`", qt(t), t.name,
+                      first.tok.text, if (payload_of(t, first) != null) "(...)" else ""));
+        return check_items_for_error(c, n);
+    }
+    if (t.kind != .Struct && t.kind != .Union) {
+        if (t.kind != .Error)
+            error(c, declared.tok, tformat("% is not a struct type", qt(t)));
+        return check_items_for_error(c, n);
+    }
+
+    if (t.kind == .Union && items.len > 1)
+        error(c, items[1].tok, "a union literal can set only one field");
+
+    for (i in 0..items.len) {
+        let item = items[i];
+        if (item.kind is .FieldInit{value}) {
+            let field: *Field = null;
+            for (k in 0..t.fields.len)
+                if (t.fields[k].name == item.tok.text)
+                    field = &t.fields[k];
+            if (value.ty == null)
+                check_expr(c, value, if (field != null) field.ty else c.types.error);
+            if (field == null)
+                error(c, item.tok, tformat("% has no field %", qt(t), q(item.tok.text)));
+            else
+                coerce(c, value, field.ty);
+        } else {
+            if (item.ty == null)
+                check_expr(c, item, if (i < t.fields.len) t.fields[i].ty else c.types.error);
+            if (i < t.fields.len)
+                coerce(c, item, t.fields[i].ty);
+            else if (i == t.fields.len)
+                error(c, item.tok, tformat("too many values, % has % fields", qt(t), t.fields.len));
+        }
+    }
+    return t;
+}
+
+/* ------------------------------------------------------------------ casts */
+
+fn pointer_like(t: *Type) -> bool { return t.kind == .Ptr || t.kind == .Rawptr || t.kind == .Fn; }
+
+// what `as` allows on top of the implicit conversions
+fn can_cast(c: *Checker, from: *Type, to: *Type) -> bool {
+    if (is_numeric(from) && is_numeric(to))
+        return true;
+    if ((is_int_like(from) && to.kind == .Enum) || (from.kind == .Enum && to.kind == .Int))
+        return true;
+    if (from.kind == .Bool && to.kind == .Int)
+        return true;
+    // text and bytes: the same memory, seen differently
+    let bytes = slice_of(&c.types, c.types.u8);
+    if ((from.is_string && to == bytes) || (from == bytes && to.is_string))
+        return true;
+    if (from == growable_of(&c.types, c.types.u8) && to.is_string) // its elements
+        return true;
+    if ((pointer_like(from) || from.kind == .Null) && pointer_like(to))
+        return true;
+    let pointer_sized = to == c.types.usize || to == c.types.isize || from == c.types.usize || from == c.types.isize;
+    if (pointer_sized && ((pointer_like(from) && to.kind == .Int) || (from.kind == .Int && pointer_like(to))))
+        return true;
+    return false;
+}
+
+pub fn check_cast(c: *Checker, n: *Node) -> *Type {
+    let value: *Node = null;
+    let to_node: *Node = null;
+    if (n.kind is .Cast{value: v, to: t})
+        value, to_node = v, t;
+    let from = check_expr(c, value, null);
+    let to = type_from_node(c, to_node);
+    if (from.kind == .Error || to.kind == .Error)
+        return to;
+
+    if (from.kind == .UntypedString) {
+        if (to == slice_of(&c.types, c.types.u8)) // its text, as bytes
+            coerce(c, value, c.types.string_);
+        else if (can_coerce(c, value, from, to))
+            coerce(c, value, to);
+        else
+            error(c, n.tok, tformat("can't cast a string literal to %, only to `string`, `[]u8` or `*u8`", qt(to)));
+        return to;
+    }
+    if (!can_coerce(c, value, from, to) && !can_cast(c, from, to)) {
+        error(c, n.tok, tformat("can't cast % to %", qt(from), qt(to)));
+        return to;
+    }
+    // a failure enum `as Error` is the same widening as without `as`
+    if (to.is_failure && can_coerce(c, value, from, to)) {
+        coerce(c, value, to);
+        n.cval = value.cval;
+        return to;
+    }
+
+    // casts of constants are constants; integer casts wrap like in C
+    let k = value.cval;
+    let target = if (to.kind == .Enum) to.elem else to;
+    if (k.kind == .Int && target.kind == .Int)
+        n.cval = int_const(wrap(k.i, target));
+    else if (k.kind != .None && target.kind == .Float)
+        n.cval = float_const(as_float(k));
+    else if (k.kind == .Float && target.kind == .Int)
+        n.cval = int_const(wrap(f64_to_i128(k.f), target));
+    else if (k.kind == .Bool && target.kind == .Int)
+        n.cval = int_const(k.i);
+    // the operand itself gets a concrete type it can hold
+    if (from.kind == .UntypedInt)
+        value.ty = if (target.kind == .Int && fits(k.i, target)) target else c.types.i64;
+    else if (from.kind == .UntypedFloat)
+        value.ty = c.types.f64;
+    return to;
+}

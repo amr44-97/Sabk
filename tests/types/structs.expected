@@ -1,0 +1,109 @@
+MODULE tests/types/structs.smelt
+ROOT
+  STRUCT `Padded` : Padded
+    STRUCT_FIELD `a` : u8
+      type: TYPE_NAME `u8` -> builtin : u8
+    STRUCT_FIELD `b` : i32
+      type: TYPE_NAME `i32` -> builtin : i32
+    STRUCT_FIELD `c` : u8
+      type: TYPE_NAME `u8` -> builtin : u8
+  STRUCT `Nested` : Nested
+    STRUCT_FIELD `p` : Padded
+      type: TYPE_NAME `Padded` -> STRUCT `Padded` tests/types/structs.smelt:1:8 : Padded
+    STRUCT_FIELD `d` : f64
+      type: TYPE_NAME `f64` -> builtin : f64
+  UNION `Bits` : Bits
+    STRUCT_FIELD `byte` : u8
+      type: TYPE_NAME `u8` -> builtin : u8
+    STRUCT_FIELD `wide` : f64
+      type: TYPE_NAME `f64` -> builtin : f64
+  STRUCT `List` : List
+    STRUCT_FIELD `value` : i32
+      type: TYPE_NAME `i32` -> builtin : i32
+    STRUCT_FIELD `next` : *List
+      type: TYPE_PTR `*` : *List
+        lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+  STRUCT `Def` : Def
+    STRUCT_FIELD `x` : i32
+      type: TYPE_NAME `i32` -> builtin : i32
+      lhs: NUMBER_LITERAL `7` : i32 = 7
+    STRUCT_FIELD `y` : f32
+      type: TYPE_NAME `f32` -> builtin : f32
+  CONST_DECL `SIZES` : [8]usize
+    lhs: ARRAY_LITERAL `.` : [8]usize
+      type: TYPE_NAME `usize` -> builtin : usize
+      SIZE_OF : usize = 12
+        type: TYPE_NAME `Padded` -> STRUCT `Padded` tests/types/structs.smelt:1:8 : Padded
+      SIZE_OF : usize = 24
+        type: TYPE_NAME `Nested` -> STRUCT `Nested` tests/types/structs.smelt:2:8 : Nested
+      SIZE_OF : usize = 8
+        type: TYPE_NAME `Bits` -> UNION `Bits` tests/types/structs.smelt:3:7 : Bits
+      SIZE_OF : usize = 16
+        type: TYPE_SLICE `[` : []u8
+          lhs: TYPE_NAME `u8` -> builtin : u8
+      SIZE_OF : usize = 6
+        type: TYPE_ARRAY `[` : [3]u16
+          lhs: TYPE_NAME `u16` -> builtin : u16
+          rhs: NUMBER_LITERAL `3` : untyped int = 3
+      SIZE_OF : usize = 8
+        type: TYPE_PTR `*` : *List
+          lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+      SIZE_OF : usize = 1
+        type: TYPE_NAME `bool` -> builtin : bool
+      SIZE_OF : usize = 16
+        type: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+  FUN_DECL `f` : fn(*List, []i32, [3]u8) -> i32
+    type: TYPE_NAME `i32` -> builtin : i32
+    rhs: BLOCK
+      VAR_DECL `n` : i32
+        lhs: MEMBER `value` : i32
+          lhs: MEMBER `next` : *List
+            lhs: MEMBER `next` : *List
+              lhs: IDENTIFIER `l` -> FUN_PARAM `l` 12:6 : *List
+      VAR_DECL `d` : Def
+        lhs: STRUCT_INIT : Def
+          type: IDENTIFIER `Def` -> STRUCT `Def` tests/types/structs.smelt:5:8 : Def
+          FIELD_INIT `y`
+            rhs: FLOAT_LITERAL `1.0` : f32 = 1
+      VAR_DECL `pos` : Def
+        lhs: STRUCT_INIT : Def
+          type: IDENTIFIER `Def` -> STRUCT `Def` tests/types/structs.smelt:5:8 : Def
+          NUMBER_LITERAL `1` : i32 = 1
+          FLOAT_LITERAL `2.0` : f32 = 2
+      VAR_DECL `b` : Bits
+        lhs: STRUCT_INIT : Bits
+          type: IDENTIFIER `Bits` -> UNION `Bits` tests/types/structs.smelt:3:7 : Bits
+          FIELD_INIT `wide`
+            rhs: FLOAT_LITERAL `0.5` : f64 = 0.5
+      ASSIGN `=`
+        lhs: MEMBER `value` : i32
+          lhs: IDENTIFIER `l` -> FUN_PARAM `l` 12:6 : *List
+        rhs: CAST : i32
+          type: TYPE_NAME `i32` -> builtin : i32
+          lhs: MEMBER `len` : isize
+            lhs: IDENTIFIER `items` -> FUN_PARAM `items` 12:16 : []i32
+      VAR_DECL `first` : *i32
+        lhs: MEMBER `ptr` : *i32
+          lhs: IDENTIFIER `items` -> FUN_PARAM `items` 12:16 : []i32
+      VAR_DECL `count` : isize
+        lhs: MEMBER `len` : isize = 3
+          lhs: IDENTIFIER `fixed` -> FUN_PARAM `fixed` 12:30 : [3]u8
+      VAR_DECL `x` : u8
+        lhs: INDEX `[` : u8
+          lhs: IDENTIFIER `fixed` -> FUN_PARAM `fixed` 12:30 : [3]u8
+          rhs: NUMBER_LITERAL `2` : isize = 2
+      RETURN
+        lhs: ADD `+` : i32
+          lhs: IDENTIFIER `n` -> VAR_DECL `n` 13:9 : i32
+          rhs: MEMBER `x` : i32
+            lhs: IDENTIFIER `d` -> VAR_DECL `d` 14:9 : Def
+    FUN_PARAM `l` : *List
+      type: TYPE_PTR `*` : *List
+        lhs: TYPE_NAME `List` -> STRUCT `List` tests/types/structs.smelt:4:8 : List
+    FUN_PARAM `items` : []i32
+      type: TYPE_SLICE `[` : []i32
+        lhs: TYPE_NAME `i32` -> builtin : i32
+    FUN_PARAM `fixed` : [3]u8
+      type: TYPE_ARRAY `[` : [3]u8
+        lhs: TYPE_NAME `u8` -> builtin : u8
+        rhs: NUMBER_LITERAL `3` : untyped int = 3

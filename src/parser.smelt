@@ -39,6 +39,24 @@ pub fn parse_file(src: *Source, tokens: []Token) -> (*Node, isize) {
     return new_node(start, .Root(decls)), p.error_count;
 }
 
+// code made by `#insert` where statements go: statements up to the end
+pub fn parse_stmts(src: *Source, tokens: []Token) -> ([]*Node, isize) {
+    let p = Parser.{ .src = src, .tokens = tokens };
+    let stmts: [..]*Node;
+    while (!at(&p, .Eof))
+        array_add(&stmts, stmt(&p));
+    return stmts, p.error_count;
+}
+
+// code made by `#insert` where an expression goes: one expression, all of it
+pub fn parse_whole_expr(src: *Source, tokens: []Token) -> (*Node, isize) {
+    let p = Parser.{ .src = src, .tokens = tokens };
+    let e = expr(&p);
+    if (!at(&p, .Eof))
+        fail(&p, peek(&p), tformat("expected the end of the expression, found %", describe(peek(&p))));
+    return e, p.error_count;
+}
+
 /* ---------------------------------------------------------------- tokens */
 
 // looking past the end gives the Eof
@@ -83,6 +101,7 @@ fn expect(p: *Parser, kind: TokenKind, what: string) -> Token {
 // a syntax error: reported, and the compiler stops
 fn fail(p: *Parser, t: Token, message: string) -> *Node {
     report(p.src, .Error, t.text, message);
+    fatal_error_notes();
     exit(1);
     return null;
 }
@@ -90,6 +109,7 @@ fn fail(p: *Parser, t: Token, message: string) -> *Node {
 // an error parsing can go past
 fn report_error(p: *Parser, t: Token, message: string) {
     report(p.src, .Error, t.text, message);
+    fatal_error_notes(); // its notes
     p.error_count++;
 }
 
@@ -186,7 +206,7 @@ fn top_decl(p: *Parser) -> *Node {
             if (value != null)
                 fail(p, value.tok, "an `extern let` can't have a value: C defines the variable");
             expect(p, .Semicolon, "`;` after the declaration");
-            decl = new_node(name, .Let(declared, null, false, true, false, false));
+            decl = new_node(name, .Let(declared, null, false, true, false));
         } else {
             decl = fn_decl(p);
         }
@@ -223,7 +243,7 @@ fn import_decl(p: *Parser) -> *Node {
     let path = expect(p, .String, "a module path after `import`");
     let alias: *Node = null;
     if (eat(p, .As))
-        alias = new_node(expect(p, .Identifier, "a module name after `as`"), .Identifier(false));
+        alias = new_node(expect(p, .Identifier, "a module name after `as`"), .Identifier);
     expect(p, .Semicolon, "`;` after the import");
     return new_node(path, .Import(alias));
 }
@@ -441,7 +461,7 @@ fn const_decl(p: *Parser) -> *Node {
     expect(p, .Equal, "`=` and a value (a constant needs a value)");
     let value = expr(p);
     expect(p, .Semicolon, "`;` after the constant");
-    return new_node(name, .Const(declared, value, false, false));
+    return new_node(name, .Const(declared, value, false));
 }
 
 // `let ...` without its `;`
@@ -451,14 +471,14 @@ fn let_decl(p: *Parser) -> *Node {
     if (at(p, .Comma)) {
         // let q, r = divide(a, b); several names, from several values
         let names: [..]*Node;
-        array_add(&names, new_node(name, .Let(null, null, false, false, false, false)));
+        array_add(&names, new_node(name, .Let(null, null, false, false, false)));
         while (eat(p, .Comma))
             array_add(&names, new_node(expect(p, .Identifier, "a variable name"),
-                                       .Let(null, null, false, false, false, false)));
+                                       .Let(null, null, false, false, false)));
         if (at(p, .Colon))
             fail(p, peek(p), "names declared together get their types from the values; to give them types, declare them one at a time");
         expect(p, .Equal, "`=` and the values");
-        return new_node(name, .LetValues(names, values(p), false));
+        return new_node(name, .LetValues(names, values(p)));
     }
     let declared: *Node = null;
     let value: *Node = null;
@@ -478,7 +498,7 @@ fn let_decl(p: *Parser) -> *Node {
     }
     if (declared == null && value == null && !uninit)
         fail(p, name, "`let` needs a type, an initializer, or both");
-    return new_node(name, .Let(declared, value, false, false, uninit, false));
+    return new_node(name, .Let(declared, value, false, false, uninit));
 }
 
 // one expression, or several separated by commas: `a, b`
@@ -513,7 +533,7 @@ fn stmt(p: *Parser) -> *Node {
     if (t.kind == .Identifier && at(p, .Colon, 1) &&
         (at(p, .For, 2) || at(p, .While, 2) || at(p, .Do, 2) ||
          at(p, .Switch, 2) || at(p, .LBrace, 2))) {
-        let label = new_node(next(p), .Identifier(false));
+        let label = new_node(next(p), .Identifier);
         next(p); // :
         let n = stmt(p);
         switch (n.kind) {
@@ -580,7 +600,7 @@ fn stmt(p: *Parser) -> *Node {
         if (!at(p, .Semicolon))
             value = values(p); // return q, r;
         expect(p, .Semicolon, "`;` after `return`");
-        return new_node(t, .Return(value, false));
+        return new_node(t, .Return(value));
 
     case .Break, .Continue:
         // break; break outer; continue outer; continue state = .Next;
@@ -589,7 +609,7 @@ fn stmt(p: *Parser) -> *Node {
         let label: *Node = null;
         let value: *Node = null;
         if (at(p, .Identifier)) {
-            label = new_node(next(p), .Identifier(false));
+            label = new_node(next(p), .Identifier);
             if (eat(p, .Equal))
                 value = expr(p);
         }
@@ -600,7 +620,7 @@ fn stmt(p: *Parser) -> *Node {
 
     case .Defer:
         next(p);
-        return new_node(t, .Defer(stmt(p), false));
+        return new_node(t, .Defer(stmt(p)));
 
     case .Hash:
         // #if (condition known at compile time) stmt [else stmt]
@@ -637,14 +657,7 @@ fn stmt(p: *Parser) -> *Node {
         if (at(p, .Let, 1) || at(p, .Const, 1) || at(p, .Defer, 1) || at(p, .Return, 1)) {
             next(p);
             let n = stmt(p);
-            switch (n.kind) {
-            case .Let(&l): l.caller = true;
-            case .LetValues(&l): l.caller = true;
-            case .Const(&c): c.caller = true;
-            case .Defer(&d): d.caller = true;
-            case .Return(&r): r.caller = true;
-            default:
-            }
+            n.caller = true;
             return n;
         }
 
@@ -865,7 +878,7 @@ fn pattern_inner(p: *Parser, min_prec: isize) -> *Node {
             let dot = next(p);
             variant = new_node(joined(dot, next(p)), .EnumShorthand); // `.Binary` as one token
         } else {
-            variant = new_node(next(p), .Identifier(false));
+            variant = new_node(next(p), .Identifier);
             while (eat(p, .Period))
                 variant = new_node(next(p), .Member(variant));
         }
@@ -908,13 +921,13 @@ fn variant_fields(p: *Parser, variant: *Node) -> *Node {
     let bindings: [..]*Node;
     while (!at(p, .RBrace)) {
         if (at(p, .Identifier) && at(p, .Colon, 1)) { // field: name or pattern
-            let field = new_node(next(p), .Identifier(false));
+            let field = new_node(next(p), .Identifier);
             next(p);
             array_add(&bindings, subpattern(p, field));
         } else { // field, or &field: bound to its own name
             let by_ref = eat(p, .Amp);
             let name = expect(p, .Identifier, "a name for the field");
-            let field = new_node(name, .Identifier(false));
+            let field = new_node(name, .Identifier);
             array_add(&bindings, new_node(name, .Binding(field, by_ref)));
         }
         if (!eat(p, .Comma))
@@ -1303,7 +1316,7 @@ fn primary(p: *Parser) -> *Node {
     switch (t.kind) {
     case .Number: return new_node(next(p), .Number);
     case .Float: return new_node(next(p), .Float);
-    case .String: return new_node(next(p), .String);
+    case .String: return new_node(next(p), .String(""));
     case .Char: return new_node(next(p), .Char);
     case .True, .False: return new_node(next(p), .Bool);
     case .Null: return new_node(next(p), .Null);
@@ -1311,7 +1324,7 @@ fn primary(p: *Parser) -> *Node {
         // `name: { ... }` and `name: switch (...) { ... }`: labeled, they
         // give a value with `break name = value;`
         if (!p.in_pattern && at(p, .Colon, 1) && (at(p, .LBrace, 2) || at(p, .Switch, 2))) {
-            let label = new_node(next(p), .Identifier(false));
+            let label = new_node(next(p), .Identifier);
             next(p); // :
             if (at(p, .Switch))
                 return switch_body(p, next(p), true, label);
@@ -1324,7 +1337,7 @@ fn primary(p: *Parser) -> *Node {
             }
             return n;
         }
-        return new_node(next(p), .Identifier(false));
+        return new_node(next(p), .Identifier);
     case .If: // if (c) a else b: one of two values
         next(p);
         expect(p, .LParen, "`(` after `if`");
@@ -1353,7 +1366,9 @@ fn primary(p: *Parser) -> *Node {
     case .Backtick:
         // `name: the macro caller's `name`
         next(p);
-        return new_node(expect(p, .Identifier, "a name after the backtick"), .Identifier(true));
+        let n = new_node(expect(p, .Identifier, "a name after the backtick"), .Identifier);
+        n.caller = true;
+        return n;
 
     case .Hash:
         if (!at(p, .Identifier, 1))

@@ -1,0 +1,10 @@
+// Memory that escapes a function, and the memory traps the checker can
+// see (see "Memory traps" in ../the-compiler/docs/reference.md): warnings.
+// Not ported yet; these come with the checker's last stage.
+
+import "ast";
+import "check";
+
+pub fn check_escapes(c: *Checker, fun: *Node) {}
+
+pub fn check_traps(c: *Checker, fun: *Node) {}

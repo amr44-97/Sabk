@@ -1,0 +1,85 @@
+MODULE tests/types/literals.smelt
+ROOT
+  CONST_DECL `A` : untyped int = 10
+    lhs: NUMBER_LITERAL `10` : untyped int = 10
+  CONST_DECL `B` : untyped int = 31
+    lhs: ADD `+` : untyped int = 31
+      lhs: MUL `*` : untyped int = 30
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : untyped int = 10
+        rhs: NUMBER_LITERAL `3` : untyped int = 3
+      rhs: NUMBER_LITERAL `1` : untyped int = 1
+  CONST_DECL `F` : untyped float = 3
+    lhs: MUL `*` : untyped float = 3
+      lhs: FLOAT_LITERAL `1.5` : untyped float = 1.5
+      rhs: NUMBER_LITERAL `2` : untyped int = 2
+  CONST_DECL `MIX` : untyped float = 1.5
+    lhs: ADD `+` : untyped float = 1.5
+      lhs: NUMBER_LITERAL `1` : untyped int = 1
+      rhs: FLOAT_LITERAL `0.5` : untyped float = 0.5
+  CONST_DECL `SMALL` : u8 = 250
+    type: TYPE_NAME `u8` -> builtin : u8
+    lhs: NUMBER_LITERAL `250` : u8 = 250
+  CONST_DECL `SHIFTED` : untyped int = 1024
+    lhs: SHL `<<` : untyped int = 1024
+      lhs: NUMBER_LITERAL `1` : untyped int = 1
+      rhs: NUMBER_LITERAL `10` : u32 = 10
+  CONST_DECL `NOT` : untyped int = -1
+    lhs: BIT_NOT `~` : untyped int = -1
+      lhs: NUMBER_LITERAL `0` : untyped int = 0
+  CONST_DECL `NOT8` : u8 = 255
+    type: TYPE_NAME `u8` -> builtin : u8
+    lhs: BIT_NOT `~` : u8 = 255
+      lhs: GROUPED_EXPR `(` : u8 = 0
+        lhs: CAST : u8 = 0
+          type: TYPE_NAME `u8` -> builtin : u8
+          lhs: NUMBER_LITERAL `0` : u8 = 0
+  CONST_DECL `CMP` : bool = false
+    lhs: BOOL_AND `&&` : bool = false
+      lhs: GT `>` : bool = true
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : untyped int = 10
+        rhs: NUMBER_LITERAL `5` : untyped int = 5
+      rhs: NOT_EQ `!=` : bool = false
+        lhs: IDENTIFIER `B` -> CONST_DECL `B` tests/types/literals.smelt:2:7 : untyped int = 31
+        rhs: NUMBER_LITERAL `31` : untyped int = 31
+  CONST_DECL `WRAP` : u8 = 44
+    lhs: CAST : u8 = 44
+      type: TYPE_NAME `u8` -> builtin : u8
+      lhs: NUMBER_LITERAL `300` : i64 = 300
+  CONST_DECL `NEG` : i8 = -128
+    lhs: CAST : i8 = -128
+      type: TYPE_NAME `i8` -> builtin : i8
+      lhs: NEG `-` : i8 = -128
+        lhs: NUMBER_LITERAL `128` : untyped int = 128
+  CONST_DECL `TRUNC` : i32 = 3
+    lhs: CAST : i32 = 3
+      type: TYPE_NAME `i32` -> builtin : i32
+      lhs: FLOAT_LITERAL `3.9` : f64 = 3.9
+  CONST_DECL `CH` : u8 = 97
+    lhs: CHAR_LITERAL `'a'` : u8 = 97
+  CONST_DECL `NL` : u8 = 10
+    lhs: CHAR_LITERAL `'\n'` : u8 = 10
+  CONST_DECL `HEX` : u8 = 65
+    lhs: CHAR_LITERAL `'\x41'` : u8 = 65
+  CONST_DECL `QUOTE` : u8 = 39
+    lhs: CHAR_LITERAL `'\''` : u8 = 39
+  FUN_DECL `f` : fn()
+    rhs: BLOCK
+      VAR_DECL `i` : isize
+        lhs: NUMBER_LITERAL `5` : isize = 5
+      VAR_DECL `x` : f64
+        lhs: FLOAT_LITERAL `2.5` : f64 = 2.5
+      VAR_DECL `s` : string
+        lhs: STRING_LITERAL `"text"` : string
+      VAR_DECL `u` : u64
+        type: TYPE_NAME `u64` -> builtin : u64
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : u64 = 10
+      VAR_DECL `g` : f32
+        type: TYPE_NAME `f32` -> builtin : f32
+        lhs: IDENTIFIER `A` -> CONST_DECL `A` tests/types/literals.smelt:1:7 : f32 = 10
+      VAR_DECL `flag` : bool
+        lhs: BOOL_LITERAL `true` : bool = true
+      VAR_DECL `big` : i64
+        type: TYPE_NAME `i64` -> builtin : i64
+        lhs: SHL `<<` : i64 = 1099511627776
+          lhs: NUMBER_LITERAL `1` : untyped int = 1
+          rhs: NUMBER_LITERAL `40` : u32 = 40

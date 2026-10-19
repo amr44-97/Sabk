@@ -1,0 +1,8 @@
+// top-level names can be used before they are declared
+fn area(r: Rect) -> f32 { return r.size.x * r.size.y; }
+type Size = Vec2;
+struct Rect { pos: Vec2; size: Size; }
+struct Vec2 { x: f32; y: f32; }
+let origin: Vec2;
+let ptr: *[4]u8;
+let cb: fn(Rect) -> f32 = area;

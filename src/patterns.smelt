@@ -1,0 +1,928 @@
+// Patterns, `switch`, `is`, `if` as an expression, and which values a
+// switch's cases cover.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/str";
+import "ast";
+import "const";
+import "lexer";
+import "types";
+import "check";
+import "statements";
+import "expressions";
+import "generics";
+
+// What a pattern matches, for finding cases that repeat or overlap: the
+// values lo..=hi, or a string
+pub struct Matched {
+    known: bool;
+    lo: I128;
+    hi: I128;
+    is_text: bool;
+    text: string;
+}
+
+// the string a constant string expression is, if it is one
+pub fn constant_text(n: *Node) -> (string, bool) {
+    let e = ungroup(n);
+    if ((e.kind.tag == .Identifier || e.kind.tag == .Member) && e.decl != null &&
+        e.decl.kind is .Const{value} && value != null)
+        e = value;
+    if (e.kind.tag != .String)
+        return "", false;
+    let text = string_literal_text(e);
+    return text, true;
+}
+
+// a string literal's bytes, its escapes decoded
+pub fn string_literal_text(e: *Node) -> string {
+    let quoted = e.tok.text;
+    if (e.kind is .String{quoted: q} && q.len > 0)
+        quoted = q;
+    let text, _, _ = decode_escapes(quoted[1..quoted.len - 1]);
+    return text;
+}
+
+// does it check what a variant holds?
+pub fn has_subpatterns(p: *Node) -> bool {
+    switch (p.kind) {
+    case .FieldPattern: return true;
+    case .VariantPattern{bindings}:
+        for (item in bindings)
+            if (has_subpatterns(item))
+                return true;
+        return false;
+    default: return false;
+    }
+}
+
+fn fail_bindings(c: *Checker, p: *Node) {
+    if (p.kind is .VariantPattern{bindings}) {
+        for (b in bindings) {
+            b.ty = c.types.error;
+            b.check_state = 2;
+        }
+    }
+}
+
+fn first_binding(p: *Node) -> *Node {
+    if (p.kind is .VariantPattern{bindings} && bindings.len > 0)
+        return bindings[0];
+    return null;
+}
+
+// A pattern (a case's, or an `is`'s) against a value of type `t`: a value,
+// a range of integers, or a variant of a tagged enum with its bindings.
+// `subject` is what's matched, which `&` bindings must point into.
+pub fn check_pattern(c: *Checker, p: *Node, t: *Type, subject: *Node, in_is: bool) -> Matched {
+    let m: Matched;
+    if (t.kind == .Error)
+        return m;
+    let tagged: *Type = if (t.is_tagged) t else null;
+    let values = if (tagged != null) tagged.fields[0].ty else t; // what's compared
+
+    if (p.kind is .Range{lo, hi, inclusive}) {
+        if (values.kind != .Int) {
+            error(c, p.tok, tformat("a range in a pattern needs integers (or characters), not %", qt(values)));
+            return m;
+        }
+        for (end in .[lo, hi]) {
+            let et = check_expr(c, end, values);
+            if (et.kind == .Error || !coerce(c, end, values))
+                return m;
+            if (end.cval.kind != .Int) {
+                error(c, end.tok, "a range's ends must be known at compile time");
+                return m;
+            }
+        }
+        m.lo = lo.cval.i;
+        m.hi = if (inclusive) hi.cval.i else i128_sub(hi.cval.i, i128(1));
+        if (i128_lt(m.hi, m.lo)) {
+            error(c, p.tok, tformat("this range is empty%",
+                                    if (inclusive) "" else "; `..` leaves its end out, `..=` includes it"));
+            return m;
+        }
+        m.known = true;
+        return m;
+    }
+
+    let is_variant_pattern = p.kind.tag == .VariantPattern;
+    if (is_variant_pattern && tagged == null) {
+        let first = first_binding(p);
+        error(c, if (first == null) p.tok else first.tok,
+              tformat("only a tagged enum's variants hold values to bind; % isn't one", qt(t)));
+        fail_bindings(c, p);
+        return m;
+    }
+
+    // the variant (or value) itself
+    let value = p;
+    if (p.kind is .VariantPattern{variant})
+        value = variant;
+    if (values.is_string) {
+        let vt = check_expr(c, value, c.types.string_);
+        if (vt.kind == .Error || !coerce(c, value, c.types.string_))
+            return m;
+        let text, ok = constant_text(value);
+        if (!ok) {
+            error(c, value.tok, if (in_is) "a string after `is` must be known at compile time"
+                                else "a case of a string switch must be a string known at compile time");
+            return m;
+        }
+        m.known, m.is_text, m.text = true, true, text;
+        return m;
+    }
+    let vt: *Type = null;
+    if (tagged != null && value.kind is .Member{object} && value.decl != null && value.decl.kind.tag == .Variant) {
+        // `Expr.Number(n)` names the tag, not a value
+        if (array_find(enum_variants(tagged.decl), value.decl) < 0) {
+            error(c, value.tok, tformat("% isn't a variant of %", q(tformat("%.%", object.tok.text, value.tok.text)),
+                                        qt(tagged)));
+            value.ty = c.types.error;
+            vt = c.types.error;
+        } else {
+            vt = enum_variant(c, value, values, value.tok.text);
+            value.ty = vt;
+        }
+    } else {
+        vt = check_expr(c, value, values);
+    }
+    if (is_variant_pattern) {
+        if (vt.kind == .Error) // no variant to bind: reported
+            fail_bindings(c, p);
+        else
+            check_variant_bindings(c, p, tagged, subject, in_is);
+    }
+    if (vt.kind == .Error || !coerce(c, value, values))
+        return m;
+    if (value.cval.kind != .Int && value.cval.kind != .Bool) {
+        error(c, value.tok, if (in_is) "what follows `is` must be known at compile time"
+                            else "a case value must be known at compile time");
+        return m;
+    }
+    m.lo, m.hi = value.cval.i, value.cval.i;
+    m.known = true;
+    return m;
+}
+
+// the field a `.V{name: ...}` item names
+fn item_field(item: *Node) -> *Node {
+    switch (item.kind) {
+    case .Binding{field}: return field;
+    case .FieldPattern{field}: return field;
+    default: return null;
+    }
+}
+
+// .V(x): x is the variant's value; .V{a, &b, c: d}: names for its fields.
+// A copy, or with `&` a pointer into what's matched. Where a name can go, a
+// pattern can too: .V(.W(y)), .V{op: .Mul}, matched through a pointer.
+// `subject` is what `&` points into (null: through a pointer, always fine).
+fn check_variant_bindings(c: *Checker, p: *Node, tagged: *Type, subject: *Node, in_is: bool) {
+    let variant: *Node = null;
+    let items: []*Node;
+    let by_fields = false;
+    if (p.kind is .VariantPattern{variant: vn, bindings, by_fields: f})
+        variant, items, by_fields = vn, bindings, f;
+    for (item in items) {
+        if (item.kind.tag == .Binding) {
+            item.ty = c.types.error;
+            item.check_state = 2;
+        }
+    }
+    let v = variant.decl;
+    if (v == null || v.kind.tag != .Variant || items.len == 0)
+        return; // not a variant: reported already
+    let pt = payload_of(tagged, v);
+    let name = tformat("`.%`", v.tok.text);
+    if (pt == null) {
+        error(c, items[0].tok, tformat("% holds no value to %", name,
+                                       if (items[0].kind.tag == .Binding) "bind" else "match"));
+        return;
+    }
+    if (by_fields && pt.kind != .Struct) {
+        error(c, p.tok, tformat("% holds a %, which has no fields; name it with `.%(x)`", name, qt(pt), v.tok.text));
+        return;
+    }
+    let seen: Map(string, *Node);
+    for (item in items) {
+        let it = pt;
+        if (by_fields) {
+            let field_node = item_field(item);
+            let field = field_node.tok.text;
+            if (map_has(&seen, field)) {
+                error(c, field_node.tok, tformat("the field `%` is named twice", field));
+                continue;
+            }
+            map_put(&seen, field, item);
+            it = null;
+            for (f in pt.fields)
+                if (f.name == field)
+                    it = f.ty;
+            if (it == null) {
+                error(c, field_node.tok, tformat("% has no field `%`", name, field));
+                continue;
+            }
+        }
+        if (item.kind is .FieldPattern{pattern}) {
+            // a pattern for the value: through a pointer, what it points at
+            item.ty = it;
+            let through = it.kind == .Ptr;
+            check_pattern(c, pattern, if (through) it.elem else it, if (through) null else subject, in_is);
+            continue;
+        }
+        let by_ref = item.kind is .Binding{by_ref: true};
+        let why = "";
+        if (by_ref && subject != null && !assignable(c, subject, &why)) {
+            error(c, item.tok, tformat("`&%` points into %, which must be a variable: %", item.tok.text,
+                                       if (in_is) "what `is` matches" else "the switch value", why));
+            continue;
+        }
+        item.ty = if (by_ref) ptr_to(&c.types, it) else it;
+    }
+    map_free(&seen);
+}
+
+/* -------------------------------------- which values a switch's cases cover */
+
+// Exhaustiveness and unreachable cases, by Luc Maranget's usefulness
+// algorithm ("Warnings for pattern matching", 2007), as OCaml and Rust do
+// it. A row of patterns is useful if some value matches it and no earlier
+// row; a switch handles everything when a lone `_` isn't useful after its
+// cases. The algorithm finds an example of a value that isn't handled.
+
+enum PatKind { Wild, Ctor, Lit }
+
+struct Pat {
+    kind: PatKind;
+    ctor: I128;     // Ctor: an enum's value, a variant's tag, or a bool
+    args: []Pat;    // Ctor: what a variant holds, taken apart
+    lit: Matched;   // Lit: an integer range, or a string
+}
+
+fn pointee(t: *Type) -> *Type { return if (t.kind == .Ptr) t.elem else t; }
+
+fn finite(t: *Type) -> bool {
+    // an Error can hold any failure enum's variants: like an integer
+    return t.is_tagged || (t.kind == .Enum && !t.is_failure) || t.kind == .Bool;
+}
+
+fn tag_type(t: *Type) -> *Type { return if (t.is_tagged) t.fields[0].ty else t; }
+
+fn ctors_of(t: *Type) -> [..]I128 {
+    let all: [..]I128;
+    if (t.kind == .Bool) {
+        array_add(&all, i128(0));
+        array_add(&all, i128(1));
+        return all;
+    }
+    for (v in enum_variants(tag_type(t).decl))
+        array_add(&all, v.cval.i);
+    return all;
+}
+
+fn variant_of(t: *Type, tag: I128) -> *Node {
+    for (v in enum_variants(tag_type(t).decl))
+        if (i128_eq(v.cval.i, tag))
+            return v;
+    return null;
+}
+
+// a variant declared with fields, Rect(w: f64, h: f64), holds a struct of
+// them, matched field by field
+fn is_fields_payload(pt: *Type) -> bool {
+    return pt != null && pt.kind == .Struct && starts_with(pt.part, "variant_");
+}
+
+// the types of what a constructor holds, taken apart
+fn ctor_args(t: *Type, ctor: I128) -> [..]*Type {
+    let args: [..]*Type;
+    if (!t.is_tagged)
+        return args;
+    let pt = payload_of(t, variant_of(t, ctor));
+    if (pt == null)
+        return args;
+    if (!is_fields_payload(pt)) {
+        array_add(&args, pointee(pt));
+        return args;
+    }
+    for (f in pt.fields)
+        array_add(&args, pointee(f.ty));
+    return args;
+}
+
+fn wilds(count: isize) -> []Pat { return new([]Pat, count); }
+
+fn to_pat(p: *Node, t: *Type) -> Pat {
+    let r: Pat;
+    switch (p.kind) {
+    case .Binding: // a name matches anything
+        return r;
+    case .FieldPattern{pattern}:
+        return to_pat(pattern, pointee(if (p.ty != null) p.ty else t));
+    case .Range{lo, hi, inclusive}:
+        r.kind = .Lit;
+        r.lit.known = true;
+        r.lit.lo = lo.cval.i;
+        r.lit.hi = if (inclusive) hi.cval.i else i128_sub(hi.cval.i, i128(1));
+        return r;
+    case .VariantPattern{variant, bindings, by_fields}:
+        r.kind = .Ctor;
+        r.ctor = variant.cval.i;
+        let types = ctor_args(t, r.ctor);
+        r.args = wilds(types.len);
+        let pt = payload_of(t, variant_of(t, r.ctor));
+        if (by_fields) {
+            for (item in bindings)
+                for (i in 0..pt.fields.len)
+                    if (pt.fields[i].name == item_field(item).tok.text)
+                        r.args[i] = to_pat(item, types[i]);
+        } else if (!is_fields_payload(pt) && bindings.len > 0 && types.len > 0) {
+            r.args[0] = to_pat(bindings[0], types[0]);
+        }
+        return r;
+    default:
+        if (finite(t)) { // .Nil, Color.Red, true
+            r.kind = .Ctor;
+            r.ctor = p.cval.i;
+            r.args = wilds(ctor_args(t, r.ctor).len);
+            return r;
+        }
+        r.kind = .Lit;
+        r.lit.known = true;
+        let text, ok = constant_text(p);
+        if (t.is_string && ok) {
+            r.lit.is_text = true;
+            r.lit.text = text;
+        } else {
+            r.lit.lo, r.lit.hi = p.cval.i, p.cval.i;
+        }
+        return r;
+    }
+}
+
+// does `a` match every value `b` does?
+fn covers(a: Matched, b: Matched) -> bool {
+    if (a.is_text || b.is_text)
+        return a.is_text && b.is_text && a.text == b.text;
+    return !i128_lt(b.lo, a.lo) && !i128_lt(a.hi, b.hi);
+}
+
+// a row: `head` followed by `rest`
+fn joined(head: []Pat, rest: []Pat) -> []Pat {
+    let out: [..]Pat;
+    array_append(&out, head);
+    array_append(&out, rest);
+    return out;
+}
+
+// the rows that match constructor `ctor` (or anything), with what it holds
+// in place of their first column
+fn specialize(rows: [][]Pat, ctor: I128, arity: isize) -> [..][]Pat {
+    let out: [..][]Pat;
+    for (row in rows) {
+        if (row[0].kind == .Ctor && !i128_eq(row[0].ctor, ctor))
+            continue;
+        let head = if (row[0].kind == .Ctor) row[0].args else wilds(arity);
+        array_add(&out, joined(head, row[1..]));
+    }
+    return out;
+}
+
+fn has_ctor(xs: []I128, x: I128) -> bool {
+    for (y in xs)
+        if (i128_eq(x, y))
+            return true;
+    return false;
+}
+
+// is `q` useful after `rows`? if so, also a value it matches and no row
+// does (columns of the types in `ts`)
+fn useful(rows: [][]Pat, q: []Pat, ts: []*Type) -> ([]Pat, bool) {
+    if (rows.len == 0)
+        return q, true;
+    if (q.len == 0)
+        return .[], false;
+    let t = ts[0];
+    let rest = ts[1..];
+    let q_rest = q[1..];
+    if (q[0].kind == .Ctor)
+        return useful_ctor(rows, q, ts, q[0].ctor, q_rest);
+    if (q[0].kind == .Lit) {
+        let left: [..][]Pat;
+        for (row in rows)
+            if (row[0].kind == .Wild || (row[0].kind == .Lit && covers(row[0].lit, q[0].lit)))
+                array_add(&left, row[1..]);
+        let w, ok = useful(left, q_rest, rest);
+        if (!ok)
+            return .[], false;
+        return joined(q[..1], w), true;
+    }
+    // q starts with `_`: if the rows name every constructor, try each
+    let named: [..]I128;
+    for (row in rows)
+        if (row[0].kind == .Ctor && !has_ctor(named, row[0].ctor))
+            array_add(&named, row[0].ctor);
+    if (finite(t)) {
+        let all = ctors_of(t);
+        let every = true;
+        for (k in all)
+            every = every && has_ctor(named, k);
+        if (every) {
+            for (k in all) {
+                let w, ok = useful_ctor(rows, q, ts, k, q_rest);
+                if (ok)
+                    return w, true;
+            }
+            return .[], false;
+        }
+    }
+    // otherwise only the rows that match anything here matter
+    let wild: [..][]Pat;
+    for (row in rows)
+        if (row[0].kind == .Wild)
+            array_add(&wild, row[1..]);
+    let w, ok = useful(wild, q_rest, rest);
+    if (!ok)
+        return .[], false;
+    let head = new([]Pat, 1);
+    if (finite(t)) {
+        for (k in ctors_of(t)) {
+            if (!has_ctor(named, k)) {
+                head[0].kind = .Ctor;
+                head[0].ctor = k;
+                head[0].args = wilds(ctor_args(t, k).len);
+                break;
+            }
+        }
+    }
+    return joined(head, w), true;
+}
+
+// useful() for constructor `ctor` in the first column
+fn useful_ctor(rows: [][]Pat, q: []Pat, ts: []*Type, ctor: I128, q_rest: []Pat) -> ([]Pat, bool) {
+    let t = ts[0];
+    let args = ctor_args(t, ctor);
+    let sub: [..]*Type;
+    array_append(&sub, args);
+    array_append(&sub, ts[1..]);
+    let q_head = if (q[0].kind == .Ctor) q[0].args else wilds(args.len);
+    let w, ok = useful(specialize(rows, ctor, args.len), joined(q_head, q_rest), sub);
+    if (!ok)
+        return .[], false;
+    let head = new([]Pat, 1);
+    head[0].kind = .Ctor;
+    head[0].ctor = ctor;
+    head[0].args = w[..args.len];
+    return joined(head, w[args.len..]), true;
+}
+
+// a pattern as Smelt writes it, for messages: .Negate(.Negate(_))
+fn show(p: Pat, t: *Type) -> string {
+    switch (p.kind) {
+    case .Wild: return "_";
+    case .Lit: return if (p.lit.is_text) quote_string(p.lit.text) else i128_to_string(p.lit.lo);
+    case .Ctor:
+    }
+    if (t.kind == .Bool)
+        return if (i128_is_zero(p.ctor)) "false" else "true";
+    let v = variant_of(t, p.ctor);
+    let name = tformat(".%", if (v != null) v.tok.text else "?");
+    let all_wild = true;
+    for (a in p.args)
+        all_wild = all_wild && a.kind == .Wild;
+    if (all_wild) // .Nil; .Number(_) for one that holds something
+        return if (p.args.len == 0) name else tformat("%(_)", name);
+    let types = ctor_args(t, p.ctor);
+    let pt = payload_of(t, v);
+    if (!is_fields_payload(pt))
+        return tformat("%(%)", name, show(p.args[0], types[0]));
+    let fields: [..]u8;
+    for (i in 0..p.args.len) {
+        if (p.args[i].kind == .Wild)
+            continue;
+        if (fields.len > 0)
+            append_string(&fields, ", ");
+        print_to(&fields, "%: %", pt.fields[i].name, show(p.args[i], types[i]));
+    }
+    return tformat("%{}{%}", name, fields as string);
+}
+
+// "`.A`, `.B` and `.C`", at most five of them
+fn name_list(names: []string) -> string {
+    let list: [..]u8;
+    for (i in 0..names.len) {
+        if (i >= 5)
+            break;
+        if (i > 0)
+            append_string(&list, if (i + 1 == names.len) " and " else ", ");
+        append_string(&list, names[i]);
+    }
+    if (names.len > 5)
+        print_to(&list, " and % more", names.len - 5);
+    return list as string;
+}
+
+struct Seen {
+    m: Matched;
+    at: *Node;
+}
+
+fn case_parts(clause: *Node) -> ([]*Node, *Node, *Node) {
+    switch (clause.kind) {
+    case .Case{patterns, guard, body}: return patterns, guard, body;
+    case .DefaultCase{body}: return .[], null, body;
+    default: return .[], null, null;
+    }
+}
+
+// the value a pattern names: a variant's, or its own
+fn pattern_head(p: *Node) -> *Node {
+    if (p.kind is .VariantPattern{variant})
+        return variant;
+    return p;
+}
+
+// A switch statement, or with `is_expr` a switch expression, whose value
+// it returns (its type: `expected`, or the first case's)
+pub fn check_switch(c: *Checker, n: *Node, is_expr: bool, expected: *Type) -> *Type {
+    let subject: *Node = null;
+    let clauses: []*Node;
+    let label: *Node = null;
+    let continued = false;
+    if (n.kind is .Switch(s))
+        subject, clauses, label, continued = s.value, s.cases, s.label, s.continued;
+    let t = check_expr(c, subject, null);
+    if (t.kind == .UntypedInt || t.kind == .UntypedString)
+        t = default_type(c, subject);
+    let tagged: *Type = if (t.is_tagged) t else null;
+    let values = if (tagged != null) tagged.fields[0].ty else t;
+    if (values.kind != .Int && values.kind != .Enum && !values.is_string && values.kind != .Error) {
+        error(c, subject.tok, tformat("can only switch on integers, enums and strings, found %", qt(t)));
+        t = c.types.error;
+        values = c.types.error;
+    }
+
+    let seen: [..]Seen;
+    let default_case: *Node = null;
+    let result = expected;
+    let broken = false; // a pattern with errors: no "doesn't handle" too
+    let in_order = false;
+    for (clause in clauses) {
+        let patterns, guard, body = case_parts(clause);
+        if (clause.kind.tag == .DefaultCase) {
+            if (default_case != null) {
+                error(c, clause.tok, "this switch already has a `default`");
+                note(c, default_case.tok, "the first `default` is here");
+            }
+            default_case = clause;
+        }
+        for (p in patterns) {
+            let before = c.error_count;
+            let m = check_pattern(c, p, t, subject, false);
+            broken = broken || c.error_count != before;
+            // a case with a guard, or patterns inside a variant, doesn't
+            // cover all of its variant: Maranget's check below handles those
+            if (guard != null || has_subpatterns(p)) {
+                in_order = true;
+                set_in_order(n);
+                continue;
+            }
+            if (!m.known)
+                continue;
+            for (other in seen) {
+                let same = if (m.is_text) other.m.is_text && other.m.text == m.text
+                           else !other.m.is_text && !i128_lt(other.m.hi, m.lo) && !i128_lt(m.hi, other.m.lo);
+                if (!same)
+                    continue;
+                let what = if (m.is_text) tformat("duplicate case %", quote_string(m.text))
+                           else if (i128_eq(m.lo, m.hi) && i128_eq(other.m.lo, other.m.hi))
+                               tformat("duplicate case value %", i128_to_string(m.lo))
+                           else "this case overlaps an earlier one";
+                error(c, p.tok, what);
+                note(c, other.at.tok, "it's first handled here");
+                break;
+            }
+            array_add(&seen, Seen.{ .m = m, .at = p });
+        }
+        if (continued) {
+            for (p in patterns) {
+                if (p.kind is .VariantPattern{bindings}) {
+                    for (b in bindings) {
+                        if (b.kind is .Binding{by_ref: true} && b.ty.kind != .Error)
+                            error(c, b.tok, tformat("a switch that `continue` gives new values works on a copy, so `&%` can't point into it; bind a copy",
+                                                    b.tok.text));
+                    }
+                }
+            }
+        }
+        if (guard != null) { // the guard: a bool, with the case's names
+            let gt = check_expr(c, guard, c.types.bool_);
+            if (gt.kind != .Error && gt != c.types.bool_)
+                error(c, guard.tok, tformat("a guard needs a `bool`, found %", qt(gt)));
+        }
+        if (!is_expr) {
+            check_stmt(c, body);
+            continue;
+        }
+        // a case's value: of the type wanted, or the first case's
+        if (body.kind.tag == .Block) { // statements: break name = value
+            map_put(&c.value_types, n, result);
+            check_stmt(c, body);
+            result = map_get(&c.value_types, n) or_else null;
+            if (!always_returns(body, n))
+                error(c, clause.tok, tformat("this case can reach its end without giving a value; end it with `break % = value;`",
+                                             label.tok.text));
+            continue;
+        }
+        let vt = check_expr(c, body, result);
+        if (vt.kind == .Error)
+            continue;
+        if (vt.kind == .Void) {
+            let hint = if (label != null) tformat("; to run it first, end the case with `break % = value;`", label.tok.text) else "";
+            error(c, body.tok, tformat("this returns nothing, so it can't be the case's value%", hint));
+            continue;
+        }
+        if (result == null) {
+            result = if (is_untyped(vt)) default_type(c, body) else vt;
+            continue;
+        }
+        coerce(c, body, result);
+    }
+    let fallback = if (result != null) result else c.types.error;
+
+    // cases that can never be reached, among those Maranget's check sees
+    if (in_order && !broken && values.kind != .Error)
+        unreachable_cases(c, clauses, t);
+
+    // without a `default`, a switch on an enum must handle every variant,
+    // and a switch expression must give a value for everything
+    if (default_case != null || values.kind == .Error)
+        return fallback;
+    let is_enum = values.kind == .Enum && !values.is_failure;
+    if (in_order && is_enum && !broken) {
+        set_complete(n); // reported if not
+        // variants no case names at all are listed, as below; otherwise an
+        // example of a value nothing handles
+        let unnamed: [..]string;
+        for (v in enum_variants(values.decl)) {
+            let named = false;
+            for (clause in clauses) {
+                let patterns, _, _ = case_parts(clause);
+                for (p in patterns) {
+                    let head = pattern_head(p);
+                    named = named || (head.cval.kind == .Int && i128_eq(head.cval.i, v.cval.i));
+                }
+            }
+            if (!named)
+                array_add(&unnamed, tformat("`.%`", v.tok.text));
+        }
+        let rows: [..][]Pat;
+        for (clause in clauses) {
+            let patterns, guard, _ = case_parts(clause);
+            if (guard == null)
+                for (p in patterns)
+                    array_add(&rows, single(to_pat(p, t)));
+        }
+        if (unnamed.len == 0) {
+            let witness, ok = useful(rows, wilds(1), .[t]);
+            if (ok)
+                error(c, n.tok, tformat("this switch doesn't handle `%` of %; add a case for it, or a `default`",
+                                        show(witness[0], t), qt(t)));
+            return fallback;
+        }
+        error(c, n.tok, tformat("this switch doesn't handle % of %; add %, or a `default`", name_list(unnamed), qt(t),
+                                if (unnamed.len == 1) "a case for it" else "cases for them"));
+        return fallback;
+    }
+    if (broken && is_enum) {
+        set_complete(n); // reported: no "can reach the end" either
+        return fallback;
+    }
+    if (!is_enum) {
+        if (is_expr)
+            error(c, n.tok, tformat("a switch expression needs a `default`: there's no case for every %", qt(values)));
+        return fallback;
+    }
+    let missing: [..]string;
+    for (v in enum_variants(values.decl)) {
+        let handled = false;
+        for (s in seen)
+            handled = handled || (!s.m.is_text && !i128_lt(v.cval.i, s.m.lo) && !i128_lt(s.m.hi, v.cval.i));
+        if (!handled) {
+            array_add(&missing, tformat("`.%`", v.tok.text));
+            array_add(&seen, Seen.{ .m = .{ .known = true, .lo = v.cval.i, .hi = v.cval.i }, .at = v }); // once
+        }
+    }
+    set_complete(n); // (reported if not: no "can reach the end" on top)
+    if (missing.len == 0)
+        return fallback;
+    error(c, n.tok, tformat("this switch doesn't handle % of %; add %, or a `default`", name_list(missing),
+                            qt(if (tagged != null) tagged else values),
+                            if (missing.len == 1) "a case for it" else "cases for them"));
+    return fallback;
+}
+
+fn single(p: Pat) -> []Pat {
+    let row = new([]Pat, 1);
+    row[0] = p;
+    return row;
+}
+
+fn set_in_order(n: *Node) {
+    switch (n.kind) {
+    case .Switch{in_order: &flag}: flag.* = true;
+    default:
+    }
+}
+
+fn set_complete(n: *Node) {
+    switch (n.kind) {
+    case .Switch{complete: &flag}: flag.* = true;
+    default:
+    }
+}
+
+// if (c) a else b: the type its context wants, or the values'; an untyped
+// value follows a typed one, as for `+`
+pub fn check_if_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    let cond_node: *Node = null;
+    let then: *Node = null;
+    let else_: *Node = null;
+    if (n.kind is .If{cond: x, then: y, else_: z})
+        cond_node, then, else_ = x, y, z;
+    let cond = check_expr(c, cond_node, c.types.bool_);
+    if (cond.kind != .Error && cond != c.types.bool_)
+        error(c, cond_node.tok, tformat("an `if` needs a `bool` condition, found %", qt(cond)));
+    let result = expected;
+    let a = check_expr(c, then, result);
+    if (result == null && !is_untyped(a) && a.kind != .Error)
+        result = a;
+    let b = check_expr(c, else_, result);
+    if (a.kind == .Error || b.kind == .Error)
+        return c.types.error;
+    if (result == null && !is_untyped(b))
+        result = b;
+    if (result == null) // both untyped: 1 and 2.5 make a float
+        result = if (a.kind == .UntypedFloat || b.kind == .UntypedFloat) c.types.f64 else default_type(c, then);
+    // with nothing to say which type is right, values that can't agree are
+    // reported together
+    if (expected == null && (!can_coerce(c, then, a, result) || !can_coerce(c, else_, b, result))) {
+        let qa, qb = q2(shown_type(c, a), shown_type(c, b));
+        error(c, n.tok, tformat("the `if`'s two values don't agree: % and %; give the result a type, or convert one with `as`",
+                                qa, qb));
+        return c.types.error;
+    }
+    if (!coerce(c, then, result) || !coerce(c, else_, result))
+        return c.types.error;
+    // a constant condition with constant values folds (unless the value is
+    // converted, as to an Any)
+    if (cond_node.cval.kind == .Bool) {
+        let taken = if (cond_node.cval.i.lo != 0) then else else_;
+        if (taken.conv == null)
+            n.cval = taken.cval;
+    }
+    return result;
+}
+
+// an untyped constant's type as messages show it
+fn shown_type(c: *Checker, t: *Type) -> *Type {
+    return switch (t.kind) {
+    case .UntypedInt: c.types.isize;
+    case .UntypedFloat: c.types.f64;
+    case .UntypedString: c.types.string_;
+    default: t;
+    };
+}
+
+// a case after others that already match everything it does, guarded or
+// with patterns inside a variant (the rest are checked as duplicates)
+fn unreachable_cases(c: *Checker, clauses: []*Node, t: *Type) {
+    let before: [..][]Pat;
+    for (clause in clauses) {
+        let patterns, guard, _ = case_parts(clause);
+        for (p in patterns) {
+            let checked = guard != null || has_subpatterns(p);
+            if (!checked)
+                continue;
+            let _, ok = useful(before, single(to_pat(p, t)), .[t]);
+            if (!ok)
+                error(c, p.tok, "this case can't be reached: the cases before it already match everything it does");
+        }
+        if (guard == null)
+            for (p in patterns)
+                array_add(&before, single(to_pat(p, t)));
+    }
+}
+
+// e is .Number(n): does e match the pattern? bool
+pub fn check_is(c: *Checker, n: *Node) -> *Type {
+    let value: *Node = null;
+    let pattern: *Node = null;
+    if (n.kind is .Is{value: v, pattern: p})
+        value, pattern = v, p;
+    let t = check_expr(c, value, null);
+    if (t.kind == .UntypedInt || t.kind == .UntypedString)
+        t = default_type(c, value);
+    let values = if (t.is_tagged) t.fields[0].ty else t;
+    if (values.kind != .Int && values.kind != .Enum && !values.is_string) {
+        if (t.kind != .Error)
+            error(c, n.tok, tformat("`is` matches integers, enums, tagged enums and strings, not %", qt(t)));
+        fail_bindings(c, pattern);
+        return c.types.bool_;
+    }
+    check_pattern(c, pattern, t, value, true);
+    return c.types.bool_;
+}
+
+// a loop's or switch's own parts, where its unlabeled breaks are its own
+fn own_bodies(n: *Node) -> [..]*Node {
+    let out: [..]*Node;
+    out.allocator = context.temp_allocator;
+    switch (n.kind) {
+    case .While{body}: array_add(&out, body);
+    case .DoWhile{body}: array_add(&out, body);
+    case .For{body}: array_add(&out, body);
+    case .ForIn{body}: array_add(&out, body);
+    case .Switch{cases}:
+        for (clause in cases) {
+            let _, _, body = case_parts(clause);
+            if (body != null)
+                array_add(&out, body);
+        }
+    default:
+    }
+    return out;
+}
+
+// can `loop` be left by a break in `n`? an unlabeled break belongs to the
+// innermost loop or switch around it; a labeled one names its target
+fn has_break(n: *Node, loop: *Node, nested: bool) -> bool {
+    if (n == null)
+        return false;
+    switch (n.kind) {
+    case .Break{label}:
+        return if (label != null) n.decl == loop else !nested;
+    case .StaticIf:
+        return has_break(static_if_branch(n), loop, nested);
+    case .While, .DoWhile, .For, .ForIn, .Switch:
+        // their own unlabeled breaks are theirs; a labeled one can reach out
+        for (body in own_bodies(n))
+            if (has_break(body, loop, true))
+                return true;
+        return false;
+    default:
+        for (child in children(n))
+            if (has_break(child, loop, nested))
+                return true;
+        return false;
+    }
+}
+
+fn is_const_true(n: *Node) -> bool {
+    return n == null || (n.cval.kind == .Bool && n.cval.i.lo != 0);
+}
+
+// does every path through `n` end in a return (or loop forever)? `sw`: a
+// labeled switch whose `continue sw = v` goes back into it, which doesn't
+// reach the end either
+pub fn always_returns(n: *Node, sw: *Node) -> bool {
+    if (n == null)
+        return false;
+    switch (n.kind) {
+    case .Return, .InsertString: // code that couldn't be made: its errors are out
+        return true;
+    case .Continue:
+        return sw != null && n.decl == sw;
+    case .Break{value}: // break name = v gives the value of what `sw` names
+        return sw != null && n.decl == sw && value != null;
+    case .Block{stmts}:
+        for (s in stmts)
+            if (always_returns(s, sw))
+                return true;
+        return false;
+    case .If{then, else_}:
+        return else_ != null && always_returns(then, sw) && always_returns(else_, sw);
+    case .StaticIf:
+        return always_returns(static_if_branch(n), sw);
+    case .While{cond, body}:
+        return is_const_true(cond) && !has_break(body, n, false);
+    case .For{cond, body}:
+        return is_const_true(cond) && !has_break(body, n, false);
+    case .DoWhile{body, cond}:
+        return always_returns(body, sw) || (is_const_true(cond) && !has_break(body, n, false));
+    case .Switch{cases, complete}:
+        let has_default = false;
+        for (clause in cases) {
+            let _, _, body = case_parts(clause);
+            has_default = has_default || clause.kind.tag == .DefaultCase;
+            if (!always_returns(body, n) || has_break(body, n, false))
+                return false;
+        }
+        return has_default || complete;
+    default:
+        return false;
+    }
+}

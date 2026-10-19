@@ -22,6 +22,16 @@ pub fn load_source(path: string) -> (Source, IoError) {
 
 pub enum Severity { Error, Warning, Note }
 
+// Called before a syntax error stops the compiler, for notes saying where
+// the code came from (code made by `#insert`); null otherwise
+pub let on_fatal_error: fn(*void);
+pub let on_fatal_error_data: *void;
+
+pub fn fatal_error_notes() {
+    if (on_fatal_error != null)
+        on_fatal_error(on_fatal_error_data);
+}
+
 // a message about `at`, a view of the source's text (a token's text, or
 // an empty view where something is missing)
 pub fn report(src: *Source, severity: Severity, at: string, message: string) {

@@ -1,0 +1,7 @@
+// the code is made while compiling, before locals exist
+fn same(s: []u8) -> []u8 { return s; }
+
+fn main() {
+    let text = "let a = 1;";
+    #insert #run same(text);
+}

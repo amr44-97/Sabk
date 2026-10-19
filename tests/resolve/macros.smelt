@@ -1,0 +1,13 @@
+// hygiene: which declaration each name links to
+fn add_to_total(n: i32) #expand {
+    let tmp = n * 2;          // the macro's own tmp
+    `total += tmp;            // the caller's total
+    `let added = tmp;         // declared for the caller
+}
+
+fn f() {
+    let total = 0;
+    let tmp = 10;             // the caller's tmp
+    add_to_total(tmp);
+    total += added + tmp;
+}

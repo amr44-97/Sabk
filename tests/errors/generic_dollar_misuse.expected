@@ -1,0 +1,9 @@
+[error]: `$T` declares a type parameter, which only a function parameter's type can do; write `T` to use one at [tests/errors/generic_dollar_misuse.smelt:1:29]
+     1 | fn wrong_return(x: i32) -> $T { return x; }
+       |                             ^
+[error]: `$T` declares a type parameter, which only a function parameter's type can do; write `T` to use one at [tests/errors/generic_dollar_misuse.smelt:2:20]
+     2 | struct S { field: $T; }
+       |                    ^
+[error]: `$U` declares a type parameter, which only a function parameter's type can do; write `U` to use one at [tests/errors/generic_dollar_misuse.smelt:3:26]
+     3 | fn body(x: $T) { let y: $U = x; }
+       |                          ^

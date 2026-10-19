@@ -1,0 +1,174 @@
+MODULE tests/types/several_results.smelt
+ROOT
+  ENUM `Error` : Error
+    ENUM_VARIANT `None` : Error = 0
+    ENUM_VARIANT `Bad` : Error = 1
+  FUN_DECL `divide` : fn(i64, i64) -> (i64, i64)
+    type: TYPE_TUPLE `(` : (i64, i64)
+      TYPE_NAME `i64` -> builtin : i64
+      TYPE_NAME `i64` -> builtin : i64
+    rhs: BLOCK
+      RETURN
+        lhs: VALUES `/` : (i64, i64)
+          DIV `/` : i64
+            lhs: IDENTIFIER `a` -> FUN_PARAM `a` 4:11 : i64
+            rhs: IDENTIFIER `b` -> FUN_PARAM `b` 4:19 : i64
+          MOD `%` : i64
+            lhs: IDENTIFIER `a` -> FUN_PARAM `a` 4:11 : i64
+            rhs: IDENTIFIER `b` -> FUN_PARAM `b` 4:19 : i64
+    FUN_PARAM `a` : i64
+      type: TYPE_NAME `i64` -> builtin : i64
+    FUN_PARAM `b` : i64
+      type: TYPE_NAME `i64` -> builtin : i64
+  FUN_DECL `first` [generic]
+    type: TYPE_TUPLE `(`
+      TYPE_NAME `T` -> TYPE_PARAM `T` 6:17
+      TYPE_NAME `bool` -> builtin
+    rhs: BLOCK
+      IF
+        lhs: EQ_EQ `==`
+          lhs: MEMBER `len`
+            lhs: IDENTIFIER `xs` -> FUN_PARAM `xs` 6:10
+          rhs: NUMBER_LITERAL `0`
+        rhs: BLOCK
+          VAR_DECL `none`
+            type: TYPE_NAME `T` -> TYPE_PARAM `T` 6:17
+          RETURN
+            lhs: VALUES `none`
+              IDENTIFIER `none` -> VAR_DECL `none` 8:13
+              BOOL_LITERAL `false`
+      RETURN
+        lhs: VALUES `[`
+          INDEX `[`
+            lhs: IDENTIFIER `xs` -> FUN_PARAM `xs` 6:10
+            rhs: NUMBER_LITERAL `0`
+          BOOL_LITERAL `true`
+    FUN_PARAM `xs`
+      type: TYPE_SLICE `[`
+        lhs: TYPE_PARAM `T`
+  FUN_DECL `parse` : fn(string) -> (u8, Error)
+    type: TYPE_TUPLE `(` : (u8, Error)
+      TYPE_NAME `u8` -> builtin : u8
+      TYPE_NAME `Error` -> ENUM `Error` tests/types/several_results.smelt:2:6 : Error
+    rhs: BLOCK
+      IF
+        lhs: EQ_EQ `==` : bool
+          lhs: MEMBER `len` : isize
+            lhs: IDENTIFIER `s` -> FUN_PARAM `s` 14:10 : string
+          rhs: NUMBER_LITERAL `0` : isize = 0
+        rhs: RETURN
+          lhs: VALUES `0` : (u8, Error)
+            NUMBER_LITERAL `0` : u8 = 0
+            ENUM_SHORTHAND `.Bad` -> ENUM_VARIANT `Bad` tests/types/several_results.smelt:2:20 : Error = 1
+      RETURN
+        lhs: VALUES `[` : (u8, Error)
+          INDEX `[` : u8
+            lhs: IDENTIFIER `s` -> FUN_PARAM `s` 14:10 : string
+            rhs: NUMBER_LITERAL `0` : isize = 0
+          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt:2:14 : Error = 0
+    FUN_PARAM `s` : string
+      type: TYPE_NAME `string` -> builtin : string
+  FUN_DECL `twice` : fn(string) -> (u16, Error)
+    type: TYPE_TUPLE `(` : (u16, Error)
+      TYPE_NAME `u16` -> builtin : u16
+      TYPE_NAME `Error` -> ENUM `Error` tests/types/several_results.smelt:2:6 : Error
+    rhs: BLOCK
+      VAR_DECL `c` : u8
+        lhs: OR_RETURN : u8
+          lhs: CALL `(` : (u8, Error)
+            lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, Error)
+            IDENTIFIER `s` -> FUN_PARAM `s` 19:10 : string
+      RETURN
+        lhs: VALUES `*` : (u16, Error)
+          MUL `*` : u16
+            lhs: CAST : u16
+              type: TYPE_NAME `u16` -> builtin : u16
+              lhs: IDENTIFIER `c` -> VAR_DECL `c` 20:9 : u8
+            rhs: NUMBER_LITERAL `2` : u16 = 2
+          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt:2:14 : Error = 0
+    FUN_PARAM `s` : string
+      type: TYPE_NAME `string` -> builtin : string
+  FUN_DECL `main` : fn()
+    rhs: BLOCK
+      LET_VALUES `q`
+        lhs: CALL `(` : (i64, i64)
+          lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.smelt:4:4 : fn(i64, i64) -> (i64, i64)
+          NUMBER_LITERAL `7` : i64 = 7
+          NUMBER_LITERAL `2` : i64 = 2
+        VAR_DECL `q` : i64
+        VAR_DECL `r` : i64
+      VAR_DECL `x` : f32
+        lhs: OR_ELSE : f32
+          lhs: CALL `(` -> FUN_DECL `first` tests/types/several_results.smelt:6:4 : (f32, bool)
+            lhs: IDENTIFIER `first` -> FUN_DECL `first` tests/types/several_results.smelt:6:4 : fn([]f32) -> (f32, bool)
+            ARRAY_LITERAL `.` : [1]f32
+              type: TYPE_NAME `f32` -> builtin : f32
+              FLOAT_LITERAL `1.5` : f32 = 1.5
+          rhs: NUMBER_LITERAL `0` : f32 = 0
+      LET_VALUES `a`
+        VAR_DECL `a` : isize
+          lhs: NUMBER_LITERAL `1` : isize = 1
+        VAR_DECL `b` : string
+          lhs: STRING_LITERAL `"two"` : string
+      VAR_DECL `f` : fn(i64, i64) -> (i64, i64)
+        type: TYPE_FN : fn(i64, i64) -> (i64, i64)
+          type: TYPE_TUPLE `(` : (i64, i64)
+            TYPE_NAME `i64` -> builtin : i64
+            TYPE_NAME `i64` -> builtin : i64
+          TYPE_NAME `i64` -> builtin : i64
+          TYPE_NAME `i64` -> builtin : i64
+        lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.smelt:4:4 : fn(i64, i64) -> (i64, i64)
+      ASSIGN `=`
+        lhs: VALUES `q`
+          IDENTIFIER `q` -> VAR_DECL `q` 25:9 : i64
+          IDENTIFIER `r` -> VAR_DECL `r` 25:12 : i64
+        rhs: CALL `(` : (i64, i64)
+          lhs: IDENTIFIER `f` -> VAR_DECL `f` 28:9 : fn(i64, i64) -> (i64, i64)
+          NUMBER_LITERAL `9` : i64 = 9
+          NUMBER_LITERAL `4` : i64 = 4
+      VAR_DECL `wide` : i64
+        type: TYPE_NAME `i64` -> builtin : i64
+      VAR_DECL `small` : u8
+        type: TYPE_NAME `u8` -> builtin : u8
+      ASSIGN `=`
+        lhs: VALUES `small`
+          IDENTIFIER `small` -> VAR_DECL `small` 31:9 : u8
+          IDENTIFIER `_`
+        rhs: CALL `(` : (u8, Error)
+          lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, Error)
+          STRING_LITERAL `"a"` : string
+      ASSIGN `=`
+        lhs: VALUES `wide`
+          IDENTIFIER `wide` -> VAR_DECL `wide` 30:9 : i64
+          IDENTIFIER `_`
+        rhs: CALL `(` : (i64, i64)
+          lhs: IDENTIFIER `divide` -> FUN_DECL `divide` tests/types/several_results.smelt:4:4 : fn(i64, i64) -> (i64, i64)
+          IDENTIFIER `small` -> VAR_DECL `small` 31:9 : u8
+          NUMBER_LITERAL `1` : i64 = 1
+INSTANCE `first` with T = f32
+FUN_DECL `first` : fn([]f32) -> (f32, bool)
+  type: TYPE_TUPLE `(` : (f32, bool)
+    TYPE_NAME `T` -> TYPE_PARAM `T` 6:17 : f32
+    TYPE_NAME `bool` -> builtin : bool
+  rhs: BLOCK
+    IF
+      lhs: EQ_EQ `==` : bool
+        lhs: MEMBER `len` : isize
+          lhs: IDENTIFIER `xs` -> FUN_PARAM `xs` 6:10 : []f32
+        rhs: NUMBER_LITERAL `0` : isize = 0
+      rhs: BLOCK
+        VAR_DECL `none` : f32
+          type: TYPE_NAME `T` -> TYPE_PARAM `T` 6:17 : f32
+        RETURN
+          lhs: VALUES `none` : (f32, bool)
+            IDENTIFIER `none` -> VAR_DECL `none` 8:13 : f32
+            BOOL_LITERAL `false` : bool = false
+    RETURN
+      lhs: VALUES `[` : (f32, bool)
+        INDEX `[` : f32
+          lhs: IDENTIFIER `xs` -> FUN_PARAM `xs` 6:10 : []f32
+          rhs: NUMBER_LITERAL `0` : isize = 0
+        BOOL_LITERAL `true` : bool = true
+  FUN_PARAM `xs` : []f32
+    type: TYPE_SLICE `[` : []f32
+      lhs: TYPE_PARAM `T` : f32

@@ -1,0 +1,90 @@
+MODULE tests/resolve/locals.smelt
+ROOT
+  CONST_DECL `X`
+    lhs: NUMBER_LITERAL `1`
+  FUN_DECL `f`
+    type: TYPE_NAME `i32` -> builtin
+    rhs: BLOCK
+      VAR_DECL `x`
+        lhs: ADD `+`
+          lhs: IDENTIFIER `X` -> CONST_DECL `X` tests/resolve/locals.smelt:1:7
+          rhs: IDENTIFIER `a` -> FUN_PARAM `a` 3:6
+      BLOCK
+        VAR_DECL `x`
+          lhs: MUL `*`
+            lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+            rhs: NUMBER_LITERAL `2`
+        VAR_DECL `y`
+          type: TYPE_NAME `i32` -> builtin
+          lhs: IDENTIFIER `x` -> VAR_DECL `x` 6:13
+      FOR_IN `i`
+        lhs: NUMBER_LITERAL `0`
+        rhs: BLOCK
+          ASSIGN `+=`
+            lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+            rhs: IDENTIFIER `i` -> FOR_IN `i` 9:10
+        extra: IDENTIFIER `a` -> FUN_PARAM `a` 3:6
+      FOR
+        rhs: BLOCK
+          IF
+            lhs: EQ_EQ `==`
+              lhs: IDENTIFIER `j` -> VAR_DECL `j` 10:14
+              rhs: NUMBER_LITERAL `2`
+            rhs: BREAK
+            extra: CONTINUE
+        VAR_DECL `j`
+          lhs: NUMBER_LITERAL `0`
+        LT `<`
+          lhs: IDENTIFIER `j` -> VAR_DECL `j` 10:14
+          rhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+        INC `++`
+          lhs: IDENTIFIER `j` -> VAR_DECL `j` 10:14
+      SWITCH
+        lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+        CASE
+          rhs: BLOCK
+            BREAK
+          NUMBER_LITERAL `1`
+        DEFAULT_CASE
+          rhs: BLOCK
+            ASSIGN `=`
+              lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+              rhs: DEREF `*`
+                lhs: IDENTIFIER `b` -> FUN_PARAM `b` 3:14
+      DEFER
+        lhs: ASSIGN `=`
+          lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+          rhs: NUMBER_LITERAL `0`
+      WHILE
+        lhs: GT `>`
+          lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+          rhs: NUMBER_LITERAL `0`
+        rhs: BLOCK
+          DEFER
+            lhs: EXPR_STMT `g`
+              lhs: CALL `(`
+                lhs: IDENTIFIER `g` -> FUN_DECL `g` tests/resolve/locals.smelt:16:4
+                IDENTIFIER `x` -> VAR_DECL `x` 4:9
+          DEC `--`
+            lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+      RETURN
+        lhs: IDENTIFIER `x` -> VAR_DECL `x` 4:9
+    FUN_PARAM `a`
+      type: TYPE_NAME `i32` -> builtin
+    FUN_PARAM `b`
+      type: TYPE_PTR `*`
+        lhs: TYPE_NAME `i32` -> builtin
+  FUN_DECL `g`
+    rhs: BLOCK
+    FUN_PARAM `v`
+      type: TYPE_NAME `i32` -> builtin
+  ENUM `E`
+    ENUM_VARIANT `A`
+    ENUM_VARIANT `B`
+      lhs: ADD `+`
+        lhs: IDENTIFIER `A` -> ENUM_VARIANT `A` tests/resolve/locals.smelt:18:10
+        rhs: NUMBER_LITERAL `1`
+    ENUM_VARIANT `C`
+      lhs: MUL `*`
+        lhs: IDENTIFIER `B` -> ENUM_VARIANT `B` tests/resolve/locals.smelt:18:13
+        rhs: NUMBER_LITERAL `2`

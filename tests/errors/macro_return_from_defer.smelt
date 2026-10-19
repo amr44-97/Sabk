@@ -1,0 +1,5 @@
+fn m() -> i32 #expand {
+    defer { return 1; }
+    return 2;
+}
+fn f() { let x = m(); }

@@ -1,0 +1,6 @@
+[error]: `body` is a block, so it can't be inserted into an expression at [tests/errors/macro_block_as_expression.smelt:1:44]
+     1 | fn m(body: Code) #expand { let x = #insert body; }
+       |                                            ^
+[note]: in the expansion of `m` here at [tests/errors/macro_block_as_expression.smelt:2:10]
+     2 | fn f() { m() { } }
+       |          ^

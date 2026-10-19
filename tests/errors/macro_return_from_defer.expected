@@ -1,0 +1,6 @@
+[error]: can't `return` from inside a `defer` at [tests/errors/macro_return_from_defer.smelt:2:13]
+     2 |     defer { return 1; }
+       |             ^
+[note]: in the expansion of `m` here at [tests/errors/macro_return_from_defer.smelt:5:18]
+     5 | fn f() { let x = m(); }
+       |                  ^

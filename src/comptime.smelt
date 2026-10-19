@@ -1,0 +1,275 @@
+// The checker's compile-time parts: `#run`, the strings `#insert` splices
+// in, top-level `#if` conditions, what type_info says about a type, build
+// steps, and field defaults.
+//
+// Running code needs the bytecode VM, which isn't ported yet: a `#run`
+// whose value is already known (`#run 4 * 1024`) folds, and any other is
+// an error until the VM is.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/str";
+import "ast";
+import "const";
+import "lexer";
+import "module";
+import "types";
+import "check";
+import "expressions";
+import "patterns";
+
+/* -------------------------------------------------------------------- #run */
+
+// #run expr: runs `expr` now and puts its value in its place
+pub fn check_run(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    let inner: *Node = null;
+    if (n.kind is .Run{value})
+        inner = value;
+    c.in_run++;
+    let t = check_expr(c, inner, expected);
+    c.in_run--;
+    if (t.kind == .Error)
+        return t;
+    if (is_constant(inner) && t.kind != .Void) {
+        n.* = inner.*; // already known: `#run 4 * 1024`
+        return n.ty;
+    }
+    t = default_type(c, inner);
+    let statement = n == c.run_statement;
+    c.run_statement = null;
+    if (t.kind == .Void && !statement) {
+        error(c, n.tok, "`#run` of something that returns nothing has no value; use it as a statement, `#run f();`");
+        return c.types.error;
+    }
+    if (c.error_count > 0 || c.res.error_count > 0)
+        return c.types.error; // the program it would run may be broken
+    error(c, n.tok, "`#run` needs the bytecode VM, which the new compiler doesn't have yet");
+    return c.types.error;
+}
+
+// `#insert e`: e must come to a string literal: `#run f()`, a string, or a
+// constant holding one. The resolver calls this while it's resolving `m`.
+pub fn insert_text_of(c: *Checker, e: *Node, m: *Module) -> (string, bool) {
+    prepare(c);
+    let place = leave_place(c);
+    c.mod = m;
+    c.current_fn = null; // current_instance stays: for its notes
+    let t = check_expr(c, e, c.types.string_);
+    return_to_place(c, &place);
+    if (t.kind == .Error)
+        return "", false;
+
+    let lit = e;
+    while (true) {
+        if (lit.kind is .Grouped{inner}) {
+            lit = inner;
+        } else if ((lit.kind.tag == .Identifier || lit.kind.tag == .Member) && lit.decl != null &&
+                   lit.decl.kind is .Const{value} && value != null) {
+            lit = value;
+        } else {
+            break;
+        }
+    }
+    if (lit.kind.tag != .String) {
+        error(c, e.tok, tformat("`#insert` needs a string known at compile time, like `#insert #run f()`; this is %", qt(t)));
+        return "", false;
+    }
+    return string_literal_text(lit), true;
+}
+
+// A top-level #if's condition, checked while the resolver decides which
+// branch is part of the program: a bool known at compile time. Its value,
+// and whether it's known; `top_level`: a top-level #if, which reports a
+// condition that isn't known.
+pub fn static_condition(c: *Checker, e: *Node, m: *Module, top_level: bool) -> (bool, bool) {
+    prepare(c);
+    let saved_mod = c.mod;
+    let saved_fn = c.current_fn;
+    c.mod = m;
+    c.current_fn = null;
+    let t = check_expr(c, e, null);
+    c.mod = saved_mod;
+    c.current_fn = saved_fn;
+    if (t.kind == .Error)
+        return false, false;
+    if (t.kind != .Bool) {
+        if (top_level)
+            error(c, e.tok, tformat("`#if` needs a `bool` condition, found %", qt(t)));
+        return false, false;
+    }
+    if (e.cval.kind != .Bool) {
+        if (top_level) // in a function, the statement's check reports it
+            error(c, e.tok, "a top-level `#if` needs a condition known at compile time, such as `OS == .Windows`");
+        return false, false;
+    }
+    return e.cval.i.lo != 0, true;
+}
+
+// Does `use` name a declaration a top-level #if set aside? Code that's
+// compiled can't: the declaration isn't part of the program.
+pub fn untaken(c: *Checker, use: *Node, d: *Node) -> bool {
+    if (d == null || d.untaken_if == null)
+        return false;
+    let cond: *Node = null;
+    if (d.untaken_if.kind is .StaticIf{cond: x})
+        cond = x;
+    error(c, use.tok, tformat("% isn't part of the program: it's declared in a branch of a top-level `#if` that isn't taken",
+                              q(d.tok.text)));
+    note(c, cond.tok, tformat("the condition `%` picks another branch", text_of(cond)));
+    return true;
+}
+
+/* -------------------------------------------------------------- type info */
+
+pub struct FieldShape {
+    name: string;
+    ty: *Type;
+    offset: u64;
+}
+
+pub struct VariantShape {
+    name: string;
+    value: i64;
+    payload: *Type; // or null
+}
+
+// What a TypeInfo (the prelude's) says about a type: the code generator
+// writes it as C data, the #run interpreter builds it in memory
+pub struct TypeShape {
+    kind: string; // a TypeKind variant: "Int", "Struct", ...
+    elem: *Type;
+    count: u64;
+    fields: [..]FieldShape;
+    variants: [..]VariantShape;
+}
+
+pub fn shape_of(c: *Checker, t: *Type) -> TypeShape {
+    layout(c, t);
+    let s: TypeShape;
+    switch (t.kind) {
+    case .Void: s.kind = "Void";
+    case .Bool: s.kind = "Bool";
+    case .Int: s.kind = "Int";
+    case .Float: s.kind = "Float";
+    case .Rawptr: // *void
+        s.kind = "Pointer";
+        s.elem = c.types.void_;
+    case .Fn: s.kind = "Function";
+    case .Ptr:
+        s.kind = "Pointer";
+        s.elem = t.elem;
+    case .Array:
+        s.kind = "Array";
+        s.elem = t.elem;
+        s.count = t.len;
+    case .Slice:
+        s.kind = if (t.is_string) "String" else "Slice";
+        s.elem = t.elem;
+    case .Growable:
+        s.kind = "Growable";
+        s.elem = t.elem;
+    case .Enum:
+        s.kind = "Enum";
+        s.elem = t.elem;
+        for (v in enum_variants(t.decl))
+            array_add(&s.variants, VariantShape.{ .name = v.tok.text, .value = i128_to_i64(v.cval.i) });
+    case .Struct, .Union:
+        s.kind = if (t.is_tagged) "TaggedEnum" else if (t.kind == .Struct) "Struct" else "Union";
+        for (f in t.fields)
+            array_add(&s.fields, FieldShape.{ .name = f.name, .ty = f.ty, .offset = f.offset });
+        if (t.is_tagged) {
+            s.elem = t.fields[0].ty.elem;
+            for (v in enum_variants(t.decl))
+                array_add(&s.variants, VariantShape.{ .name = v.tok.text, .value = i128_to_i64(v.cval.i),
+                                                      .payload = payload_of(t, v) });
+        }
+    default:
+        s.kind = "Void";
+    }
+    return s;
+}
+
+// TypeKind.<kind>
+pub fn type_kind_value(c: *Checker, kind: string) -> i64 {
+    let d = map_get(&c.res.prelude.scope, ScopeKey.{ .name = "TypeKind" }) or_else null;
+    for (v in enum_variants(d))
+        if (v.tok.text == kind)
+            return i128_to_i64(v.cval.i);
+    return 0;
+}
+
+/* ------------------------------------------------------------ build steps */
+
+// Top-level `#run`s, in order, once the program checks without errors:
+// build scripts, which can set how it's built (std/build). Any value they
+// make is dropped. Until the VM is ported they're checked, not run.
+pub fn run_build_steps(c: *Checker) {
+    for (n in c.build_steps) {
+        if (c.error_count > 0)
+            return; // the code they'd run may be broken
+        c.mod = n.owner;
+        let value: *Node = null;
+        if (n.kind is .Run{value: v})
+            value = v;
+        let t = check_expr(c, value, null);
+        if (t.kind == .Error || c.error_count > 0)
+            continue;
+        if (is_untyped(t))
+            default_type(c, value);
+        let i: isize = 0;
+        while (i < c.pending.len) { // instances it needed
+            c.current_instance = c.pending[i];
+            check_fn_body(c, c.pending[i]);
+            i++;
+        }
+        c.current_instance = null;
+    }
+}
+
+/* --------------------------------------------------------------- defaults */
+
+// Field defaults apply wherever a value is made without saying what it is
+// (`let x: T;`, new(T), a field left out of a literal): does `t`, or
+// something it holds by value, have any? Types without are just zeroed.
+pub fn has_defaults(c: *Checker, t: *Type) -> bool {
+    let known = map_get(&c.defaults_known, t) or_else 0;
+    if (known != 0)
+        return known == 3; // 1: a type holding itself is reported elsewhere
+    map_put(&c.defaults_known, t, 1);
+    let any = false;
+    if (t.kind == .Array) {
+        any = has_defaults(c, t.elem);
+    } else if (t.is_tagged) { // its zero is the first variant, so its value's
+        let first = payload_of(t, enum_variants(t.decl)[0]);
+        any = first != null && has_defaults(c, first);
+    } else if (t.kind == .Struct) {
+        for (f in t.fields)
+            any = any || (f.decl != null && value_of(f.decl) != null) || has_defaults(c, f.ty);
+    }
+    let state: i32 = if (any) 3 else 2;
+    map_put(&c.defaults_known, t, state);
+    return any;
+}
+
+// a global without a value starts as its type's defaults, which C needs to
+// know at compile time: a default that isn't constant, or null
+pub fn non_constant_default(c: *Checker, t: *Type) -> *Node {
+    if (!has_defaults(c, t))
+        return null;
+    if (t.kind == .Array)
+        return non_constant_default(c, t.elem);
+    if (t.is_tagged)
+        return non_constant_default(c, payload_of(t, enum_variants(t.decl)[0]));
+    for (f in t.fields) {
+        let value: *Node = if (f.decl != null) value_of(f.decl) else null;
+        if (value != null && !is_constant(value))
+            return f.decl;
+        if (value == null) {
+            let inner = non_constant_default(c, f.ty);
+            if (inner != null)
+                return inner;
+        }
+    }
+    return null;
+}

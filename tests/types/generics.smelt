@@ -1,0 +1,8 @@
+fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
+struct Box($T) { value: T; }
+fn wrap(x: $T) -> Box(T) { return Box(T).{ .value = x }; }
+fn f() {
+    let small: u8 = 7;
+    let a = max(small, 300 - 100);
+    let b = wrap(1.5);
+}

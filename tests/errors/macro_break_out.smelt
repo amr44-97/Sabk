@@ -1,0 +1,4 @@
+fn stop() #expand { break; }
+fn f() {
+    while (true) { stop(); }
+}

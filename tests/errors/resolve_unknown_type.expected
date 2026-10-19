@@ -1,0 +1,3 @@
+[error]: unknown type `Strng` at [tests/errors/resolve_unknown_type.smelt:1:8]
+     1 | let x: Strng;
+       |        ^

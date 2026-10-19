@@ -1,0 +1,3 @@
+[error]: `g` is not a struct type at [tests/errors/resolve_not_a_struct.smelt:2:18]
+     2 | fn f() { let a = g.{}; }
+       |                  ^

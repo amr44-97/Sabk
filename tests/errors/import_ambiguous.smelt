@@ -1,0 +1,8 @@
+import "lib/left";
+import "lib/right";
+
+fn f(s: Shape) {
+    shared();
+    left.shared();            // fine: qualified
+    only_left();              // fine: only one has it
+}

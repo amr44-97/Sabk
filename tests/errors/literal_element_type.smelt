@@ -1,0 +1,9 @@
+// T.[a, b] needs a type before the dot
+struct Point { x: i64; }
+fn make() -> i64 { return 1; }
+
+fn f(x: i64, p: Point) {
+    let v = x.[1, 2];              // a variable
+    let w = make().[1];            // a call
+    let ps = *Point.[p];           // `*` applies to the literal
+}

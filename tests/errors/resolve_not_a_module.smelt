@@ -1,0 +1,2 @@
+let v: i32 = 0;
+let x: v.T;
