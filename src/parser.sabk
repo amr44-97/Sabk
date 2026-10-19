@@ -27,6 +27,7 @@ struct Parser {
     error_count: isize;
     statement_head: bool; // parsing the first expression of a statement
     in_pattern: bool;     // a case's `X:` isn't a label there
+    bare_condition: bool; // in `if x {`: a `{` after a name is the body
 }
 
 // the file's declarations, and how many errors were reported and gone past
@@ -320,8 +321,19 @@ fn fn_decl(p: *Parser) -> *Node {
     expect(p, .RParen, "`)` to close the parameter list");
 
     let result: *Node = null;
-    if (eat(p, .Arrow))
+    if (eat(p, .Arrow)) {
+        let grouped = at(p, .LParen);
         result = result_type(p);
+        // -> i64, bool { ... }: a declaration's results don't need
+        // parentheses, since its body or `;` ends them
+        if (!grouped && at(p, .Comma)) {
+            let items: [..]*Node;
+            array_add(&items, result);
+            while (eat(p, .Comma))
+                array_add(&items, type_(p));
+            result = new_node(items[0].tok, .TypeTuple(items));
+        }
+    }
 
     // fn name(...) #expand { ... } is a macro
     // fn print(fmt: string, args: ..Any) #format: calls get their format
@@ -565,6 +577,9 @@ fn values(p: *Parser) -> *Node {
 
 fn block(p: *Parser) -> *Node {
     let open = expect(p, .LBrace, "`{`");
+    let saved = p.bare_condition; // a `for` header's ends here
+    p.bare_condition = false;
+    defer p.bare_condition = saved;
     let stmts: [..]*Node;
     while (!at(p, .RBrace)) {
         if (at(p, .Eof))
@@ -609,10 +624,7 @@ fn stmt(p: *Parser) -> *Node {
 
     case .If:
         next(p);
-        expect(p, .LParen, "`(` after `if`");
-        let cond = expr(p);
-        expect(p, .RParen, "`)` after the condition");
-        let then = stmt(p);
+        let cond, then = condition_and_body(p, "if");
         let else_: *Node = null;
         if (eat(p, .Else))
             else_ = stmt(p);
@@ -620,18 +632,14 @@ fn stmt(p: *Parser) -> *Node {
 
     case .While:
         next(p);
-        expect(p, .LParen, "`(` after `while`");
-        let cond = expr(p);
-        expect(p, .RParen, "`)` after the condition");
-        return new_node(t, .While(cond, stmt(p), null));
+        let cond, body = condition_and_body(p, "while");
+        return new_node(t, .While(cond, body, null));
 
     case .Do:
         next(p);
         let body = stmt(p);
         expect(p, .While, "`while` after the `do` body");
-        expect(p, .LParen, "`(` after `while`");
-        let cond = expr(p);
-        expect(p, .RParen, "`)` after the condition");
+        let cond = condition(p, "while");
         expect(p, .Semicolon, "`;` after `do ... while (...)`");
         return new_node(t, .DoWhile(body, cond, null));
 
@@ -732,6 +740,68 @@ fn stmt(p: *Parser) -> *Node {
     return n;
 }
 
+// the condition after `if`, `while` or `switch`: `(x)` as in C, or `x`
+// alone. A `(` is the whole condition unless the condition goes on after
+// its `)`: `if (a + b) * 2 > c { ... }`.
+fn condition(p: *Parser, what: string) -> *Node {
+    if (!parenthesized(p))
+        return bare_expr(p);
+    expect(p, .LParen, tformat("`(` after `%`", what));
+    let cond = expr(p);
+    expect(p, .RParen, "`)` after the condition");
+    return cond;
+}
+
+// `if (x) stmt` takes any statement; `if x { ... }` takes a block, so the
+// condition can't run into it (`if done -count;`)
+fn condition_and_body(p: *Parser, what: string) -> (*Node, *Node) {
+    let parens = parenthesized(p);
+    let begin = peek(p).text.ptr;
+    let cond = condition(p, what);
+    if (!parens && !at(p, .LBrace))
+        return cond, fail(p, peek(p), tformat("`{` after the condition `%`: without parentheses, `%`'s body is a block",
+                                              span_from(p, begin), what));
+    return cond, stmt(p);
+}
+
+// an expression a block follows: `x {` ends at the `{`, which isn't a
+// literal's (`Vec2{`, `K.Let{`)
+fn bare_expr(p: *Parser) -> *Node {
+    let saved = p.bare_condition;
+    p.bare_condition = true;
+    let e = expr(p);
+    p.bare_condition = saved;
+    return e;
+}
+
+// is there a `(` here that holds the whole condition?
+fn parenthesized(p: *Parser) -> bool {
+    if (!at(p, .LParen))
+        return false;
+    let depth = 0;
+    let k: isize = 0;
+    while (true) {
+        let kind = peek(p, k).kind;
+        if (kind == .Eof)
+            return true; // unclosed: the `)` is reported missing
+        if (kind == .LParen)
+            depth += 1;
+        if (kind == .RParen) {
+            depth -= 1;
+            if (depth == 0)
+                break;
+        }
+        k += 1;
+    }
+    // not `(`: `if (x) (p as *f32).* = v;` is a statement after the
+    // condition, and calling what's in parentheses is rare
+    let after = peek(p, k + 1).kind;
+    let goes_on = binary_prec(after) > 0 || (after == .Bang && at(p, .Is, k + 2)) ||
+                  after == .Period || after == .LBracket || after == .As ||
+                  after == .OrReturn;
+    return !goes_on;
+}
+
 fn is_assign_op(kind: TokenKind) -> bool {
     switch (kind) {
     case .Equal, .PlusEq, .MinusEq, .StarEq, .SlashEq, .PercentEq, .AmpEq,
@@ -779,7 +849,11 @@ fn simple_stmt(p: *Parser) -> *Node {
 
 fn for_stmt(p: *Parser) -> *Node {
     let t = next(p); // for
-    expect(p, .LParen, "`(` after `for`");
+    // `for (x in xs) stmt`, or `for x in xs { ... }` without parentheses
+    let parens = eat(p, .LParen);
+    let saved = p.bare_condition;
+    p.bare_condition = !parens;
+    defer p.bare_condition = saved;
 
     // for (x in xs) / for (x, i in xs), with its index / for (i in a..b)
     let indexed = at(p, .Identifier) && at(p, .Comma, 1) && at(p, .Identifier, 2) && at(p, .In, 3);
@@ -799,8 +873,8 @@ fn for_stmt(p: *Parser) -> *Node {
                 fail(p, index.tok, tformat("a loop over a range takes one name: `%` would only count what `%` counts",
                                            index.tok.text, name.text));
         }
-        expect(p, .RParen, "`)` after the loop header");
-        return new_node(name, .ForIn(iterable, range_end, stmt(p), null, index));
+        let body = loop_body(p, parens);
+        return new_node(name, .ForIn(iterable, range_end, body, null, index));
     }
 
     // for (init; cond; step)
@@ -815,10 +889,21 @@ fn for_stmt(p: *Parser) -> *Node {
     if (!at(p, .Semicolon))
         cond = expr(p);
     expect(p, .Semicolon, "`;` after the loop condition");
-    if (!at(p, .RParen))
+    if (!at(p, if (parens) TokenKind.RParen else TokenKind.LBrace))
         step = simple_stmt(p);
-    expect(p, .RParen, "`)` after the loop header");
-    return new_node(t, .For(init, cond, step, stmt(p), null));
+    let body = loop_body(p, parens);
+    return new_node(t, .For(init, cond, step, body, null));
+}
+
+// after a loop header: `)` and any statement, or a block
+fn loop_body(p: *Parser, parens: bool) -> *Node {
+    if (parens) {
+        expect(p, .RParen, "`)` after the loop header");
+        return stmt(p);
+    }
+    if (!at(p, .LBrace))
+        return fail(p, peek(p), "`{` after the loop header: without parentheses, `for`'s body is a block");
+    return stmt(p);
 }
 
 // does a pattern bind names? (`_` doesn't)
@@ -839,9 +924,7 @@ fn binds_names(pattern: *Node) -> bool {
 // `(value) { case ...: ... }`, after `switch`; as an expression each case
 // gives a value
 fn switch_body(p: *Parser, t: Token, gives_value: bool, label: *Node) -> *Node {
-    expect(p, .LParen, "`(` after `switch`");
-    let value = expr(p);
-    expect(p, .RParen, "`)` after the switch value");
+    let value = condition(p, "switch");
     expect(p, .LBrace, "`{` to start the cases");
 
     let cases: [..]*Node;
@@ -931,7 +1014,8 @@ fn pattern_inner(p: *Parser, min_prec: isize) -> *Node {
         if (k < 3 && !(k == 1 && at(p, .LParen, 1)))
             k = 0;
     }
-    if (k > 0 && (at(p, .LBrace, k) || at(p, .LParen, k))) {
+    // (in `if x is .V {`, the `{` is the body's)
+    if (k > 0 && ((at(p, .LBrace, k) && !p.bare_condition) || at(p, .LParen, k))) {
         let variant: *Node;
         if (at(p, .Period)) {
             let dot = next(p);
@@ -1250,6 +1334,8 @@ fn postfix(p: *Parser) -> *Node {
         case .LParen:
             let open = next(p);
             let args: [..]*Node;
+            let saved = p.bare_condition;
+            p.bare_condition = false; // f(Vec2{...}) inside `if f(...) {`
             while (!at(p, .RParen)) {
                 let arg_begin = peek(p).text.ptr;
                 let arg: *Node;
@@ -1265,6 +1351,7 @@ fn postfix(p: *Parser) -> *Node {
                     break;
             }
             expect(p, .RParen, "`,` or `)` in the argument list");
+            p.bare_condition = saved;
             e = new_node(open, .Call(e, args, false));
         case .LBracket:
             // x[i], or a slice: x[lo..hi], where both bounds are optional
@@ -1294,11 +1381,12 @@ fn postfix(p: *Parser) -> *Node {
                 e = new_node(field_name(p, "a member name after `.`"), .Member(e));
             }
         case .LBrace:
-            // `{` after a name ends the expression (conditions are
-            // parenthesized, so `if (x) {` is fine), except C's way of
-            // writing a struct literal, `Vec2{...}`, which is an error. At
-            // the head of a statement, `m(x) {` is a macro call with a
-            // trailing block.
+            // `{` after a name ends the expression (`if (x) {`, and
+            // `if x {` always), except C's way of writing a struct
+            // literal, `Vec2{...}`, which is an error. At the head of a
+            // statement, `m(x) {` is a macro call with a trailing block.
+            if (p.bare_condition)
+                return e;
             let named = e.kind.tag == .Identifier || e.kind.tag == .Member;
             let generic_type = false;
             if (!head && e.kind is .Call{callee})
@@ -1442,7 +1530,7 @@ fn primary(p: *Parser) -> *Node {
             return array_items(p, dot, null);
         let name = expect(p, .Identifier, "`{`, `[` or an enum variant after `.`");
         let shorthand = new_node(joined(dot, name), .EnumShorthand); // `.Red`: one token
-        if (at(p, .LBrace)) { // .Let{ .declared = t }: a variant, by its fields
+        if (at(p, .LBrace) && !p.bare_condition) { // .Let{ .declared = t }: a variant, by its fields
             let lit = init_list(p, shorthand, false);
             if (lit.kind is .StructInit{variant: &v})
                 v.* = true;
@@ -1481,7 +1569,10 @@ fn primary(p: *Parser) -> *Node {
 
     case .LParen:
         let open = next(p);
+        let saved = p.bare_condition;
+        p.bare_condition = false;
         let inner = expr(p);
+        p.bare_condition = saved;
         expect(p, .RParen, "`)` to close the parenthesis");
         return new_node(open, .Grouped(inner));
 

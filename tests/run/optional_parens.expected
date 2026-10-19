@@ -1,0 +1,22 @@
+divmod: 3 2
+sign: negative zero positive
+while: 3
+do: 0
+for: 0 10
+for: 1 20
+for: 2 30
+total: 206
+grouped: 10
+parenthesized
+old forms: 0 266
+statement after (...): 7
+a literal in a call
+a literal's field
+circle 2
+square 3
+is: 3 (not round)
+!is: not round
+dot
+!is: not round
+(s) is .Dot
+[exit 0]

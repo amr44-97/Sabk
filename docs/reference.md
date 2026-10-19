@@ -181,7 +181,8 @@ decl        = fn_decl
 top_if      = "#if" "(" expr ")" "{" { decl } "}"     // see Compile-time #if
               [ "else" ( top_if | "{" { decl } "}" ) ] ;
 
-fn_decl     = [ "extern" ] "fn" IDENT "(" [ params ] ")" [ "->" results ]
+fn_decl     = [ "extern" ] "fn" IDENT "(" [ params ] ")"
+              [ "->" ( results | type { "," type } ) ] // -> i64, bool
               { fn_directive }                       // in any order
               [ "#expand" ] ( block | ";" ) ;        // #expand: a macro
 fn_directive = "#format"                             // its format is checked
@@ -439,15 +440,18 @@ simple_stmt = expr [ assign_op expr | "++" | "--" ]
 assign_op   = "=" | "+=" | "-=" | "*=" | "/=" | "%="
             | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
 
-if_stmt     = "if" "(" expr ")" stmt [ "else" stmt ] ;
-while_stmt  = "while" "(" expr ")" stmt ;
-do_stmt     = "do" stmt "while" "(" expr ")" ";" ;
+if_stmt     = "if" body [ "else" stmt ] ;
+while_stmt  = "while" body ;
+body        = "(" expr ")" stmt                      // parentheses: any statement
+            | expr block ;                           // none: a block
+do_stmt     = "do" stmt "while" expr ";" ;
 
-for_stmt    = "for" "(" IDENT "in" expr [ ".." expr ] ")" stmt
-            | "for" "(" [ let_binding | simple_stmt ] ";" [ expr ] ";"
-                    [ simple_stmt ] ")" stmt ;
+for_stmt    = "for" "(" header ")" stmt
+            | "for" header block ;
+header      = IDENT [ "," IDENT ] "in" expr [ ".." expr ]
+            | [ let_binding | simple_stmt ] ";" [ expr ] ";" [ simple_stmt ] ;
 
-switch_stmt = "switch" "(" expr ")" "{" { case_clause } "}" ;
+switch_stmt = "switch" expr "{" { case_clause } "}" ;
 case_clause = "case" pattern { "," pattern } [ guard ] ":" { stmt }
             | "default" ":" { stmt } ;
 guard       = "if" "(" expr ")" ;                    // case .Number(n) if (n > 0):
@@ -461,8 +465,22 @@ item        = [ "&" ] IDENT                          // a name for it (`_`: none
             | pattern ;                              // or what it must match
 ```
 
-- Conditions are in parentheses, as in C. Bodies can be any statement, not
-  just a block.
+- **Parentheses around a condition are optional.** With them, as in C,
+  the body can be any statement: `if (err != .None) return err;`. Without
+  them, the body is a block, so the condition can't run into it:
+  `if err != .None { return err; }`. The same goes for `while` and `for`
+  (`for x, i in xs { ... }`); `switch x { ... }` always has its braces.
+  - A `(` holds the whole condition only when the condition ends at its
+    `)`: `if (a + b) * 2 > c { ... }` is a condition without parentheses,
+    so it takes a block.
+  - In a condition without parentheses, a `{` after a name is the body's:
+    `if p == origin {`. A literal there is written `Point.{ ... }`, as
+    everywhere; C's `Point{ ... }` isn't one.
+  - A declaration's results don't need them either:
+    `fn divmod(a: i64, b: i64) -> i64, i64 { ... }`. A function type keeps
+    them, `fn(i64) -> (i64, bool)`, since a comma there could start the
+    next parameter.
+  - The `if` that gives a value, `if (c) a else b`, keeps its parentheses.
 - **Assignment, `++` and `--` are statements, not expressions.** `if (x = 5)`
   is a syntax error, and `a = b = c` isn't allowed.
 - **There's no `goto` and no `static`.** `defer` covers what `goto cleanup`
@@ -610,8 +628,8 @@ primary     = NUMBER | FLOAT | STRING | CHAR
             | ( "#text" | "#location" ) "(" IDENT ")"   // macros only
             | "#run" unary                              // runs while compiling
             | "(" expr ")"
-            | "switch" "(" expr ")" "{" { value_case } "}"
-            | IDENT ":" "switch" "(" expr ")" "{" { labeled_case } "}"
+            | "switch" expr "{" { value_case } "}"
+            | IDENT ":" "switch" expr "{" { labeled_case } "}"
             | IDENT ":" block                           // break IDENT = value; gives it
             | "if" "(" expr ")" expr "else" expr        // one of two values
             | "sizeof" "(" ( type | expr ) ")"        // expr: its type's size, unevaluated

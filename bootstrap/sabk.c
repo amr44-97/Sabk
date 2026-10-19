@@ -517,6 +517,7 @@ typedef struct ast__NodeKind__variant_InsertString ast__NodeKind__variant_Insert
 typedef struct ast__NodeKind__variant_TypeAlias ast__NodeKind__variant_TypeAlias;
 typedef struct ast__NodeKind__variant_Import ast__NodeKind__variant_Import;
 typedef struct ast__NodeKind__variant_TypeSlice ast__NodeKind__variant_TypeSlice;
+typedef struct ast__NodeKind__variant_TypeTuple ast__NodeKind__variant_TypeTuple;
 typedef struct ast__NodeKind__variant_Field ast__NodeKind__variant_Field;
 typedef struct ast__NodeKind__variant_Variant ast__NodeKind__variant_Variant;
 typedef struct ast__NodeKind__variant_LetValues ast__NodeKind__variant_LetValues;
@@ -556,7 +557,6 @@ typedef struct ast__NodeKind__variant_SizeOf ast__NodeKind__variant_SizeOf;
 typedef struct ast__NodeKind__variant_TypeInfo ast__NodeKind__variant_TypeInfo;
 typedef struct ast__NodeKind__variant_TypeGrowable ast__NodeKind__variant_TypeGrowable;
 typedef struct ast__NodeKind__variant_TypeArray ast__NodeKind__variant_TypeArray;
-typedef struct ast__NodeKind__variant_TypeTuple ast__NodeKind__variant_TypeTuple;
 typedef struct ast__NodeKind__variant_TypeFn ast__NodeKind__variant_TypeFn;
 typedef struct arr2__arr2__ptr_ast__Node arr2__arr2__ptr_ast__Node;
 typedef struct tuple__54 tuple__54;
@@ -1915,6 +1915,7 @@ struct parser__Parser {
   isize error_count;
   bool statement_head;
   bool in_pattern;
+  bool bare_condition;
 };
 
 struct tuple__22 {
@@ -5269,9 +5270,14 @@ static ast__Node* parser__let_decl(prelude__Context *ctx, parser__Parser* p);
 static ast__Node* parser__values(prelude__Context *ctx, parser__Parser* p);
 static ast__Node* parser__block(prelude__Context *ctx, parser__Parser* p);
 static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p);
+static ast__Node* parser__condition(prelude__Context *ctx, parser__Parser* p, slice__u8 what);
+static tuple__22 parser__condition_and_body(prelude__Context *ctx, parser__Parser* p, slice__u8 what);
+static ast__Node* parser__bare_expr(prelude__Context *ctx, parser__Parser* p);
+static bool parser__parenthesized(prelude__Context *ctx, parser__Parser* p);
 static bool parser__is_assign_op(prelude__Context *ctx, token__TokenKind kind);
 static ast__Node* parser__simple_stmt(prelude__Context *ctx, parser__Parser* p);
 static ast__Node* parser__for_stmt(prelude__Context *ctx, parser__Parser* p);
+static ast__Node* parser__loop_body(prelude__Context *ctx, parser__Parser* p, bool parens);
 static bool parser__binds_names(prelude__Context *ctx, ast__Node* pattern);
 static ast__Node* parser__switch_body(prelude__Context *ctx, parser__Parser* p, token__Token t, bool gives_value, ast__Node* label);
 static grow__ptr_ast__Node parser__case_stmts(prelude__Context *ctx, parser__Parser* p);
@@ -29680,8 +29686,8 @@ static tuple__20 parser__parse_whole_expr(prelude__Context *ctx, source__Source*
 }
 
 static token__Token parser__peek(prelude__Context *ctx, parser__Parser* p, isize k) {
-  isize i = ((isize)((rt_nonnull(p, "src/parser.sabk:64:15"))->idx + k));
-  return ((i < ((rt_nonnull(p, "src/parser.sabk:65:22"))->tokens).len) ? (*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:65:36"))->tokens, i, "src/parser.sabk:65:42")) : (*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:65:53"))->tokens, ((isize)(((rt_nonnull(p, "src/parser.sabk:65:62"))->tokens).len - ((isize)1LL))), "src/parser.sabk:65:59")));
+  isize i = ((isize)((rt_nonnull(p, "src/parser.sabk:65:15"))->idx + k));
+  return ((i < ((rt_nonnull(p, "src/parser.sabk:66:22"))->tokens).len) ? (*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:66:36"))->tokens, i, "src/parser.sabk:66:42")) : (*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:66:53"))->tokens, ((isize)(((rt_nonnull(p, "src/parser.sabk:66:62"))->tokens).len - ((isize)1LL))), "src/parser.sabk:66:59")));
 }
 
 static bool parser__at(prelude__Context *ctx, parser__Parser* p, token__TokenKind kind, isize k) {
@@ -29690,8 +29696,8 @@ static bool parser__at(prelude__Context *ctx, parser__Parser* p, token__TokenKin
 
 static token__Token parser__next(prelude__Context *ctx, parser__Parser* p) {
   token__Token t = parser__peek(ctx, p, ((isize)0LL));
-  if (((rt_nonnull(p, "src/parser.sabk:72:11"))->idx < ((isize)(((rt_nonnull(p, "src/parser.sabk:72:19"))->tokens).len - ((isize)1LL))))) {
-    (rt_nonnull(p, "src/parser.sabk:73:11"))->idx++;
+  if (((rt_nonnull(p, "src/parser.sabk:73:11"))->idx < ((isize)(((rt_nonnull(p, "src/parser.sabk:73:19"))->tokens).len - ((isize)1LL))))) {
+    (rt_nonnull(p, "src/parser.sabk:74:11"))->idx++;
   }
   return t;
 }
@@ -29743,16 +29749,16 @@ static token__Token parser__expect(prelude__Context *ctx, parser__Parser* p, tok
 }
 
 static ast__Node* parser__fail(prelude__Context *ctx, parser__Parser* p, token__Token t, slice__u8 message) {
-  source__report(ctx, (rt_nonnull(p, "src/parser.sabk:122:14"))->src, ((source__Severity)0LL), (t).text, message);
+  source__report(ctx, (rt_nonnull(p, "src/parser.sabk:123:14"))->src, ((source__Severity)0LL), (t).text, message);
   source__fatal_error_notes(ctx);
   exit(((i32)1LL));
   return ((ast__Node*)0);
 }
 
 static void parser__report_error(prelude__Context *ctx, parser__Parser* p, token__Token t, slice__u8 message) {
-  source__report(ctx, (rt_nonnull(p, "src/parser.sabk:130:14"))->src, ((source__Severity)0LL), (t).text, message);
+  source__report(ctx, (rt_nonnull(p, "src/parser.sabk:131:14"))->src, ((source__Severity)0LL), (t).text, message);
   source__fatal_error_notes(ctx);
-  (rt_nonnull(p, "src/parser.sabk:132:7"))->error_count++;
+  (rt_nonnull(p, "src/parser.sabk:133:7"))->error_count++;
 }
 
 static token__Token parser__directive(prelude__Context *ctx, parser__Parser* p) {
@@ -29766,16 +29772,16 @@ static token__Token parser__joined(prelude__Context *ctx, token__Token a, token_
     return b;
   }
   token__Token t = b;
-  (t).text = slice__u8__sub(((a).text).ptr, PTRDIFF_MAX, ((isize)0LL), ((isize)(((a).text).len + ((b).text).len)), "src/parser.sabk:147:24");
+  (t).text = slice__u8__sub(((a).text).ptr, PTRDIFF_MAX, ((isize)0LL), ((isize)(((a).text).len + ((b).text).len)), "src/parser.sabk:148:24");
   (t).line = (a).line;
   (t).column = (a).column;
   return t;
 }
 
 static slice__u8 parser__span_from(prelude__Context *ctx, parser__Parser* p, u8* begin) {
-  token__Token last = (*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:155:18"))->tokens, ((isize)((rt_nonnull(p, "src/parser.sabk:155:27"))->idx - ((isize)1LL))), "src/parser.sabk:155:24"));
+  token__Token last = (*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:156:18"))->tokens, ((isize)((rt_nonnull(p, "src/parser.sabk:156:27"))->idx - ((isize)1LL))), "src/parser.sabk:156:24"));
   u8* end = (((last).text).ptr + ((last).text).len);
-  return slice__u8__sub(begin, PTRDIFF_MAX, ((isize)0LL), ((isize)((((isize)(end))) - (((isize)(begin))))), "src/parser.sabk:157:17");
+  return slice__u8__sub(begin, PTRDIFF_MAX, ((isize)0LL), ((isize)((((isize)(end))) - (((isize)(begin))))), "src/parser.sabk:158:17");
 }
 
 static ast__Node* parser__top_static_if(prelude__Context *ctx, parser__Parser* p) {
@@ -29847,7 +29853,7 @@ static ast__Node* parser__top_decl(prelude__Context *ctx, parser__Parser* p) {
           value = parser__expr(ctx, p, ((isize)1LL));
         }
         if ((value != ((ast__Node*)0))) {
-          parser__fail(ctx, p, (rt_nonnull(value, "src/parser.sabk:226:31"))->tok, ((slice__u8){(u8*)"an `extern let` can't have a value: C defines the variable", 58}));
+          parser__fail(ctx, p, (rt_nonnull(value, "src/parser.sabk:227:31"))->tok, ((slice__u8){(u8*)"an `extern let` can't have a value: C defines the variable", 58}));
         }
         parser__expect(ctx, p, ((token__TokenKind)20LL), ((slice__u8){(u8*)"`;` after the declaration", 25}));
         decl = ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)9LL), .payload.Let = ((ast__NodeKind__variant_Let){.declared = declared, .value = ((ast__Node*)0), .is_pub = false, .is_extern = true, .uninit = false})}));
@@ -29891,8 +29897,8 @@ static ast__Node* parser__top_decl(prelude__Context *ctx, parser__Parser* p) {
       decl = parser__let_decl(ctx, p);
       {
         slice__ptr_ast__Node names;
-        if (({ ast__NodeKind is__3991 = (rt_nonnull(decl, "src/parser.sabk:240:18"))->kind; is__3991.tag == ((ast__NodeKind__Tag)10LL) ? (names = is__3991.payload.LetValues.names, 1) : 0; })) {
-          ({ parser__Parser* v__3992 = p; token__Token v__3993 = (rt_nonnull((*slice__ptr_ast__Node__at(names, ((isize)1LL), "src/parser.sabk:241:26")), "src/parser.sabk:241:30"))->tok; slice__u8 v__3995 = fmt__tformat(ctx, ((slice__u8){(u8*)"a global variable is declared one at a time: `let % = ...;`", 59}), ((slice__prelude__Any){(items__3994[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(decl, "src/parser.sabk:241:111"))->tok).text}, .info = (&ti__1)}), items__3994), 1})); parser__fail(ctx, v__3992, v__3993, v__3995); });
+        if (({ ast__NodeKind is__3991 = (rt_nonnull(decl, "src/parser.sabk:241:18"))->kind; is__3991.tag == ((ast__NodeKind__Tag)10LL) ? (names = is__3991.payload.LetValues.names, 1) : 0; })) {
+          ({ parser__Parser* v__3992 = p; token__Token v__3993 = (rt_nonnull((*slice__ptr_ast__Node__at(names, ((isize)1LL), "src/parser.sabk:242:26")), "src/parser.sabk:242:30"))->tok; slice__u8 v__3995 = fmt__tformat(ctx, ((slice__u8){(u8*)"a global variable is declared one at a time: `let % = ...;`", 59}), ((slice__prelude__Any){(items__3994[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(decl, "src/parser.sabk:242:111"))->tok).text}, .info = (&ti__1)}), items__3994), 1})); parser__fail(ctx, v__3992, v__3993, v__3995); });
         }
       }
       parser__expect(ctx, p, ((token__TokenKind)20LL), ((slice__u8){(u8*)"`;` after the declaration", 25}));
@@ -29907,42 +29913,42 @@ static ast__Node* parser__top_decl(prelude__Context *ctx, parser__Parser* p) {
   }
   if (is_pub) {
     {
-      ast__NodeKind *switch__4000 = &(rt_nonnull(decl, "src/parser.sabk:247:22"))->kind;
+      ast__NodeKind *switch__4000 = &(rt_nonnull(decl, "src/parser.sabk:248:22"))->kind;
       switch ((*switch__4000).tag) {
       case ((ast__NodeKind__Tag)2LL):
       {
         ast__NodeKind__variant_Fn* f = &(*switch__4000).payload.Fn;
-        (rt_nonnull(f, "src/parser.sabk:248:25"))->is_pub = true;
+        (rt_nonnull(f, "src/parser.sabk:249:25"))->is_pub = true;
       }
       break;
       case ((ast__NodeKind__Tag)4LL):
       {
         ast__NodeKind__variant_Struct* s = &(*switch__4000).payload.Struct;
-        (rt_nonnull(s, "src/parser.sabk:249:29"))->is_pub = true;
+        (rt_nonnull(s, "src/parser.sabk:250:29"))->is_pub = true;
       }
       break;
       case ((ast__NodeKind__Tag)6LL):
       {
         ast__NodeKind__variant_Enum* e = &(*switch__4000).payload.Enum;
-        (rt_nonnull(e, "src/parser.sabk:250:27"))->is_pub = true;
+        (rt_nonnull(e, "src/parser.sabk:251:27"))->is_pub = true;
       }
       break;
       case ((ast__NodeKind__Tag)8LL):
       {
         ast__NodeKind__variant_TypeAlias* t = &(*switch__4000).payload.TypeAlias;
-        (rt_nonnull(t, "src/parser.sabk:251:32"))->is_pub = true;
+        (rt_nonnull(t, "src/parser.sabk:252:32"))->is_pub = true;
       }
       break;
       case ((ast__NodeKind__Tag)9LL):
       {
         ast__NodeKind__variant_Let* l = &(*switch__4000).payload.Let;
-        (rt_nonnull(l, "src/parser.sabk:252:26"))->is_pub = true;
+        (rt_nonnull(l, "src/parser.sabk:253:26"))->is_pub = true;
       }
       break;
       case ((ast__NodeKind__Tag)11LL):
       {
         ast__NodeKind__variant_Const* c = &(*switch__4000).payload.Const;
-        (rt_nonnull(c, "src/parser.sabk:253:28"))->is_pub = true;
+        (rt_nonnull(c, "src/parser.sabk:254:28"))->is_pub = true;
       }
       break;
       default:
@@ -29968,8 +29974,8 @@ static ast__Node* parser__import_decl(prelude__Context *ctx, parser__Parser* p) 
 
 static ast__Node* parser__fn_decl(prelude__Context *ctx, parser__Parser* p) {
   prelude__Any items__4007[2];
-  prelude__Any items__4022[1];
-  prelude__Any items__4026[1];
+  prelude__Any items__4024[1];
+  prelude__Any items__4028[1];
   bool is_extern = parser__eat(ctx, p, ((token__TokenKind)71LL));
   parser__expect(ctx, p, ((token__TokenKind)61LL), ((slice__u8){(u8*)"`fn` after `extern`", 19}));
   token__Token name = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a function name", 15}));
@@ -29990,9 +29996,9 @@ static ast__Node* parser__fn_decl(prelude__Context *ctx, parser__Parser* p) {
       parser__expect(ctx, p, ((token__TokenKind)15LL), ((slice__u8){(u8*)"`: Type` after the type parameter", 33}));
       token__Token kind = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"`Type`", 6}));
       if (!({ slice__u8 a__4003 = (kind).text, b__4004 = ((slice__u8){(u8*)"Type", 4}); rt_bytes_equal(a__4003.ptr, a__4003.len, b__4004.ptr, b__4004.len); })) {
-        ({ parser__Parser* v__4005 = p; token__Token v__4006 = kind; slice__u8 v__4008 = fmt__tformat(ctx, ((slice__u8){(u8*)"a `$%` parameter takes a type, so it's written `$%: Type`", 57}), ((slice__prelude__Any){(items__4007[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(declared, "src/parser.sabk:293:48"))->tok).text}, .info = (&ti__1)}), items__4007[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(declared, "src/parser.sabk:293:67"))->tok).text}, .info = (&ti__1)}), items__4007), 2})); parser__fail(ctx, v__4005, v__4006, v__4008); });
+        ({ parser__Parser* v__4005 = p; token__Token v__4006 = kind; slice__u8 v__4008 = fmt__tformat(ctx, ((slice__u8){(u8*)"a `$%` parameter takes a type, so it's written `$%: Type`", 57}), ((slice__prelude__Any){(items__4007[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(declared, "src/parser.sabk:294:48"))->tok).text}, .info = (&ti__1)}), items__4007[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(declared, "src/parser.sabk:294:67"))->tok).text}, .info = (&ti__1)}), items__4007), 2})); parser__fail(ctx, v__4005, v__4006, v__4008); });
       }
-      ({ grow__ptr_ast__Node* v__4009 = (&params); ast__Node* v__4010 = ast__new_node(ctx, (rt_nonnull(declared, "src/parser.sabk:294:50"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)3LL), .payload.Param = ((ast__NodeKind__variant_Param){.declared = declared, .value = ((ast__Node*)0), .is_type = true, .variadic = false})})); array__array_add__ptr_ast__Node(ctx, v__4009, v__4010); });
+      ({ grow__ptr_ast__Node* v__4009 = (&params); ast__Node* v__4010 = ast__new_node(ctx, (rt_nonnull(declared, "src/parser.sabk:295:50"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)3LL), .payload.Param = ((ast__NodeKind__variant_Param){.declared = declared, .value = ((ast__Node*)0), .is_type = true, .variadic = false})})); array__array_add__ptr_ast__Node(ctx, v__4009, v__4010); });
       if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
         break;
       }
@@ -30023,7 +30029,16 @@ static ast__Node* parser__fn_decl(prelude__Context *ctx, parser__Parser* p) {
   parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` to close the parameter list", 31}));
   ast__Node* result = ((ast__Node*)0);
   if (parser__eat(ctx, p, ((token__TokenKind)36LL))) {
+    bool grouped = parser__at(ctx, p, ((token__TokenKind)6LL), ((isize)0LL));
     result = parser__result_type(ctx, p);
+    if (((!grouped) && parser__at(ctx, p, ((token__TokenKind)21LL), ((isize)0LL)))) {
+      grow__ptr_ast__Node items = {0};
+      array__array_add__ptr_ast__Node(ctx, (&items), result);
+      while (parser__eat(ctx, p, ((token__TokenKind)21LL))) {
+        ({ grow__ptr_ast__Node* v__4019 = (&items); ast__Node* v__4020 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4019, v__4020); });
+      }
+      result = ast__new_node(ctx, (rt_nonnull((*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(items), ((isize)0LL), "src/parser.sabk:334:36")), "src/parser.sabk:334:40"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)81LL), .payload.TypeTuple = ((ast__NodeKind__variant_TypeTuple){.items = grow__ptr_ast__Node__view(items)})}));
+    }
   }
   bool format = false;
   bool nodiscard = false;
@@ -30063,13 +30078,13 @@ static ast__Node* parser__fn_decl(prelude__Context *ctx, parser__Parser* p) {
     if (is_extern) {
       parser__fail(ctx, p, hash, ((slice__u8){(u8*)"an `extern` function can't be `#expand`", 39}));
     }
-    bool last_variadic = (((params).len > ((isize)0LL)) && ({ ast__NodeKind is__4019 = (rt_nonnull((*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(params), ((isize)((params).len - ((isize)1LL))), "src/parser.sabk:363:53")), "src/parser.sabk:363:70"))->kind; (is__4019.tag == ((ast__NodeKind__Tag)3LL) && (is__4019.payload.Param.variadic == true)) ? (1) : 0; }));
+    bool last_variadic = (((params).len > ((isize)0LL)) && ({ ast__NodeKind is__4021 = (rt_nonnull((*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(params), ((isize)((params).len - ((isize)1LL))), "src/parser.sabk:375:53")), "src/parser.sabk:375:70"))->kind; (is__4021.tag == ((ast__NodeKind__Tag)3LL) && (is__4021.payload.Param.variadic == true)) ? (1) : 0; }));
     if ((variadic || last_variadic)) {
       parser__fail(ctx, p, hash, ((slice__u8){(u8*)"an `#expand` function can't be variadic", 39}));
     }
     is_macro = true;
     if ((!parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL)))) {
-      ({ parser__Parser* v__4020 = p; token__Token v__4021 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4023 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected the body of the `#expand` function, found %", 52}), ((slice__prelude__Any){(items__4022[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, parser__peek(ctx, p, ((isize)0LL)))}, .info = (&ti__1)}), items__4022), 1})); parser__fail(ctx, v__4020, v__4021, v__4023); });
+      ({ parser__Parser* v__4022 = p; token__Token v__4023 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4025 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected the body of the `#expand` function, found %", 52}), ((slice__prelude__Any){(items__4024[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, parser__peek(ctx, p, ((isize)0LL)))}, .info = (&ti__1)}), items__4024), 1})); parser__fail(ctx, v__4022, v__4023, v__4025); });
     }
   }
   ast__Node* body = ((ast__Node*)0);
@@ -30082,7 +30097,7 @@ static ast__Node* parser__fn_decl(prelude__Context *ctx, parser__Parser* p) {
       }
       parser__expect(ctx, p, ((token__TokenKind)20LL), ((slice__u8){(u8*)"a function body or `;`", 22}));
     } else {
-      ({ parser__Parser* v__4024 = p; token__Token v__4025 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4027 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected a function body `{`, found % (only `extern` functions can omit the body)", 81}), ((slice__prelude__Any){(items__4026[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, parser__peek(ctx, p, ((isize)0LL)))}, .info = (&ti__1)}), items__4026), 1})); parser__fail(ctx, v__4024, v__4025, v__4027); });
+      ({ parser__Parser* v__4026 = p; token__Token v__4027 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4029 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected a function body `{`, found % (only `extern` functions can omit the body)", 81}), ((slice__prelude__Any){(items__4028[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, parser__peek(ctx, p, ((isize)0LL)))}, .info = (&ti__1)}), items__4028), 1})); parser__fail(ctx, v__4026, v__4027, v__4029); });
     }
   }
   return ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)2LL), .payload.Fn = ((ast__NodeKind__variant_Fn){.params = grow__ptr_ast__Node__view(params), .result = result, .body = body, .is_pub = false, .is_extern = is_extern, .is_macro = is_macro, .variadic = variadic, .format = format, .nodiscard = nodiscard, .no_bounds_check = no_bounds_check, .type_params = ((slice__ptr_ast__Node){0})})}));
@@ -30093,7 +30108,7 @@ static grow__ptr_ast__Node parser__type_params(prelude__Context *ctx, parser__Pa
   if (parser__eat(ctx, p, ((token__TokenKind)6LL))) {
     while ((!parser__at(ctx, p, ((token__TokenKind)7LL), ((isize)0LL)))) {
       parser__expect(ctx, p, ((token__TokenKind)25LL), ((slice__u8){(u8*)"`$` and a type parameter name", 29}));
-      ({ grow__ptr_ast__Node* v__4028 = (&params); ast__Node* v__4031 = ({ token__Token v__4029 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a type parameter name", 21})); ast__NodeKind v__4030 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)82LL)}); ast__new_node(ctx, v__4029, v__4030); }); array__array_add__ptr_ast__Node(ctx, v__4028, v__4031); });
+      ({ grow__ptr_ast__Node* v__4030 = (&params); ast__Node* v__4033 = ({ token__Token v__4031 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a type parameter name", 21})); ast__NodeKind v__4032 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)82LL)}); ast__new_node(ctx, v__4031, v__4032); }); array__array_add__ptr_ast__Node(ctx, v__4030, v__4033); });
       if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
         break;
       }
@@ -30118,7 +30133,7 @@ static ast__Node* parser__aggregate(prelude__Context *ctx, parser__Parser* p, bo
       value = parser__expr(ctx, p, ((isize)1LL));
     }
     parser__expect(ctx, p, ((token__TokenKind)20LL), ((slice__u8){(u8*)"`;` after the field", 19}));
-    ({ grow__ptr_ast__Node* v__4032 = (&fields); ast__Node* v__4033 = ast__new_node(ctx, field, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)5LL), .payload.Field = ((ast__NodeKind__variant_Field){.declared = declared, .value = value})})); array__array_add__ptr_ast__Node(ctx, v__4032, v__4033); });
+    ({ grow__ptr_ast__Node* v__4034 = (&fields); ast__Node* v__4035 = ast__new_node(ctx, field, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)5LL), .payload.Field = ((ast__NodeKind__variant_Field){.declared = declared, .value = value})})); array__array_add__ptr_ast__Node(ctx, v__4034, v__4035); });
   }
   parser__next(ctx, p);
   return ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)4LL), .payload.Struct = ((ast__NodeKind__variant_Struct){.fields = grow__ptr_ast__Node__view(fields), .type_params = grow__ptr_ast__Node__view(params), .is_union = is_union, .is_pub = false})}));
@@ -30134,15 +30149,15 @@ static ast__Node* parser__enum_decl(prelude__Context *ctx, parser__Parser* p) {
   }
   parser__expect(ctx, p, ((token__TokenKind)8LL), ((slice__u8){(u8*)"`{` to start the variants", 25}));
   grow__ptr_ast__Node variants = {0};
-  bool error_enum = ((((backing != ((ast__Node*)0)) && (((rt_nonnull(backing, "src/parser.sabk:431:49"))->kind).tag == ((ast__NodeKind__Tag)74LL))) && ({ slice__u8 a__4034 = ((rt_nonnull(backing, "src/parser.sabk:431:82"))->tok).text, b__4035 = ((slice__u8){(u8*)"Error", 5}); rt_bytes_equal(a__4034.ptr, a__4034.len, b__4035.ptr, b__4035.len); })) && (parser__type_args_count(ctx, backing) == ((isize)0LL)));
+  bool error_enum = ((((backing != ((ast__Node*)0)) && (((rt_nonnull(backing, "src/parser.sabk:443:49"))->kind).tag == ((ast__NodeKind__Tag)74LL))) && ({ slice__u8 a__4036 = ((rt_nonnull(backing, "src/parser.sabk:443:82"))->tok).text, b__4037 = ((slice__u8){(u8*)"Error", 5}); rt_bytes_equal(a__4036.ptr, a__4036.len, b__4037.ptr, b__4037.len); })) && (parser__type_args_count(ctx, backing) == ((isize)0LL)));
   if (error_enum) {
-    token__Token none = (rt_nonnull(backing, "src/parser.sabk:434:28"))->tok;
+    token__Token none = (rt_nonnull(backing, "src/parser.sabk:446:28"))->tok;
     (none).text = ((slice__u8){(u8*)"None", 4});
-    ({ grow__ptr_ast__Node* v__4036 = (&variants); ast__Node* v__4037 = ast__new_node(ctx, none, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)7LL), .payload.Variant = ((ast__NodeKind__variant_Variant){.payload = ((ast__Node*)0), .fields = ((ast__Node*)0), .value = ((ast__Node*)0)})})); array__array_add__ptr_ast__Node(ctx, v__4036, v__4037); });
+    ({ grow__ptr_ast__Node* v__4038 = (&variants); ast__Node* v__4039 = ast__new_node(ctx, none, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)7LL), .payload.Variant = ((ast__NodeKind__variant_Variant){.payload = ((ast__Node*)0), .fields = ((ast__Node*)0), .value = ((ast__Node*)0)})})); array__array_add__ptr_ast__Node(ctx, v__4038, v__4039); });
   }
   while ((!parser__at(ctx, p, ((token__TokenKind)9LL), ((isize)0LL)))) {
     token__Token variant = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a variant name", 14}));
-    if ((error_enum && ({ slice__u8 a__4038 = (variant).text, b__4039 = ((slice__u8){(u8*)"None", 4}); rt_bytes_equal(a__4038.ptr, a__4038.len, b__4039.ptr, b__4039.len); }))) {
+    if ((error_enum && ({ slice__u8 a__4040 = (variant).text, b__4041 = ((slice__u8){(u8*)"None", 4}); rt_bytes_equal(a__4040.ptr, a__4040.len, b__4041.ptr, b__4041.len); }))) {
       parser__fail(ctx, p, variant, ((slice__u8){(u8*)"an error enum's `None` (no failure) comes from `Error`, at 0: leave it out", 74}));
     }
     ast__Node* payload = ((ast__Node*)0);
@@ -30159,7 +30174,7 @@ static ast__Node* parser__enum_decl(prelude__Context *ctx, parser__Parser* p) {
           if (parser__eat(ctx, p, ((token__TokenKind)18LL))) {
             field_value = parser__expr(ctx, p, ((isize)1LL));
           }
-          ({ grow__ptr_ast__Node* v__4040 = (&list); ast__Node* v__4041 = ast__new_node(ctx, field, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)5LL), .payload.Field = ((ast__NodeKind__variant_Field){.declared = declared, .value = field_value})})); array__array_add__ptr_ast__Node(ctx, v__4040, v__4041); });
+          ({ grow__ptr_ast__Node* v__4042 = (&list); ast__Node* v__4043 = ast__new_node(ctx, field, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)5LL), .payload.Field = ((ast__NodeKind__variant_Field){.declared = declared, .value = field_value})})); array__array_add__ptr_ast__Node(ctx, v__4042, v__4043); });
           if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
             break;
           }
@@ -30173,7 +30188,7 @@ static ast__Node* parser__enum_decl(prelude__Context *ctx, parser__Parser* p) {
     if (parser__eat(ctx, p, ((token__TokenKind)18LL))) {
       value = parser__expr(ctx, p, ((isize)1LL));
     }
-    ({ grow__ptr_ast__Node* v__4042 = (&variants); ast__Node* v__4043 = ast__new_node(ctx, variant, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)7LL), .payload.Variant = ((ast__NodeKind__variant_Variant){.payload = payload, .fields = fields, .value = value})})); array__array_add__ptr_ast__Node(ctx, v__4042, v__4043); });
+    ({ grow__ptr_ast__Node* v__4044 = (&variants); ast__Node* v__4045 = ast__new_node(ctx, variant, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)7LL), .payload.Variant = ((ast__NodeKind__variant_Variant){.payload = payload, .fields = fields, .value = value})})); array__array_add__ptr_ast__Node(ctx, v__4044, v__4045); });
     if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
       break;
     }
@@ -30185,7 +30200,7 @@ static ast__Node* parser__enum_decl(prelude__Context *ctx, parser__Parser* p) {
 static isize parser__type_args_count(prelude__Context *ctx, ast__Node* n) {
   {
     slice__ptr_ast__Node args;
-    if (({ ast__NodeKind is__4044 = (rt_nonnull(n, "src/parser.sabk:477:11"))->kind; is__4044.tag == ((ast__NodeKind__Tag)74LL) ? (args = is__4044.payload.TypeName.args, 1) : 0; })) {
+    if (({ ast__NodeKind is__4046 = (rt_nonnull(n, "src/parser.sabk:489:11"))->kind; is__4046.tag == ((ast__NodeKind__Tag)74LL) ? (args = is__4046.payload.TypeName.args, 1) : 0; })) {
       return (args).len;
     }
   }
@@ -30215,34 +30230,34 @@ static ast__Node* parser__const_decl(prelude__Context *ctx, parser__Parser* p) {
 }
 
 static ast__Node* parser__let_decl(prelude__Context *ctx, parser__Parser* p) {
-  prelude__Any items__4063[2];
+  prelude__Any items__4065[2];
   parser__next(ctx, p);
   token__Token name = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a variable name after `let`", 27}));
   if (parser__at(ctx, p, ((token__TokenKind)21LL), ((isize)0LL))) {
     grow__ptr_ast__Node names = {0};
-    ({ grow__ptr_ast__Node* v__4045 = (&names); ast__Node* v__4046 = ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)9LL), .payload.Let = ((ast__NodeKind__variant_Let){.declared = ((ast__Node*)0), .value = ((ast__Node*)0), .is_pub = false, .is_extern = false, .uninit = false})})); array__array_add__ptr_ast__Node(ctx, v__4045, v__4046); });
+    ({ grow__ptr_ast__Node* v__4047 = (&names); ast__Node* v__4048 = ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)9LL), .payload.Let = ((ast__NodeKind__variant_Let){.declared = ((ast__Node*)0), .value = ((ast__Node*)0), .is_pub = false, .is_extern = false, .uninit = false})})); array__array_add__ptr_ast__Node(ctx, v__4047, v__4048); });
     while (parser__eat(ctx, p, ((token__TokenKind)21LL))) {
-      ({ grow__ptr_ast__Node* v__4047 = (&names); ast__Node* v__4050 = ({ token__Token v__4048 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a variable name", 15})); ast__NodeKind v__4049 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)9LL), .payload.Let = ((ast__NodeKind__variant_Let){.declared = ((ast__Node*)0), .value = ((ast__Node*)0), .is_pub = false, .is_extern = false, .uninit = false})}); ast__new_node(ctx, v__4048, v__4049); }); array__array_add__ptr_ast__Node(ctx, v__4047, v__4050); });
+      ({ grow__ptr_ast__Node* v__4049 = (&names); ast__Node* v__4052 = ({ token__Token v__4050 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a variable name", 15})); ast__NodeKind v__4051 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)9LL), .payload.Let = ((ast__NodeKind__variant_Let){.declared = ((ast__Node*)0), .value = ((ast__Node*)0), .is_pub = false, .is_extern = false, .uninit = false})}); ast__new_node(ctx, v__4050, v__4051); }); array__array_add__ptr_ast__Node(ctx, v__4049, v__4052); });
     }
     if (parser__eat(ctx, p, ((token__TokenKind)15LL))) {
       ast__Node* declared = parser__type_(ctx, p);
       {
-        isize end__4051 = (names).len;
-        for (isize i = ((isize)0LL); i < end__4051; i++) {
-          ast__Node* d = (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(names), i, "src/parser.sabk:519:30"));
-          if (({ slice__u8 a__4052 = ((rt_nonnull(d, "src/parser.sabk:520:23"))->tok).text, b__4053 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4052.ptr, a__4052.len, b__4053.ptr, b__4053.len); })) {
-            parser__fail(ctx, p, (rt_nonnull(d, "src/parser.sabk:521:31"))->tok, ((slice__u8){(u8*)"`_` declares nothing, so it has no place in a list of names with a type", 71}));
+        isize end__4053 = (names).len;
+        for (isize i = ((isize)0LL); i < end__4053; i++) {
+          ast__Node* d = (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(names), i, "src/parser.sabk:531:30"));
+          if (({ slice__u8 a__4054 = ((rt_nonnull(d, "src/parser.sabk:532:23"))->tok).text, b__4055 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4054.ptr, a__4054.len, b__4055.ptr, b__4055.len); })) {
+            parser__fail(ctx, p, (rt_nonnull(d, "src/parser.sabk:533:31"))->tok, ((slice__u8){(u8*)"`_` declares nothing, so it has no place in a list of names with a type", 71}));
           }
-          ({ ast__NodeKind *target__4054 = &(rt_nonnull(d, "src/parser.sabk:522:19"))->kind; *target__4054 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)9LL), .payload.Let = ((ast__NodeKind__variant_Let){.declared = ((i == ((isize)0LL)) ? declared : ast__clone_node(ctx, declared, ((i32)-1LL))), .value = ((ast__Node*)0), .is_pub = false, .is_extern = false, .uninit = false})}); });
+          ({ ast__NodeKind *target__4056 = &(rt_nonnull(d, "src/parser.sabk:534:19"))->kind; *target__4056 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)9LL), .payload.Let = ((ast__NodeKind__variant_Let){.declared = ((i == ((isize)0LL)) ? declared : ast__clone_node(ctx, declared, ((i32)-1LL))), .value = ((ast__Node*)0), .is_pub = false, .is_extern = false, .uninit = false})}); });
         }
       }
       if (parser__at(ctx, p, ((token__TokenKind)18LL), ((isize)0LL))) {
-        ({ parser__Parser* v__4055 = p; token__Token v__4056 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4055, v__4056, ((slice__u8){(u8*)"names declared with a type start as its zero; to give them values, leave out the type (`let a, b = x, y;`) or declare them one at a time", 136})); });
+        ({ parser__Parser* v__4057 = p; token__Token v__4058 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4057, v__4058, ((slice__u8){(u8*)"names declared with a type start as its zero; to give them values, leave out the type (`let a, b = x, y;`) or declare them one at a time", 136})); });
       }
       return ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)10LL), .payload.LetValues = ((ast__NodeKind__variant_LetValues){.names = grow__ptr_ast__Node__view(names), .values = ((ast__Node*)0)})}));
     }
     parser__expect(ctx, p, ((token__TokenKind)18LL), ((slice__u8){(u8*)"`=` and the values", 18}));
-    return ({ token__Token v__4057 = name; ast__NodeKind v__4060 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)10LL), .payload.LetValues = ({ slice__ptr_ast__Node v__4058 = grow__ptr_ast__Node__view(names); ast__Node* v__4059 = parser__values(ctx, p); ((ast__NodeKind__variant_LetValues){.names = v__4058, .values = v__4059}); })}); ast__new_node(ctx, v__4057, v__4060); });
+    return ({ token__Token v__4059 = name; ast__NodeKind v__4062 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)10LL), .payload.LetValues = ({ slice__ptr_ast__Node v__4060 = grow__ptr_ast__Node__view(names); ast__Node* v__4061 = parser__values(ctx, p); ((ast__NodeKind__variant_LetValues){.names = v__4060, .values = v__4061}); })}); ast__new_node(ctx, v__4059, v__4062); });
   }
   ast__Node* declared = ((ast__Node*)0);
   ast__Node* value = ((ast__Node*)0);
@@ -30255,7 +30270,7 @@ static ast__Node* parser__let_decl(prelude__Context *ctx, parser__Parser* p) {
       token__Token dashes = parser__next(ctx, p);
       uninit = true;
       if ((declared == ((ast__Node*)0))) {
-        ({ parser__Parser* v__4061 = p; token__Token v__4062 = dashes; slice__u8 v__4064 = fmt__tformat(ctx, ((slice__u8){(u8*)"`---` gives `%` no value to take a type from; give it one: `let %: T = ---;`", 76}), ((slice__prelude__Any){(items__4063[0] = ((prelude__Any){.value = (slice__u8[1]){(name).text}, .info = (&ti__1)}), items__4063[1] = ((prelude__Any){.value = (slice__u8[1]){(name).text}, .info = (&ti__1)}), items__4063), 2})); parser__fail(ctx, v__4061, v__4062, v__4064); });
+        ({ parser__Parser* v__4063 = p; token__Token v__4064 = dashes; slice__u8 v__4066 = fmt__tformat(ctx, ((slice__u8){(u8*)"`---` gives `%` no value to take a type from; give it one: `let %: T = ---;`", 76}), ((slice__prelude__Any){(items__4065[0] = ((prelude__Any){.value = (slice__u8[1]){(name).text}, .info = (&ti__1)}), items__4065[1] = ((prelude__Any){.value = (slice__u8[1]){(name).text}, .info = (&ti__1)}), items__4065), 2})); parser__fail(ctx, v__4063, v__4064, v__4066); });
       }
     } else {
       value = parser__values(ctx, p);
@@ -30275,67 +30290,76 @@ static ast__Node* parser__values(prelude__Context *ctx, parser__Parser* p) {
   grow__ptr_ast__Node items = {0};
   array__array_add__ptr_ast__Node(ctx, (&items), first);
   while (parser__eat(ctx, p, ((token__TokenKind)21LL))) {
-    ({ grow__ptr_ast__Node* v__4065 = (&items); ast__Node* v__4066 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4065, v__4066); });
+    ({ grow__ptr_ast__Node* v__4067 = (&items); ast__Node* v__4068 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4067, v__4068); });
   }
-  return ast__new_node(ctx, (rt_nonnull(first, "src/parser.sabk:561:27"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)54LL), .payload.Values = ((ast__NodeKind__variant_Values){.items = grow__ptr_ast__Node__view(items)})}));
+  return ast__new_node(ctx, (rt_nonnull(first, "src/parser.sabk:573:27"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)54LL), .payload.Values = ((ast__NodeKind__variant_Values){.items = grow__ptr_ast__Node__view(items)})}));
 }
 
 static ast__Node* parser__block(prelude__Context *ctx, parser__Parser* p) {
   token__Token open = parser__expect(ctx, p, ((token__TokenKind)8LL), ((slice__u8){(u8*)"`{`", 3}));
+  bool saved = (rt_nonnull(p, "src/parser.sabk:580:19"))->bare_condition;
+  (rt_nonnull(p, "src/parser.sabk:581:7"))->bare_condition = false;
   grow__ptr_ast__Node stmts = {0};
   while ((!parser__at(ctx, p, ((token__TokenKind)9LL), ((isize)0LL)))) {
     if (parser__at(ctx, p, ((token__TokenKind)0LL), ((isize)0LL))) {
       parser__fail(ctx, p, open, ((slice__u8){(u8*)"this `{` is never closed", 24}));
     }
-    ({ grow__ptr_ast__Node* v__4067 = (&stmts); ast__Node* v__4068 = parser__stmt(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4067, v__4068); });
+    ({ grow__ptr_ast__Node* v__4069 = (&stmts); ast__Node* v__4070 = parser__stmt(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4069, v__4070); });
   }
   parser__next(ctx, p);
-  return ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)14LL), .payload.Block = ((ast__NodeKind__variant_Block){.stmts = grow__ptr_ast__Node__view(stmts), .label = ((ast__Node*)0), .gives_value = false})}));
+  ast__Node* ret__4071 = ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)14LL), .payload.Block = ((ast__NodeKind__variant_Block){.stmts = grow__ptr_ast__Node__view(stmts), .label = ((ast__Node*)0), .gives_value = false})}));
+  {
+    (rt_nonnull(p, "src/parser.sabk:582:13"))->bare_condition = saved;
+  }
+  return ret__4071;
+  {
+    (rt_nonnull(p, "src/parser.sabk:582:13"))->bare_condition = saved;
+  }
 }
 
 static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
   token__Token t = parser__peek(ctx, p, ((isize)0LL));
   if (((((t).kind == ((token__TokenKind)1LL)) && parser__at(ctx, p, ((token__TokenKind)15LL), ((isize)1LL))) && (((((parser__at(ctx, p, ((token__TokenKind)75LL), ((isize)2LL)) || parser__at(ctx, p, ((token__TokenKind)77LL), ((isize)2LL))) || parser__at(ctx, p, ((token__TokenKind)78LL), ((isize)2LL))) || parser__at(ctx, p, ((token__TokenKind)79LL), ((isize)2LL))) || parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)2LL)))))) {
-    ast__Node* label = ({ token__Token v__4069 = parser__next(ctx, p); ast__NodeKind v__4070 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4069, v__4070); });
+    ast__Node* label = ({ token__Token v__4072 = parser__next(ctx, p); ast__NodeKind v__4073 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4072, v__4073); });
     parser__next(ctx, p);
     ast__Node* n = parser__stmt(ctx, p);
     {
-      ast__NodeKind *switch__4071 = &(rt_nonnull(n, "src/parser.sabk:587:19"))->kind;
-      switch ((*switch__4071).tag) {
+      ast__NodeKind *switch__4074 = &(rt_nonnull(n, "src/parser.sabk:602:19"))->kind;
+      switch ((*switch__4074).tag) {
       case ((ast__NodeKind__Tag)14LL):
       {
-        ast__Node** l = &(*switch__4071).payload.Block.label;
-        (*rt_nonnull(l, "src/parser.sabk:588:35")) = label;
+        ast__Node** l = &(*switch__4074).payload.Block.label;
+        (*rt_nonnull(l, "src/parser.sabk:603:35")) = label;
       }
       break;
       case ((ast__NodeKind__Tag)25LL):
       {
-        ast__Node** l = &(*switch__4071).payload.While.label;
-        (*rt_nonnull(l, "src/parser.sabk:589:35")) = label;
+        ast__Node** l = &(*switch__4074).payload.While.label;
+        (*rt_nonnull(l, "src/parser.sabk:604:35")) = label;
       }
       break;
       case ((ast__NodeKind__Tag)26LL):
       {
-        ast__Node** l = &(*switch__4071).payload.DoWhile.label;
-        (*rt_nonnull(l, "src/parser.sabk:590:37")) = label;
+        ast__Node** l = &(*switch__4074).payload.DoWhile.label;
+        (*rt_nonnull(l, "src/parser.sabk:605:37")) = label;
       }
       break;
       case ((ast__NodeKind__Tag)27LL):
       {
-        ast__Node** l = &(*switch__4071).payload.For.label;
-        (*rt_nonnull(l, "src/parser.sabk:591:33")) = label;
+        ast__Node** l = &(*switch__4074).payload.For.label;
+        (*rt_nonnull(l, "src/parser.sabk:606:33")) = label;
       }
       break;
       case ((ast__NodeKind__Tag)28LL):
       {
-        ast__Node** l = &(*switch__4071).payload.ForIn.label;
-        (*rt_nonnull(l, "src/parser.sabk:592:35")) = label;
+        ast__Node** l = &(*switch__4074).payload.ForIn.label;
+        (*rt_nonnull(l, "src/parser.sabk:607:35")) = label;
       }
       break;
       case ((ast__NodeKind__Tag)30LL):
       {
-        ast__Node** l = &(*switch__4071).payload.Switch.label;
-        (*rt_nonnull(l, "src/parser.sabk:593:36")) = label;
+        ast__Node** l = &(*switch__4074).payload.Switch.label;
+        (*rt_nonnull(l, "src/parser.sabk:608:36")) = label;
       }
       break;
       default:
@@ -30347,8 +30371,8 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
     return n;
   }
   {
-    token__TokenKind switch__4072 = (t).kind;
-    switch (switch__4072) {
+    token__TokenKind switch__4075 = (t).kind;
+    switch (switch__4075) {
     case ((token__TokenKind)8LL):
     {
       return parser__block(ctx, p);
@@ -30369,10 +30393,9 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
     case ((token__TokenKind)73LL):
     {
       parser__next(ctx, p);
-      parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(` after `if`", 14}));
-      ast__Node* cond = parser__expr(ctx, p, ((isize)1LL));
-      parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the condition", 23}));
-      ast__Node* then = parser__stmt(ctx, p);
+      tuple__22 values__4076 = parser__condition_and_body(ctx, p, ((slice__u8){(u8*)"if", 2}));
+      ast__Node* cond = values__4076._0;
+      ast__Node* then = values__4076._1;
       ast__Node* else_ = ((ast__Node*)0);
       if (parser__eat(ctx, p, ((token__TokenKind)74LL))) {
         else_ = parser__stmt(ctx, p);
@@ -30383,10 +30406,10 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
     case ((token__TokenKind)77LL):
     {
       parser__next(ctx, p);
-      parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(` after `while`", 17}));
-      ast__Node* cond = parser__expr(ctx, p, ((isize)1LL));
-      parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the condition", 23}));
-      return ({ token__Token v__4073 = t; ast__NodeKind v__4076 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)25LL), .payload.While = ({ ast__Node* v__4074 = cond; ast__Node* v__4075 = parser__stmt(ctx, p); ((ast__NodeKind__variant_While){.cond = v__4074, .body = v__4075, .label = ((ast__Node*)0)}); })}); ast__new_node(ctx, v__4073, v__4076); });
+      tuple__22 values__4077 = parser__condition_and_body(ctx, p, ((slice__u8){(u8*)"while", 5}));
+      ast__Node* cond = values__4077._0;
+      ast__Node* body = values__4077._1;
+      return ast__new_node(ctx, t, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)25LL), .payload.While = ((ast__NodeKind__variant_While){.cond = cond, .body = body, .label = ((ast__Node*)0)})}));
     }
     break;
     case ((token__TokenKind)78LL):
@@ -30394,9 +30417,7 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
       parser__next(ctx, p);
       ast__Node* body = parser__stmt(ctx, p);
       parser__expect(ctx, p, ((token__TokenKind)77LL), ((slice__u8){(u8*)"`while` after the `do` body", 27}));
-      parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(` after `while`", 17}));
-      ast__Node* cond = parser__expr(ctx, p, ((isize)1LL));
-      parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the condition", 23}));
+      ast__Node* cond = parser__condition(ctx, p, ((slice__u8){(u8*)"while", 5}));
       parser__expect(ctx, p, ((token__TokenKind)20LL), ((slice__u8){(u8*)"`;` after `do ... while (...)`", 30}));
       return ast__new_node(ctx, t, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)26LL), .payload.DoWhile = ((ast__NodeKind__variant_DoWhile){.body = body, .cond = cond, .label = ((ast__Node*)0)})}));
     }
@@ -30430,7 +30451,7 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
       ast__Node* label = ((ast__Node*)0);
       ast__Node* value = ((ast__Node*)0);
       if (parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)0LL))) {
-        label = ({ token__Token v__4077 = parser__next(ctx, p); ast__NodeKind v__4078 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4077, v__4078); });
+        label = ({ token__Token v__4078 = parser__next(ctx, p); ast__NodeKind v__4079 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4078, v__4079); });
         if (parser__eat(ctx, p, ((token__TokenKind)18LL))) {
           value = parser__expr(ctx, p, ((isize)1LL));
         }
@@ -30445,7 +30466,7 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
     case ((token__TokenKind)84LL):
     {
       parser__next(ctx, p);
-      return ({ token__Token v__4079 = t; ast__NodeKind v__4080 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)22LL), .payload.Defer = ((ast__NodeKind__variant_Defer){.stmt = parser__stmt(ctx, p)})}); ast__new_node(ctx, v__4079, v__4080); });
+      return ({ token__Token v__4080 = t; ast__NodeKind v__4081 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)22LL), .payload.Defer = ((ast__NodeKind__variant_Defer){.stmt = parser__stmt(ctx, p)})}); ast__new_node(ctx, v__4080, v__4081); });
     }
     break;
     case ((token__TokenKind)27LL):
@@ -30483,7 +30504,7 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
       if ((((parser__at(ctx, p, ((token__TokenKind)63LL), ((isize)1LL)) || parser__at(ctx, p, ((token__TokenKind)64LL), ((isize)1LL))) || parser__at(ctx, p, ((token__TokenKind)84LL), ((isize)1LL))) || parser__at(ctx, p, ((token__TokenKind)62LL), ((isize)1LL)))) {
         parser__next(ctx, p);
         ast__Node* n = parser__stmt(ctx, p);
-        (rt_nonnull(n, "src/parser.sabk:708:15"))->caller = true;
+        (rt_nonnull(n, "src/parser.sabk:716:15"))->caller = true;
         return n;
       }
     }
@@ -30497,21 +30518,21 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
   ast__Node* n = parser__simple_stmt(ctx, p);
   {
     ast__Node* value;
-    if (((({ ast__NodeKind is__4081 = (rt_nonnull(n, "src/parser.sabk:717:11"))->kind; is__4081.tag == ((ast__NodeKind__Tag)15LL) ? (value = is__4081.payload.ExprStmt.value, 1) : 0; }) && (((rt_nonnull(value, "src/parser.sabk:717:45"))->kind).tag == ((ast__NodeKind__Tag)46LL))) && parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL)))) {
+    if (((({ ast__NodeKind is__4082 = (rt_nonnull(n, "src/parser.sabk:725:11"))->kind; is__4082.tag == ((ast__NodeKind__Tag)15LL) ? (value = is__4082.payload.ExprStmt.value, 1) : 0; }) && (((rt_nonnull(value, "src/parser.sabk:725:45"))->kind).tag == ((ast__NodeKind__Tag)46LL))) && parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL)))) {
       ast__Node* body = parser__block(ctx, p);
-      ({ slice__u8 *target__4082 = &(rt_nonnull(body, "src/parser.sabk:719:14"))->span; *target__4082 = parser__span_from(ctx, p, (((rt_nonnull(body, "src/parser.sabk:719:39"))->tok).text).ptr); });
+      ({ slice__u8 *target__4083 = &(rt_nonnull(body, "src/parser.sabk:727:14"))->span; *target__4083 = parser__span_from(ctx, p, (((rt_nonnull(body, "src/parser.sabk:727:39"))->tok).text).ptr); });
       {
-        ast__NodeKind *switch__4083 = &(rt_nonnull(value, "src/parser.sabk:720:23"))->kind;
-        switch ((*switch__4083).tag) {
+        ast__NodeKind *switch__4084 = &(rt_nonnull(value, "src/parser.sabk:728:23"))->kind;
+        switch ((*switch__4084).tag) {
         case ((ast__NodeKind__Tag)46LL):
         {
-          slice__ptr_ast__Node* args = &(*switch__4083).payload.Call.args;
-          bool* trailing_block = &(*switch__4083).payload.Call.trailing_block;
+          slice__ptr_ast__Node* args = &(*switch__4084).payload.Call.args;
+          bool* trailing_block = &(*switch__4084).payload.Call.trailing_block;
           grow__ptr_ast__Node more = {0};
-          array__array_append__ptr_ast__Node(ctx, (&more), (*rt_nonnull(args, "src/parser.sabk:723:38")));
+          array__array_append__ptr_ast__Node(ctx, (&more), (*rt_nonnull(args, "src/parser.sabk:731:38")));
           array__array_add__ptr_ast__Node(ctx, (&more), body);
-          (*rt_nonnull(args, "src/parser.sabk:725:18")) = grow__ptr_ast__Node__view(more);
-          (*rt_nonnull(trailing_block, "src/parser.sabk:726:28")) = true;
+          (*rt_nonnull(args, "src/parser.sabk:733:18")) = grow__ptr_ast__Node__view(more);
+          (*rt_nonnull(trailing_block, "src/parser.sabk:734:28")) = true;
         }
         break;
         default:
@@ -30527,10 +30548,67 @@ static ast__Node* parser__stmt(prelude__Context *ctx, parser__Parser* p) {
   return n;
 }
 
+static ast__Node* parser__condition(prelude__Context *ctx, parser__Parser* p, slice__u8 what) {
+  prelude__Any items__4086[1];
+  if ((!parser__parenthesized(ctx, p))) {
+    return parser__bare_expr(ctx, p);
+  }
+  ({ parser__Parser* v__4085 = p; slice__u8 v__4087 = fmt__tformat(ctx, ((slice__u8){(u8*)"`(` after `%`", 13}), ((slice__prelude__Any){(items__4086[0] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4086), 1})); parser__expect(ctx, v__4085, ((token__TokenKind)6LL), v__4087); });
+  ast__Node* cond = parser__expr(ctx, p, ((isize)1LL));
+  parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the condition", 23}));
+  return cond;
+}
+
+static tuple__22 parser__condition_and_body(prelude__Context *ctx, parser__Parser* p, slice__u8 what) {
+  prelude__Any items__4091[2];
+  bool parens = parser__parenthesized(ctx, p);
+  u8* begin = ((parser__peek(ctx, p, ((isize)0LL))).text).ptr;
+  ast__Node* cond = parser__condition(ctx, p, what);
+  if (((!parens) && (!parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL))))) {
+    return ({ ast__Node* v__4088 = cond; ast__Node* v__4093 = ({ parser__Parser* v__4089 = p; token__Token v__4090 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4092 = fmt__tformat(ctx, ((slice__u8){(u8*)"`{` after the condition `%`: without parentheses, `%`'s body is a block", 71}), ((slice__prelude__Any){(items__4091[0] = ((prelude__Any){.value = (slice__u8[1]){parser__span_from(ctx, p, begin)}, .info = (&ti__1)}), items__4091[1] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4091), 2})); parser__fail(ctx, v__4089, v__4090, v__4092); }); ((tuple__22){._0 = v__4088, ._1 = v__4093}); });
+  }
+  return ({ ast__Node* v__4094 = cond; ast__Node* v__4095 = parser__stmt(ctx, p); ((tuple__22){._0 = v__4094, ._1 = v__4095}); });
+}
+
+static ast__Node* parser__bare_expr(prelude__Context *ctx, parser__Parser* p) {
+  bool saved = (rt_nonnull(p, "src/parser.sabk:770:19"))->bare_condition;
+  (rt_nonnull(p, "src/parser.sabk:771:7"))->bare_condition = true;
+  ast__Node* e = parser__expr(ctx, p, ((isize)1LL));
+  (rt_nonnull(p, "src/parser.sabk:773:7"))->bare_condition = saved;
+  return e;
+}
+
+static bool parser__parenthesized(prelude__Context *ctx, parser__Parser* p) {
+  if ((!parser__at(ctx, p, ((token__TokenKind)6LL), ((isize)0LL)))) {
+    return false;
+  }
+  isize depth = ((isize)0LL);
+  isize k = ((isize)0LL);
+  while (true) {
+    token__TokenKind kind = (parser__peek(ctx, p, k)).kind;
+    if ((kind == ((token__TokenKind)0LL))) {
+      return true;
+    }
+    if ((kind == ((token__TokenKind)6LL))) {
+      depth += ((isize)1LL);
+    }
+    if ((kind == ((token__TokenKind)7LL))) {
+      depth -= ((isize)1LL);
+      if ((depth == ((isize)0LL))) {
+        break;
+      }
+    }
+    k += ((isize)1LL);
+  }
+  token__TokenKind after = (parser__peek(ctx, p, ((isize)(k + ((isize)1LL))))).kind;
+  bool goes_on = ((((((parser__binary_prec(ctx, after) > ((isize)0LL)) || (((after == ((token__TokenKind)22LL)) && parser__at(ctx, p, ((token__TokenKind)86LL), ((isize)(k + ((isize)2LL))))))) || (after == ((token__TokenKind)12LL))) || (after == ((token__TokenKind)10LL))) || (after == ((token__TokenKind)72LL))) || (after == ((token__TokenKind)91LL)));
+  return (!goes_on);
+}
+
 static bool parser__is_assign_op(prelude__Context *ctx, token__TokenKind kind) {
   {
-    token__TokenKind switch__4084 = kind;
-    switch (switch__4084) {
+    token__TokenKind switch__4096 = kind;
+    switch (switch__4096) {
     case ((token__TokenKind)18LL):
     case ((token__TokenKind)31LL):
     case ((token__TokenKind)34LL):
@@ -30557,52 +30635,54 @@ static bool parser__is_assign_op(prelude__Context *ctx, token__TokenKind kind) {
 
 static ast__Node* parser__simple_stmt(prelude__Context *ctx, parser__Parser* p) {
   token__Token start = parser__peek(ctx, p, ((isize)0LL));
-  (rt_nonnull(p, "src/parser.sabk:747:7"))->statement_head = true;
+  (rt_nonnull(p, "src/parser.sabk:817:7"))->statement_head = true;
   ast__Node* e = parser__expr(ctx, p, ((isize)1LL));
   if (parser__at(ctx, p, ((token__TokenKind)21LL), ((isize)0LL))) {
     grow__ptr_ast__Node targets = {0};
     array__array_add__ptr_ast__Node(ctx, (&targets), e);
     while (parser__eat(ctx, p, ((token__TokenKind)21LL))) {
-      ({ grow__ptr_ast__Node* v__4085 = (&targets); ast__Node* v__4086 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4085, v__4086); });
+      ({ grow__ptr_ast__Node* v__4097 = (&targets); ast__Node* v__4098 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4097, v__4098); });
     }
     if ((parser__is_assign_op(ctx, (parser__peek(ctx, p, ((isize)0LL))).kind) && (!parser__at(ctx, p, ((token__TokenKind)18LL), ((isize)0LL))))) {
-      ({ parser__Parser* v__4087 = p; token__Token v__4088 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4087, v__4088, ((slice__u8){(u8*)"only `=` assigns to several targets at once", 43})); });
+      ({ parser__Parser* v__4099 = p; token__Token v__4100 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4099, v__4100, ((slice__u8){(u8*)"only `=` assigns to several targets at once", 43})); });
     }
     token__Token op = parser__expect(ctx, p, ((token__TokenKind)18LL), ((slice__u8){(u8*)"`=` after the targets", 21}));
-    return ({ token__Token v__4089 = op; ast__NodeKind v__4092 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)16LL), .payload.Assign = ({ ast__Node* v__4090 = ast__new_node(ctx, (rt_nonnull(e, "src/parser.sabk:759:48"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)54LL), .payload.Values = ((ast__NodeKind__variant_Values){.items = grow__ptr_ast__Node__view(targets)})})); ast__Node* v__4091 = parser__values(ctx, p); ((ast__NodeKind__variant_Assign){.target = v__4090, .value = v__4091}); })}); ast__new_node(ctx, v__4089, v__4092); });
+    return ({ token__Token v__4101 = op; ast__NodeKind v__4104 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)16LL), .payload.Assign = ({ ast__Node* v__4102 = ast__new_node(ctx, (rt_nonnull(e, "src/parser.sabk:829:48"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)54LL), .payload.Values = ((ast__NodeKind__variant_Values){.items = grow__ptr_ast__Node__view(targets)})})); ast__Node* v__4103 = parser__values(ctx, p); ((ast__NodeKind__variant_Assign){.target = v__4102, .value = v__4103}); })}); ast__new_node(ctx, v__4101, v__4104); });
   }
-  if (((parser__at(ctx, p, ((token__TokenKind)18LL), ((isize)0LL)) && (((rt_nonnull(e, "src/parser.sabk:762:28"))->kind).tag == ((ast__NodeKind__Tag)34LL))) && ({ slice__u8 a__4093 = ((rt_nonnull(e, "src/parser.sabk:762:57"))->tok).text, b__4094 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4093.ptr, a__4093.len, b__4094.ptr, b__4094.len); }))) {
+  if (((parser__at(ctx, p, ((token__TokenKind)18LL), ((isize)0LL)) && (((rt_nonnull(e, "src/parser.sabk:832:28"))->kind).tag == ((ast__NodeKind__Tag)34LL))) && ({ slice__u8 a__4105 = ((rt_nonnull(e, "src/parser.sabk:832:57"))->tok).text, b__4106 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4105.ptr, a__4105.len, b__4106.ptr, b__4106.len); }))) {
     parser__next(ctx, p);
     ast__Node* value = parser__expr(ctx, p, ((isize)1LL));
     if (parser__at(ctx, p, ((token__TokenKind)21LL), ((isize)0LL))) {
-      ({ parser__Parser* v__4095 = p; token__Token v__4096 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4095, v__4096, ((slice__u8){(u8*)"`_ =` drops one value, or all of one call's results; for several values, give each a target: `_, _ = a, b;`", 107})); });
+      ({ parser__Parser* v__4107 = p; token__Token v__4108 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4107, v__4108, ((slice__u8){(u8*)"`_ =` drops one value, or all of one call's results; for several values, give each a target: `_, _ = a, b;`", 107})); });
     }
     return ast__new_node(ctx, start, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)15LL), .payload.ExprStmt = ((ast__NodeKind__variant_ExprStmt){.value = value, .dropped = true})}));
   }
   if (parser__is_assign_op(ctx, (parser__peek(ctx, p, ((isize)0LL))).kind)) {
     token__Token op = parser__next(ctx, p);
-    return ({ token__Token v__4097 = op; ast__NodeKind v__4100 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)16LL), .payload.Assign = ({ ast__Node* v__4098 = e; ast__Node* v__4099 = parser__values(ctx, p); ((ast__NodeKind__variant_Assign){.target = v__4098, .value = v__4099}); })}); ast__new_node(ctx, v__4097, v__4100); });
+    return ({ token__Token v__4109 = op; ast__NodeKind v__4112 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)16LL), .payload.Assign = ({ ast__Node* v__4110 = e; ast__Node* v__4111 = parser__values(ctx, p); ((ast__NodeKind__variant_Assign){.target = v__4110, .value = v__4111}); })}); ast__new_node(ctx, v__4109, v__4112); });
   }
   if (parser__at(ctx, p, ((token__TokenKind)30LL), ((isize)0LL))) {
-    return ({ token__Token v__4101 = parser__next(ctx, p); ast__NodeKind v__4102 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)17LL), .payload.Inc = ((ast__NodeKind__variant_Inc){.target = e})}); ast__new_node(ctx, v__4101, v__4102); });
+    return ({ token__Token v__4113 = parser__next(ctx, p); ast__NodeKind v__4114 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)17LL), .payload.Inc = ((ast__NodeKind__variant_Inc){.target = e})}); ast__new_node(ctx, v__4113, v__4114); });
   }
   if (parser__at(ctx, p, ((token__TokenKind)33LL), ((isize)0LL))) {
-    return ({ token__Token v__4103 = parser__next(ctx, p); ast__NodeKind v__4104 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)18LL), .payload.Dec = ((ast__NodeKind__variant_Dec){.target = e})}); ast__new_node(ctx, v__4103, v__4104); });
+    return ({ token__Token v__4115 = parser__next(ctx, p); ast__NodeKind v__4116 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)18LL), .payload.Dec = ((ast__NodeKind__variant_Dec){.target = e})}); ast__new_node(ctx, v__4115, v__4116); });
   }
   return ast__new_node(ctx, start, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)15LL), .payload.ExprStmt = ((ast__NodeKind__variant_ExprStmt){.value = e, .dropped = false})}));
 }
 
 static ast__Node* parser__for_stmt(prelude__Context *ctx, parser__Parser* p) {
-  prelude__Any items__4109[2];
+  prelude__Any items__4121[2];
   token__Token t = parser__next(ctx, p);
-  parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(` after `for`", 15}));
+  bool parens = parser__eat(ctx, p, ((token__TokenKind)6LL));
+  bool saved = (rt_nonnull(p, "src/parser.sabk:854:19"))->bare_condition;
+  (rt_nonnull(p, "src/parser.sabk:855:7"))->bare_condition = (!parens);
   bool indexed = (((parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)0LL)) && parser__at(ctx, p, ((token__TokenKind)21LL), ((isize)1LL))) && parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)2LL))) && parser__at(ctx, p, ((token__TokenKind)76LL), ((isize)3LL)));
   if ((((parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)0LL)) && parser__at(ctx, p, ((token__TokenKind)76LL), ((isize)1LL)))) || indexed)) {
     token__Token name = parser__next(ctx, p);
     ast__Node* index = ((ast__Node*)0);
     if (indexed) {
       parser__next(ctx, p);
-      index = ({ token__Token v__4105 = parser__next(ctx, p); ast__NodeKind v__4106 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)29LL)}); ast__new_node(ctx, v__4105, v__4106); });
+      index = ({ token__Token v__4117 = parser__next(ctx, p); ast__NodeKind v__4118 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)29LL)}); ast__new_node(ctx, v__4117, v__4118); });
     }
     parser__next(ctx, p);
     ast__Node* iterable = parser__expr(ctx, p, ((isize)1LL));
@@ -30610,11 +30690,15 @@ static ast__Node* parser__for_stmt(prelude__Context *ctx, parser__Parser* p) {
     if (parser__eat(ctx, p, ((token__TokenKind)13LL))) {
       range_end = parser__expr(ctx, p, ((isize)1LL));
       if ((index != ((ast__Node*)0))) {
-        ({ parser__Parser* v__4107 = p; token__Token v__4108 = (rt_nonnull(index, "src/parser.sabk:799:31"))->tok; slice__u8 v__4110 = fmt__tformat(ctx, ((slice__u8){(u8*)"a loop over a range takes one name: `%` would only count what `%` counts", 72}), ((slice__prelude__Any){(items__4109[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(index, "src/parser.sabk:800:50"))->tok).text}, .info = (&ti__1)}), items__4109[1] = ((prelude__Any){.value = (slice__u8[1]){(name).text}, .info = (&ti__1)}), items__4109), 2})); parser__fail(ctx, v__4107, v__4108, v__4110); });
+        ({ parser__Parser* v__4119 = p; token__Token v__4120 = (rt_nonnull(index, "src/parser.sabk:873:31"))->tok; slice__u8 v__4122 = fmt__tformat(ctx, ((slice__u8){(u8*)"a loop over a range takes one name: `%` would only count what `%` counts", 72}), ((slice__prelude__Any){(items__4121[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(index, "src/parser.sabk:874:50"))->tok).text}, .info = (&ti__1)}), items__4121[1] = ((prelude__Any){.value = (slice__u8[1]){(name).text}, .info = (&ti__1)}), items__4121), 2})); parser__fail(ctx, v__4119, v__4120, v__4122); });
       }
     }
-    parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the loop header", 25}));
-    return ({ token__Token v__4111 = name; ast__NodeKind v__4116 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)28LL), .payload.ForIn = ({ ast__Node* v__4112 = iterable; ast__Node* v__4113 = range_end; ast__Node* v__4114 = parser__stmt(ctx, p); ast__Node* v__4115 = index; ((ast__NodeKind__variant_ForIn){.iterable = v__4112, .range_end = v__4113, .body = v__4114, .label = ((ast__Node*)0), .index = v__4115}); })}); ast__new_node(ctx, v__4111, v__4116); });
+    ast__Node* body = parser__loop_body(ctx, p, parens);
+    ast__Node* ret__4123 = ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)28LL), .payload.ForIn = ((ast__NodeKind__variant_ForIn){.iterable = iterable, .range_end = range_end, .body = body, .label = ((ast__Node*)0), .index = index})}));
+    {
+      (rt_nonnull(p, "src/parser.sabk:856:13"))->bare_condition = saved;
+    }
+    return ret__4123;
   }
   ast__Node* init = ((ast__Node*)0);
   ast__Node* cond = ((ast__Node*)0);
@@ -30631,35 +30715,53 @@ static ast__Node* parser__for_stmt(prelude__Context *ctx, parser__Parser* p) {
     cond = parser__expr(ctx, p, ((isize)1LL));
   }
   parser__expect(ctx, p, ((token__TokenKind)20LL), ((slice__u8){(u8*)"`;` after the loop condition", 28}));
-  if ((!parser__at(ctx, p, ((token__TokenKind)7LL), ((isize)0LL)))) {
+  if ((!parser__at(ctx, p, (parens ? ((token__TokenKind)7LL) : ((token__TokenKind)8LL)), ((isize)0LL)))) {
     step = parser__simple_stmt(ctx, p);
   }
-  parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the loop header", 25}));
-  return ({ token__Token v__4117 = t; ast__NodeKind v__4122 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)27LL), .payload.For = ({ ast__Node* v__4118 = init; ast__Node* v__4119 = cond; ast__Node* v__4120 = step; ast__Node* v__4121 = parser__stmt(ctx, p); ((ast__NodeKind__variant_For){.init = v__4118, .cond = v__4119, .step = v__4120, .body = v__4121, .label = ((ast__Node*)0)}); })}); ast__new_node(ctx, v__4117, v__4122); });
+  ast__Node* body = parser__loop_body(ctx, p, parens);
+  ast__Node* ret__4124 = ast__new_node(ctx, t, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)27LL), .payload.For = ((ast__NodeKind__variant_For){.init = init, .cond = cond, .step = step, .body = body, .label = ((ast__Node*)0)})}));
+  {
+    (rt_nonnull(p, "src/parser.sabk:856:13"))->bare_condition = saved;
+  }
+  return ret__4124;
+  {
+    (rt_nonnull(p, "src/parser.sabk:856:13"))->bare_condition = saved;
+  }
+}
+
+static ast__Node* parser__loop_body(prelude__Context *ctx, parser__Parser* p, bool parens) {
+  if (parens) {
+    parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the loop header", 25}));
+    return parser__stmt(ctx, p);
+  }
+  if ((!parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL)))) {
+    return ({ parser__Parser* v__4125 = p; token__Token v__4126 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4125, v__4126, ((slice__u8){(u8*)"`{` after the loop header: without parentheses, `for`'s body is a block", 71})); });
+  }
+  return parser__stmt(ctx, p);
 }
 
 static bool parser__binds_names(prelude__Context *ctx, ast__Node* pattern) {
   {
-    ast__NodeKind switch__4123 = (rt_nonnull(pattern, "src/parser.sabk:826:21"))->kind;
-    switch (switch__4123.tag) {
+    ast__NodeKind switch__4127 = (rt_nonnull(pattern, "src/parser.sabk:911:21"))->kind;
+    switch (switch__4127.tag) {
     case ((ast__NodeKind__Tag)73LL):
     {
-      return !({ slice__u8 a__4124 = ((rt_nonnull(pattern, "src/parser.sabk:827:35"))->tok).text, b__4125 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4124.ptr, a__4124.len, b__4125.ptr, b__4125.len); });
+      return !({ slice__u8 a__4128 = ((rt_nonnull(pattern, "src/parser.sabk:912:35"))->tok).text, b__4129 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4128.ptr, a__4128.len, b__4129.ptr, b__4129.len); });
     }
     break;
     case ((ast__NodeKind__Tag)72LL):
     {
-      ast__Node* inner = switch__4123.payload.FieldPattern.pattern;
+      ast__Node* inner = switch__4127.payload.FieldPattern.pattern;
       return parser__binds_names(ctx, inner);
     }
     break;
     case ((ast__NodeKind__Tag)71LL):
     {
-      slice__ptr_ast__Node bindings = switch__4123.payload.VariantPattern.bindings;
+      slice__ptr_ast__Node bindings = switch__4127.payload.VariantPattern.bindings;
       {
-        slice__ptr_ast__Node seq__4126 = bindings;
-        for (isize i__4127 = 0; i__4127 < seq__4126.len; i__4127++) {
-          ast__Node* b = seq__4126.ptr[i__4127];
+        slice__ptr_ast__Node seq__4130 = bindings;
+        for (isize i__4131 = 0; i__4131 < seq__4130.len; i__4131++) {
+          ast__Node* b = seq__4130.ptr[i__4131];
           if (parser__binds_names(ctx, b)) {
             return true;
           }
@@ -30678,10 +30780,8 @@ static bool parser__binds_names(prelude__Context *ctx, ast__Node* pattern) {
 }
 
 static ast__Node* parser__switch_body(prelude__Context *ctx, parser__Parser* p, token__Token t, bool gives_value, ast__Node* label) {
-  prelude__Any items__4136[1];
-  parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(` after `switch`", 18}));
-  ast__Node* value = parser__expr(ctx, p, ((isize)1LL));
-  parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the switch value", 26}));
+  prelude__Any items__4140[1];
+  ast__Node* value = parser__condition(ctx, p, ((slice__u8){(u8*)"switch", 6}));
   parser__expect(ctx, p, ((token__TokenKind)8LL), ((slice__u8){(u8*)"`{` to start the cases", 22}));
   grow__ptr_ast__Node cases = {0};
   while ((!parser__at(ctx, p, ((token__TokenKind)9LL), ((isize)0LL)))) {
@@ -30690,17 +30790,17 @@ static ast__Node* parser__switch_body(prelude__Context *ctx, parser__Parser* p, 
     ast__Node* guard = ((ast__Node*)0);
     bool is_default = false;
     if (parser__eat(ctx, p, ((token__TokenKind)80LL))) {
-      ({ grow__ptr_ast__Node* v__4128 = (&patterns); ast__Node* v__4129 = parser__pattern(ctx, p, ((isize)4LL)); array__array_add__ptr_ast__Node(ctx, v__4128, v__4129); });
+      ({ grow__ptr_ast__Node* v__4132 = (&patterns); ast__Node* v__4133 = parser__pattern(ctx, p, ((isize)4LL)); array__array_add__ptr_ast__Node(ctx, v__4132, v__4133); });
       while (parser__eat(ctx, p, ((token__TokenKind)21LL))) {
-        ({ grow__ptr_ast__Node* v__4130 = (&patterns); ast__Node* v__4131 = parser__pattern(ctx, p, ((isize)4LL)); array__array_add__ptr_ast__Node(ctx, v__4130, v__4131); });
+        ({ grow__ptr_ast__Node* v__4134 = (&patterns); ast__Node* v__4135 = parser__pattern(ctx, p, ((isize)4LL)); array__array_add__ptr_ast__Node(ctx, v__4134, v__4135); });
       }
       if (((patterns).len > ((isize)1LL))) {
         {
-          grow__ptr_ast__Node seq__4132 = patterns;
-          for (isize i__4133 = 0; i__4133 < seq__4132.len; i__4133++) {
-            ast__Node* q = seq__4132.ptr[i__4133];
+          grow__ptr_ast__Node seq__4136 = patterns;
+          for (isize i__4137 = 0; i__4137 < seq__4136.len; i__4137++) {
+            ast__Node* q = seq__4136.ptr[i__4137];
             if (parser__binds_names(ctx, q)) {
-              parser__fail(ctx, p, (rt_nonnull(q, "src/parser.sabk:861:35"))->tok, ((slice__u8){(u8*)"a case that binds a variant's value can only have that one pattern", 66}));
+              parser__fail(ctx, p, (rt_nonnull(q, "src/parser.sabk:944:35"))->tok, ((slice__u8){(u8*)"a case that binds a variant's value can only have that one pattern", 66}));
             }
           }
         }
@@ -30714,7 +30814,7 @@ static ast__Node* parser__switch_body(prelude__Context *ctx, parser__Parser* p, 
       if (parser__eat(ctx, p, ((token__TokenKind)81LL))) {
         is_default = true;
       } else {
-        ({ parser__Parser* v__4134 = p; token__Token v__4135 = head; slice__u8 v__4137 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected `case` or `default`, found %", 37}), ((slice__prelude__Any){(items__4136[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, head)}, .info = (&ti__1)}), items__4136), 1})); parser__fail(ctx, v__4134, v__4135, v__4137); });
+        ({ parser__Parser* v__4138 = p; token__Token v__4139 = head; slice__u8 v__4141 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected `case` or `default`, found %", 37}), ((slice__prelude__Any){(items__4140[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, head)}, .info = (&ti__1)}), items__4140), 1})); parser__fail(ctx, v__4138, v__4139, v__4141); });
       }
     }
     parser__expect(ctx, p, ((token__TokenKind)15LL), ((slice__u8){(u8*)"`:` after the case", 18}));
@@ -30723,7 +30823,7 @@ static ast__Node* parser__switch_body(prelude__Context *ctx, parser__Parser* p, 
       grow__ptr_ast__Node stmts = parser__case_stmts(ctx, p);
       {
         ast__Node* only;
-        if ((((stmts).len == ((isize)1LL)) && ({ ast__NodeKind is__4138 = (rt_nonnull((*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(stmts), ((isize)0LL), "src/parser.sabk:879:40")), "src/parser.sabk:879:44"))->kind; is__4138.tag == ((ast__NodeKind__Tag)15LL) ? (only = is__4138.payload.ExprStmt.value, 1) : 0; }))) {
+        if ((((stmts).len == ((isize)1LL)) && ({ ast__NodeKind is__4142 = (rt_nonnull((*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(stmts), ((isize)0LL), "src/parser.sabk:962:40")), "src/parser.sabk:962:44"))->kind; is__4142.tag == ((ast__NodeKind__Tag)15LL) ? (only = is__4142.payload.ExprStmt.value, 1) : 0; }))) {
           body = only;
         } else {
           body = ast__new_node(ctx, head, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)14LL), .payload.Block = ((ast__NodeKind__variant_Block){.stmts = grow__ptr_ast__Node__view(stmts), .label = ((ast__Node*)0), .gives_value = false})}));
@@ -30734,16 +30834,16 @@ static ast__Node* parser__switch_body(prelude__Context *ctx, parser__Parser* p, 
         body = parser__expr(ctx, p, ((isize)1LL));
         parser__expect(ctx, p, ((token__TokenKind)20LL), ((slice__u8){(u8*)"`;` after the case's value", 26}));
         if ((((!parser__at(ctx, p, ((token__TokenKind)80LL), ((isize)0LL))) && (!parser__at(ctx, p, ((token__TokenKind)81LL), ((isize)0LL)))) && (!parser__at(ctx, p, ((token__TokenKind)9LL), ((isize)0LL))))) {
-          ({ parser__Parser* v__4139 = p; token__Token v__4140 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4139, v__4140, ((slice__u8){(u8*)"a switch expression's case is one value; to run statements first, label the switch (`s: switch (...)`) and give the value with `break s = value;`", 145})); });
+          ({ parser__Parser* v__4143 = p; token__Token v__4144 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4143, v__4144, ((slice__u8){(u8*)"a switch expression's case is one value; to run statements first, label the switch (`s: switch (...)`) and give the value with `break s = value;`", 145})); });
         }
       } else {
-        body = ({ token__Token v__4141 = head; ast__NodeKind v__4142 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)14LL), .payload.Block = ((ast__NodeKind__variant_Block){.stmts = grow__ptr_ast__Node__view(parser__case_stmts(ctx, p)), .label = ((ast__Node*)0), .gives_value = false})}); ast__new_node(ctx, v__4141, v__4142); });
+        body = ({ token__Token v__4145 = head; ast__NodeKind v__4146 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)14LL), .payload.Block = ((ast__NodeKind__variant_Block){.stmts = grow__ptr_ast__Node__view(parser__case_stmts(ctx, p)), .label = ((ast__Node*)0), .gives_value = false})}); ast__new_node(ctx, v__4145, v__4146); });
       }
     }
     if (is_default) {
-      ({ grow__ptr_ast__Node* v__4143 = (&cases); ast__Node* v__4144 = ast__new_node(ctx, head, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)32LL), .payload.DefaultCase = ((ast__NodeKind__variant_DefaultCase){.body = body})})); array__array_add__ptr_ast__Node(ctx, v__4143, v__4144); });
+      ({ grow__ptr_ast__Node* v__4147 = (&cases); ast__Node* v__4148 = ast__new_node(ctx, head, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)32LL), .payload.DefaultCase = ((ast__NodeKind__variant_DefaultCase){.body = body})})); array__array_add__ptr_ast__Node(ctx, v__4147, v__4148); });
     } else {
-      ({ grow__ptr_ast__Node* v__4145 = (&cases); ast__Node* v__4146 = ast__new_node(ctx, head, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)31LL), .payload.Case = ((ast__NodeKind__variant_Case){.patterns = grow__ptr_ast__Node__view(patterns), .guard = guard, .body = body})})); array__array_add__ptr_ast__Node(ctx, v__4145, v__4146); });
+      ({ grow__ptr_ast__Node* v__4149 = (&cases); ast__Node* v__4150 = ast__new_node(ctx, head, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)31LL), .payload.Case = ((ast__NodeKind__variant_Case){.patterns = grow__ptr_ast__Node__view(patterns), .guard = guard, .body = body})})); array__array_add__ptr_ast__Node(ctx, v__4149, v__4150); });
     }
   }
   parser__next(ctx, p);
@@ -30753,16 +30853,16 @@ static ast__Node* parser__switch_body(prelude__Context *ctx, parser__Parser* p, 
 static grow__ptr_ast__Node parser__case_stmts(prelude__Context *ctx, parser__Parser* p) {
   grow__ptr_ast__Node stmts = {0};
   while ((((!parser__at(ctx, p, ((token__TokenKind)80LL), ((isize)0LL))) && (!parser__at(ctx, p, ((token__TokenKind)81LL), ((isize)0LL)))) && (!parser__at(ctx, p, ((token__TokenKind)9LL), ((isize)0LL))))) {
-    ({ grow__ptr_ast__Node* v__4147 = (&stmts); ast__Node* v__4148 = parser__stmt(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4147, v__4148); });
+    ({ grow__ptr_ast__Node* v__4151 = (&stmts); ast__Node* v__4152 = parser__stmt(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4151, v__4152); });
   }
   return stmts;
 }
 
 static ast__Node* parser__pattern(prelude__Context *ctx, parser__Parser* p, isize min_prec) {
-  bool saved = (rt_nonnull(p, "src/parser.sabk:914:19"))->in_pattern;
-  (rt_nonnull(p, "src/parser.sabk:915:7"))->in_pattern = true;
+  bool saved = (rt_nonnull(p, "src/parser.sabk:997:19"))->in_pattern;
+  (rt_nonnull(p, "src/parser.sabk:998:7"))->in_pattern = true;
   ast__Node* n = parser__pattern_inner(ctx, p, min_prec);
-  (rt_nonnull(p, "src/parser.sabk:917:7"))->in_pattern = saved;
+  (rt_nonnull(p, "src/parser.sabk:1000:7"))->in_pattern = saved;
   return n;
 }
 
@@ -30781,15 +30881,15 @@ static ast__Node* parser__pattern_inner(prelude__Context *ctx, parser__Parser* p
       }
     }
   }
-  if (((k > ((isize)0LL)) && ((parser__at(ctx, p, ((token__TokenKind)8LL), k) || parser__at(ctx, p, ((token__TokenKind)6LL), k))))) {
+  if (((k > ((isize)0LL)) && ((((parser__at(ctx, p, ((token__TokenKind)8LL), k) && (!(rt_nonnull(p, "src/parser.sabk:1018:44"))->bare_condition))) || parser__at(ctx, p, ((token__TokenKind)6LL), k))))) {
     ast__Node* variant = 0;
     if (parser__at(ctx, p, ((token__TokenKind)12LL), ((isize)0LL))) {
       token__Token dot = parser__next(ctx, p);
-      variant = ({ token__Token v__4151 = ({ token__Token v__4149 = dot; token__Token v__4150 = parser__next(ctx, p); parser__joined(ctx, v__4149, v__4150); }); ast__NodeKind v__4152 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)61LL)}); ast__new_node(ctx, v__4151, v__4152); });
+      variant = ({ token__Token v__4155 = ({ token__Token v__4153 = dot; token__Token v__4154 = parser__next(ctx, p); parser__joined(ctx, v__4153, v__4154); }); ast__NodeKind v__4156 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)61LL)}); ast__new_node(ctx, v__4155, v__4156); });
     } else {
-      variant = ({ token__Token v__4153 = parser__next(ctx, p); ast__NodeKind v__4154 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4153, v__4154); });
+      variant = ({ token__Token v__4157 = parser__next(ctx, p); ast__NodeKind v__4158 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4157, v__4158); });
       while (parser__eat(ctx, p, ((token__TokenKind)12LL))) {
-        variant = ({ token__Token v__4155 = parser__next(ctx, p); ast__NodeKind v__4156 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)47LL), .payload.Member = ((ast__NodeKind__variant_Member){.object = variant})}); ast__new_node(ctx, v__4155, v__4156); });
+        variant = ({ token__Token v__4159 = parser__next(ctx, p); ast__NodeKind v__4160 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)47LL), .payload.Member = ((ast__NodeKind__variant_Member){.object = variant})}); ast__new_node(ctx, v__4159, v__4160); });
       }
     }
     if (parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL))) {
@@ -30797,15 +30897,15 @@ static ast__Node* parser__pattern_inner(prelude__Context *ctx, parser__Parser* p
     }
     parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(`", 3}));
     grow__ptr_ast__Node bindings = {0};
-    ({ grow__ptr_ast__Node* v__4157 = (&bindings); ast__Node* v__4158 = parser__subpattern(ctx, p, ((ast__Node*)0)); array__array_add__ptr_ast__Node(ctx, v__4157, v__4158); });
+    ({ grow__ptr_ast__Node* v__4161 = (&bindings); ast__Node* v__4162 = parser__subpattern(ctx, p, ((ast__Node*)0)); array__array_add__ptr_ast__Node(ctx, v__4161, v__4162); });
     parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after what the variant holds", 32}));
-    return ast__new_node(ctx, (rt_nonnull(variant, "src/parser.sabk:950:33"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)71LL), .payload.VariantPattern = ((ast__NodeKind__variant_VariantPattern){.variant = variant, .bindings = grow__ptr_ast__Node__view(bindings), .by_fields = false})}));
+    return ast__new_node(ctx, (rt_nonnull(variant, "src/parser.sabk:1034:33"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)71LL), .payload.VariantPattern = ((ast__NodeKind__variant_VariantPattern){.variant = variant, .bindings = grow__ptr_ast__Node__view(bindings), .by_fields = false})}));
   }
   ast__Node* value = parser__expr(ctx, p, min_prec);
   if (parser__at(ctx, p, ((token__TokenKind)13LL), ((isize)0LL))) {
     token__Token dots = parser__next(ctx, p);
     bool inclusive = parser__eat(ctx, p, ((token__TokenKind)18LL));
-    return ({ token__Token v__4159 = dots; ast__NodeKind v__4163 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)70LL), .payload.Range = ({ ast__Node* v__4160 = value; ast__Node* v__4161 = parser__expr(ctx, p, min_prec); bool v__4162 = inclusive; ((ast__NodeKind__variant_Range){.lo = v__4160, .hi = v__4161, .inclusive = v__4162}); })}); ast__new_node(ctx, v__4159, v__4163); });
+    return ({ token__Token v__4163 = dots; ast__NodeKind v__4167 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)70LL), .payload.Range = ({ ast__Node* v__4164 = value; ast__Node* v__4165 = parser__expr(ctx, p, min_prec); bool v__4166 = inclusive; ((ast__NodeKind__variant_Range){.lo = v__4164, .hi = v__4165, .inclusive = v__4166}); })}); ast__new_node(ctx, v__4163, v__4167); });
   }
   return value;
 }
@@ -30816,42 +30916,42 @@ static ast__Node* parser__subpattern(prelude__Context *ctx, parser__Parser* p, a
     if (by_ref) {
       parser__next(ctx, p);
     }
-    return ({ token__Token v__4164 = parser__next(ctx, p); ast__NodeKind v__4165 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)73LL), .payload.Binding = ((ast__NodeKind__variant_Binding){.field = field, .by_ref = by_ref})}); ast__new_node(ctx, v__4164, v__4165); });
+    return ({ token__Token v__4168 = parser__next(ctx, p); ast__NodeKind v__4169 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)73LL), .payload.Binding = ((ast__NodeKind__variant_Binding){.field = field, .by_ref = by_ref})}); ast__new_node(ctx, v__4168, v__4169); });
   }
-  token__Token t = ((field != ((ast__Node*)0)) ? (rt_nonnull(field, "src/parser.sabk:973:38"))->tok : parser__peek(ctx, p, ((isize)0LL)));
-  return ({ token__Token v__4166 = t; ast__NodeKind v__4169 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)72LL), .payload.FieldPattern = ({ ast__Node* v__4167 = parser__pattern_inner(ctx, p, ((isize)4LL)); ast__Node* v__4168 = field; ((ast__NodeKind__variant_FieldPattern){.pattern = v__4167, .field = v__4168}); })}); ast__new_node(ctx, v__4166, v__4169); });
+  token__Token t = ((field != ((ast__Node*)0)) ? (rt_nonnull(field, "src/parser.sabk:1057:38"))->tok : parser__peek(ctx, p, ((isize)0LL)));
+  return ({ token__Token v__4170 = t; ast__NodeKind v__4173 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)72LL), .payload.FieldPattern = ({ ast__Node* v__4171 = parser__pattern_inner(ctx, p, ((isize)4LL)); ast__Node* v__4172 = field; ((ast__NodeKind__variant_FieldPattern){.pattern = v__4171, .field = v__4172}); })}); ast__new_node(ctx, v__4170, v__4173); });
 }
 
 static ast__Node* parser__variant_fields(prelude__Context *ctx, parser__Parser* p, ast__Node* variant) {
-  prelude__Any items__4176[2];
+  prelude__Any items__4180[2];
   parser__expect(ctx, p, ((token__TokenKind)8LL), ((slice__u8){(u8*)"`{`", 3}));
   grow__ptr_ast__Node bindings = {0};
   while ((!parser__at(ctx, p, ((token__TokenKind)9LL), ((isize)0LL)))) {
     if ((parser__at_field_name(ctx, p, ((isize)0LL)) && parser__at(ctx, p, ((token__TokenKind)15LL), ((isize)1LL)))) {
-      ast__Node* field = ({ token__Token v__4170 = parser__field_name(ctx, p, ((slice__u8){(u8*)"a field name", 12})); ast__NodeKind v__4171 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4170, v__4171); });
+      ast__Node* field = ({ token__Token v__4174 = parser__field_name(ctx, p, ((slice__u8){(u8*)"a field name", 12})); ast__NodeKind v__4175 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4174, v__4175); });
       parser__next(ctx, p);
-      ({ grow__ptr_ast__Node* v__4172 = (&bindings); ast__Node* v__4173 = parser__subpattern(ctx, p, field); array__array_add__ptr_ast__Node(ctx, v__4172, v__4173); });
+      ({ grow__ptr_ast__Node* v__4176 = (&bindings); ast__Node* v__4177 = parser__subpattern(ctx, p, field); array__array_add__ptr_ast__Node(ctx, v__4176, v__4177); });
     } else {
       bool by_ref = parser__eat(ctx, p, ((token__TokenKind)46LL));
       if (parser__is_keyword_token(ctx, (parser__peek(ctx, p, ((isize)0LL))).kind)) {
-        ({ parser__Parser* v__4174 = p; token__Token v__4175 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4177 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` is a keyword, so it can't name a variable; write `%: name`", 62}), ((slice__prelude__Any){(items__4176[0] = ((prelude__Any){.value = (slice__u8[1]){(parser__peek(ctx, p, ((isize)0LL))).text}, .info = (&ti__1)}), items__4176[1] = ((prelude__Any){.value = (slice__u8[1]){(parser__peek(ctx, p, ((isize)0LL))).text}, .info = (&ti__1)}), items__4176), 2})); parser__fail(ctx, v__4174, v__4175, v__4177); });
+        ({ parser__Parser* v__4178 = p; token__Token v__4179 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4181 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` is a keyword, so it can't name a variable; write `%: name`", 62}), ((slice__prelude__Any){(items__4180[0] = ((prelude__Any){.value = (slice__u8[1]){(parser__peek(ctx, p, ((isize)0LL))).text}, .info = (&ti__1)}), items__4180[1] = ((prelude__Any){.value = (slice__u8[1]){(parser__peek(ctx, p, ((isize)0LL))).text}, .info = (&ti__1)}), items__4180), 2})); parser__fail(ctx, v__4178, v__4179, v__4181); });
       }
       token__Token name = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a name for the field", 20}));
       ast__Node* field = ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}));
-      ({ grow__ptr_ast__Node* v__4178 = (&bindings); ast__Node* v__4179 = ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)73LL), .payload.Binding = ((ast__NodeKind__variant_Binding){.field = field, .by_ref = by_ref})})); array__array_add__ptr_ast__Node(ctx, v__4178, v__4179); });
+      ({ grow__ptr_ast__Node* v__4182 = (&bindings); ast__Node* v__4183 = ast__new_node(ctx, name, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)73LL), .payload.Binding = ((ast__NodeKind__variant_Binding){.field = field, .by_ref = by_ref})})); array__array_add__ptr_ast__Node(ctx, v__4182, v__4183); });
     }
     if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
       break;
     }
   }
   parser__expect(ctx, p, ((token__TokenKind)9LL), ((slice__u8){(u8*)"`,` or `}` after the field", 26}));
-  return ast__new_node(ctx, (rt_nonnull(variant, "src/parser.sabk:999:29"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)71LL), .payload.VariantPattern = ((ast__NodeKind__variant_VariantPattern){.variant = variant, .bindings = grow__ptr_ast__Node__view(bindings), .by_fields = true})}));
+  return ast__new_node(ctx, (rt_nonnull(variant, "src/parser.sabk:1083:29"))->tok, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)71LL), .payload.VariantPattern = ((ast__NodeKind__variant_VariantPattern){.variant = variant, .bindings = grow__ptr_ast__Node__view(bindings), .by_fields = true})}));
 }
 
 static isize parser__binary_prec(prelude__Context *ctx, token__TokenKind kind) {
   {
-    token__TokenKind switch__4180 = kind;
-    switch (switch__4180) {
+    token__TokenKind switch__4184 = kind;
+    switch (switch__4184) {
     case ((token__TokenKind)90LL):
     {
       return ((isize)1LL);
@@ -30923,103 +31023,103 @@ static isize parser__binary_prec(prelude__Context *ctx, token__TokenKind kind) {
 
 static ast__BinaryOp parser__binary_op(prelude__Context *ctx, token__TokenKind kind) {
   return ({
-    ast__BinaryOp value__4181;
+    ast__BinaryOp value__4185;
     {
-      token__TokenKind switch__4182 = kind;
-      switch (switch__4182) {
+      token__TokenKind switch__4186 = kind;
+      switch (switch__4186) {
       case ((token__TokenKind)45LL):
       {
-        value__4181 = ((ast__BinaryOp)12LL);
+        value__4185 = ((ast__BinaryOp)12LL);
       }
       break;
       case ((token__TokenKind)48LL):
       {
-        value__4181 = ((ast__BinaryOp)11LL);
+        value__4185 = ((ast__BinaryOp)11LL);
       }
       break;
       case ((token__TokenKind)19LL):
       {
-        value__4181 = ((ast__BinaryOp)9LL);
+        value__4185 = ((ast__BinaryOp)9LL);
       }
       break;
       case ((token__TokenKind)23LL):
       {
-        value__4181 = ((ast__BinaryOp)10LL);
+        value__4185 = ((ast__BinaryOp)10LL);
       }
       break;
       case ((token__TokenKind)53LL):
       {
-        value__4181 = ((ast__BinaryOp)5LL);
+        value__4185 = ((ast__BinaryOp)5LL);
       }
       break;
       case ((token__TokenKind)57LL):
       {
-        value__4181 = ((ast__BinaryOp)6LL);
+        value__4185 = ((ast__BinaryOp)6LL);
       }
       break;
       case ((token__TokenKind)54LL):
       {
-        value__4181 = ((ast__BinaryOp)7LL);
+        value__4185 = ((ast__BinaryOp)7LL);
       }
       break;
       case ((token__TokenKind)58LL):
       {
-        value__4181 = ((ast__BinaryOp)8LL);
+        value__4185 = ((ast__BinaryOp)8LL);
       }
       break;
       case ((token__TokenKind)29LL):
       {
-        value__4181 = ((ast__BinaryOp)0LL);
+        value__4185 = ((ast__BinaryOp)0LL);
       }
       break;
       case ((token__TokenKind)32LL):
       {
-        value__4181 = ((ast__BinaryOp)1LL);
+        value__4185 = ((ast__BinaryOp)1LL);
       }
       break;
       case ((token__TokenKind)43LL):
       {
-        value__4181 = ((ast__BinaryOp)13LL);
+        value__4185 = ((ast__BinaryOp)13LL);
       }
       break;
       case ((token__TokenKind)49LL):
       {
-        value__4181 = ((ast__BinaryOp)15LL);
+        value__4185 = ((ast__BinaryOp)15LL);
       }
       break;
       case ((token__TokenKind)37LL):
       {
-        value__4181 = ((ast__BinaryOp)2LL);
+        value__4185 = ((ast__BinaryOp)2LL);
       }
       break;
       case ((token__TokenKind)39LL):
       {
-        value__4181 = ((ast__BinaryOp)3LL);
+        value__4185 = ((ast__BinaryOp)3LL);
       }
       break;
       case ((token__TokenKind)41LL):
       {
-        value__4181 = ((ast__BinaryOp)4LL);
+        value__4185 = ((ast__BinaryOp)4LL);
       }
       break;
       case ((token__TokenKind)55LL):
       {
-        value__4181 = ((ast__BinaryOp)16LL);
+        value__4185 = ((ast__BinaryOp)16LL);
       }
       break;
       case ((token__TokenKind)59LL):
       {
-        value__4181 = ((ast__BinaryOp)17LL);
+        value__4185 = ((ast__BinaryOp)17LL);
       }
       break;
       default:
       {
-        value__4181 = ((ast__BinaryOp)14LL);
+        value__4185 = ((ast__BinaryOp)14LL);
       }
       break;
       }
     }
-    value__4181;
+    value__4185;
   });
 }
 
@@ -31030,8 +31130,8 @@ static ast__Node* parser__expr(prelude__Context *ctx, parser__Parser* p, isize m
 }
 
 static void parser__end_here(prelude__Context *ctx, parser__Parser* p, ast__Node* n, u8* begin) {
-  if ((((rt_nonnull(n, "src/parser.sabk:1055:11"))->span).len == ((isize)0LL))) {
-    ({ slice__u8 *target__4183 = &(rt_nonnull(n, "src/parser.sabk:1056:11"))->span; *target__4183 = parser__span_from(ctx, p, begin); });
+  if ((((rt_nonnull(n, "src/parser.sabk:1139:11"))->span).len == ((isize)0LL))) {
+    ({ slice__u8 *target__4187 = &(rt_nonnull(n, "src/parser.sabk:1140:11"))->span; *target__4187 = parser__span_from(ctx, p, begin); });
   }
 }
 
@@ -31052,17 +31152,17 @@ static ast__Node* parser__binary(prelude__Context *ctx, parser__Parser* p, isize
     token__Token op = parser__next(ctx, p);
     ast__Node* n = 0;
     if (negated) {
-      ast__Node* test = ({ token__Token v__4184 = op; ast__NodeKind v__4187 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)69LL), .payload.Is = ({ ast__Node* v__4185 = lhs; ast__Node* v__4186 = parser__pattern(ctx, p, ((isize)8LL)); ((ast__NodeKind__variant_Is){.value = v__4185, .pattern = v__4186}); })}); ast__new_node(ctx, v__4184, v__4187); });
+      ast__Node* test = ({ token__Token v__4188 = op; ast__NodeKind v__4191 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)69LL), .payload.Is = ({ ast__Node* v__4189 = lhs; ast__Node* v__4190 = parser__pattern(ctx, p, ((isize)8LL)); ((ast__NodeKind__variant_Is){.value = v__4189, .pattern = v__4190}); })}); ast__new_node(ctx, v__4188, v__4191); });
       parser__end_here(ctx, p, test, begin);
       n = ast__new_node(ctx, bang, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)42LL), .payload.Unary = ((ast__NodeKind__variant_Unary){.op = ((ast__UnaryOp)0LL), .operand = test})}));
     } else {
       if (((op).kind == ((token__TokenKind)90LL))) {
-        n = ({ token__Token v__4188 = op; ast__NodeKind v__4191 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)56LL), .payload.OrElse = ({ ast__Node* v__4189 = lhs; ast__Node* v__4190 = parser__binary(ctx, p, prec); ((ast__NodeKind__variant_OrElse){.value = v__4189, .fallback = v__4190}); })}); ast__new_node(ctx, v__4188, v__4191); });
+        n = ({ token__Token v__4192 = op; ast__NodeKind v__4195 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)56LL), .payload.OrElse = ({ ast__Node* v__4193 = lhs; ast__Node* v__4194 = parser__binary(ctx, p, prec); ((ast__NodeKind__variant_OrElse){.value = v__4193, .fallback = v__4194}); })}); ast__new_node(ctx, v__4192, v__4195); });
       } else {
         if (((op).kind == ((token__TokenKind)86LL))) {
-          n = ({ token__Token v__4192 = op; ast__NodeKind v__4195 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)69LL), .payload.Is = ({ ast__Node* v__4193 = lhs; ast__Node* v__4194 = parser__pattern(ctx, p, ((isize)8LL)); ((ast__NodeKind__variant_Is){.value = v__4193, .pattern = v__4194}); })}); ast__new_node(ctx, v__4192, v__4195); });
+          n = ({ token__Token v__4196 = op; ast__NodeKind v__4199 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)69LL), .payload.Is = ({ ast__Node* v__4197 = lhs; ast__Node* v__4198 = parser__pattern(ctx, p, ((isize)8LL)); ((ast__NodeKind__variant_Is){.value = v__4197, .pattern = v__4198}); })}); ast__new_node(ctx, v__4196, v__4199); });
         } else {
-          n = ({ token__Token v__4196 = op; ast__NodeKind v__4200 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)43LL), .payload.Binary = ({ ast__BinaryOp v__4197 = parser__binary_op(ctx, (op).kind); ast__Node* v__4198 = lhs; ast__Node* v__4199 = parser__binary(ctx, p, ((isize)(prec + ((isize)1LL)))); ((ast__NodeKind__variant_Binary){.op = v__4197, .lhs = v__4198, .rhs = v__4199}); })}); ast__new_node(ctx, v__4196, v__4200); });
+          n = ({ token__Token v__4200 = op; ast__NodeKind v__4204 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)43LL), .payload.Binary = ({ ast__BinaryOp v__4201 = parser__binary_op(ctx, (op).kind); ast__Node* v__4202 = lhs; ast__Node* v__4203 = parser__binary(ctx, p, ((isize)(prec + ((isize)1LL)))); ((ast__NodeKind__variant_Binary){.op = v__4201, .lhs = v__4202, .rhs = v__4203}); })}); ast__new_node(ctx, v__4200, v__4204); });
         }
       }
     }
@@ -31072,18 +31172,18 @@ static ast__Node* parser__binary(prelude__Context *ctx, parser__Parser* p, isize
       continue;
     }
     if (((prec == ((isize)7LL)) && (parser__binary_prec(ctx, (parser__peek(ctx, p, ((isize)0LL))).kind) == ((isize)7LL)))) {
-      ({ parser__Parser* v__4201 = p; token__Token v__4202 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4201, v__4202, ((slice__u8){(u8*)"comparisons can't be chained, join them with `&&`", 49})); });
+      ({ parser__Parser* v__4205 = p; token__Token v__4206 = parser__peek(ctx, p, ((isize)0LL)); parser__fail(ctx, v__4205, v__4206, ((slice__u8){(u8*)"comparisons can't be chained, join them with `&&`", 49})); });
     }
   }
 }
 
 static bool parser__is_operator(prelude__Context *ctx, ast__Node* n) {
   {
-    ast__NodeKind switch__4203 = (rt_nonnull(n, "src/parser.sabk:1107:15"))->kind;
-    switch (switch__4203.tag) {
+    ast__NodeKind switch__4207 = (rt_nonnull(n, "src/parser.sabk:1191:15"))->kind;
+    switch (switch__4207.tag) {
     case ((ast__NodeKind__Tag)43LL):
     {
-      ast__BinaryOp op = switch__4203.payload.Binary.op;
+      ast__BinaryOp op = switch__4207.payload.Binary.op;
       return ((op != ((ast__BinaryOp)11LL)) && (op != ((ast__BinaryOp)12LL)));
     }
     break;
@@ -31103,11 +31203,11 @@ static bool parser__is_operator(prelude__Context *ctx, ast__Node* n) {
 
 static bool parser__is_bit_operator(prelude__Context *ctx, ast__Node* n) {
   {
-    ast__NodeKind switch__4204 = (rt_nonnull(n, "src/parser.sabk:1115:15"))->kind;
-    switch (switch__4204.tag) {
+    ast__NodeKind switch__4208 = (rt_nonnull(n, "src/parser.sabk:1199:15"))->kind;
+    switch (switch__4208.tag) {
     case ((ast__NodeKind__Tag)43LL):
     {
-      ast__BinaryOp op = switch__4204.payload.Binary.op;
+      ast__BinaryOp op = switch__4208.payload.Binary.op;
       return (((((op == ((ast__BinaryOp)14LL)) || (op == ((ast__BinaryOp)13LL))) || (op == ((ast__BinaryOp)15LL))) || (op == ((ast__BinaryOp)16LL))) || (op == ((ast__BinaryOp)17LL)));
     }
     break;
@@ -31124,11 +31224,11 @@ static bool parser__same_operator(prelude__Context *ctx, ast__Node* a, ast__Node
   {
     ast__BinaryOp x;
     ast__BinaryOp y;
-    if ((({ ast__NodeKind is__4205 = (rt_nonnull(a, "src/parser.sabk:1125:11"))->kind; is__4205.tag == ((ast__NodeKind__Tag)43LL) ? (x = is__4205.payload.Binary.op, 1) : 0; }) && ({ ast__NodeKind is__4206 = (rt_nonnull(b, "src/parser.sabk:1125:39"))->kind; is__4206.tag == ((ast__NodeKind__Tag)43LL) ? (y = is__4206.payload.Binary.op, 1) : 0; }))) {
+    if ((({ ast__NodeKind is__4209 = (rt_nonnull(a, "src/parser.sabk:1209:11"))->kind; is__4209.tag == ((ast__NodeKind__Tag)43LL) ? (x = is__4209.payload.Binary.op, 1) : 0; }) && ({ ast__NodeKind is__4210 = (rt_nonnull(b, "src/parser.sabk:1209:39"))->kind; is__4210.tag == ((ast__NodeKind__Tag)43LL) ? (y = is__4210.payload.Binary.op, 1) : 0; }))) {
       return (x == y);
     }
   }
-  return (((rt_nonnull(a, "src/parser.sabk:1127:14"))->kind).tag == ((rt_nonnull(b, "src/parser.sabk:1127:28"))->kind).tag);
+  return (((rt_nonnull(a, "src/parser.sabk:1211:14"))->kind).tag == ((rt_nonnull(b, "src/parser.sabk:1211:28"))->kind).tag);
 }
 
 static bool parser__mixes(prelude__Context *ctx, ast__Node* n, ast__Node* child) {
@@ -31137,26 +31237,26 @@ static bool parser__mixes(prelude__Context *ctx, ast__Node* n, ast__Node* child)
 
 static tuple__22 parser__operands(prelude__Context *ctx, ast__Node* n) {
   {
-    ast__NodeKind switch__4207 = (rt_nonnull(n, "src/parser.sabk:1139:15"))->kind;
-    switch (switch__4207.tag) {
+    ast__NodeKind switch__4211 = (rt_nonnull(n, "src/parser.sabk:1223:15"))->kind;
+    switch (switch__4211.tag) {
     case ((ast__NodeKind__Tag)43LL):
     {
-      ast__Node* lhs = switch__4207.payload.Binary.lhs;
-      ast__Node* rhs = switch__4207.payload.Binary.rhs;
+      ast__Node* lhs = switch__4211.payload.Binary.lhs;
+      ast__Node* rhs = switch__4211.payload.Binary.rhs;
       return ((tuple__22){._0 = lhs, ._1 = rhs});
     }
     break;
     case ((ast__NodeKind__Tag)56LL):
     {
-      ast__Node* value = switch__4207.payload.OrElse.value;
-      ast__Node* fallback = switch__4207.payload.OrElse.fallback;
+      ast__Node* value = switch__4211.payload.OrElse.value;
+      ast__Node* fallback = switch__4211.payload.OrElse.fallback;
       return ((tuple__22){._0 = value, ._1 = fallback});
     }
     break;
     case ((ast__NodeKind__Tag)69LL):
     {
-      ast__Node* value = switch__4207.payload.Is.value;
-      ast__Node* pattern = switch__4207.payload.Is.pattern;
+      ast__Node* value = switch__4211.payload.Is.value;
+      ast__Node* pattern = switch__4211.payload.Is.pattern;
       return ((tuple__22){._0 = value, ._1 = pattern});
     }
     break;
@@ -31170,39 +31270,39 @@ static tuple__22 parser__operands(prelude__Context *ctx, ast__Node* n) {
 }
 
 static slice__u8 parser__grouped(prelude__Context *ctx, ast__Node* n) {
-  prelude__Any items__4209[3];
-  if (((!parser__is_operator(ctx, n)) || (((rt_nonnull(n, "src/parser.sabk:1149:30"))->kind).tag == ((ast__NodeKind__Tag)69LL)))) {
-    return (rt_nonnull(n, "src/parser.sabk:1150:18"))->span;
+  prelude__Any items__4213[3];
+  if (((!parser__is_operator(ctx, n)) || (((rt_nonnull(n, "src/parser.sabk:1233:30"))->kind).tag == ((ast__NodeKind__Tag)69LL)))) {
+    return (rt_nonnull(n, "src/parser.sabk:1234:18"))->span;
   }
-  tuple__22 values__4208 = parser__operands(ctx, n);
-  ast__Node* lhs = values__4208._0;
-  ast__Node* rhs = values__4208._1;
-  return fmt__tformat(ctx, ((slice__u8){(u8*)"% % %", 5}), ((slice__prelude__Any){(items__4209[0] = ((prelude__Any){.value = (slice__u8[1]){parser__side(ctx, n, lhs)}, .info = (&ti__1)}), items__4209[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(n, "src/parser.sabk:1152:45"))->tok).text}, .info = (&ti__1)}), items__4209[2] = ((prelude__Any){.value = (slice__u8[1]){parser__side(ctx, n, rhs)}, .info = (&ti__1)}), items__4209), 3}));
+  tuple__22 values__4212 = parser__operands(ctx, n);
+  ast__Node* lhs = values__4212._0;
+  ast__Node* rhs = values__4212._1;
+  return fmt__tformat(ctx, ((slice__u8){(u8*)"% % %", 5}), ((slice__prelude__Any){(items__4213[0] = ((prelude__Any){.value = (slice__u8[1]){parser__side(ctx, n, lhs)}, .info = (&ti__1)}), items__4213[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(n, "src/parser.sabk:1236:45"))->tok).text}, .info = (&ti__1)}), items__4213[2] = ((prelude__Any){.value = (slice__u8[1]){parser__side(ctx, n, rhs)}, .info = (&ti__1)}), items__4213), 3}));
 }
 
 static slice__u8 parser__side(prelude__Context *ctx, ast__Node* n, ast__Node* child) {
-  prelude__Any items__4210[1];
-  return (parser__mixes(ctx, n, child) ? fmt__tformat(ctx, ((slice__u8){(u8*)"(%)", 3}), ((slice__prelude__Any){(items__4210[0] = ((prelude__Any){.value = (slice__u8[1]){parser__grouped(ctx, child)}, .info = (&ti__1)}), items__4210), 1})) : parser__grouped(ctx, child));
+  prelude__Any items__4214[1];
+  return (parser__mixes(ctx, n, child) ? fmt__tformat(ctx, ((slice__u8){(u8*)"(%)", 3}), ((slice__prelude__Any){(items__4214[0] = ((prelude__Any){.value = (slice__u8[1]){parser__grouped(ctx, child)}, .info = (&ti__1)}), items__4214), 1})) : parser__grouped(ctx, child));
 }
 
 static bool parser__find_mixing(prelude__Context *ctx, ast__Node* n, ast__Node** parent, ast__Node** child) {
-  bool joins = ((({ ast__NodeKind is__4211 = (rt_nonnull(n, "src/parser.sabk:1161:19"))->kind; (is__4211.tag == ((ast__NodeKind__Tag)43LL) && (is__4211.payload.Binary.op == ((ast__BinaryOp)11LL))) ? (1) : 0; }) || ({ ast__NodeKind is__4212 = (rt_nonnull(n, "src/parser.sabk:1161:50"))->kind; (is__4212.tag == ((ast__NodeKind__Tag)43LL) && (is__4212.payload.Binary.op == ((ast__BinaryOp)12LL))) ? (1) : 0; })) || (((rt_nonnull(n, "src/parser.sabk:1161:80"))->kind).tag == ((ast__NodeKind__Tag)56LL)));
+  bool joins = ((({ ast__NodeKind is__4215 = (rt_nonnull(n, "src/parser.sabk:1245:19"))->kind; (is__4215.tag == ((ast__NodeKind__Tag)43LL) && (is__4215.payload.Binary.op == ((ast__BinaryOp)11LL))) ? (1) : 0; }) || ({ ast__NodeKind is__4216 = (rt_nonnull(n, "src/parser.sabk:1245:50"))->kind; (is__4216.tag == ((ast__NodeKind__Tag)43LL) && (is__4216.payload.Binary.op == ((ast__BinaryOp)12LL))) ? (1) : 0; })) || (((rt_nonnull(n, "src/parser.sabk:1245:80"))->kind).tag == ((ast__NodeKind__Tag)56LL)));
   if (((!joins) && (!parser__is_operator(ctx, n)))) {
     return false;
   }
-  tuple__22 values__4213 = parser__operands(ctx, n);
-  ast__Node* lhs = values__4213._0;
-  ast__Node* rhs = values__4213._1;
+  tuple__22 values__4217 = parser__operands(ctx, n);
+  ast__Node* lhs = values__4217._0;
+  ast__Node* rhs = values__4217._1;
   {
-    arr2__ptr_ast__Node seq__4214 = ((arr2__ptr_ast__Node){{lhs, rhs}});
-    for (isize i__4215 = 0; i__4215 < 2; i__4215++) {
-      ast__Node* c = seq__4214.data[i__4215];
-      if (((((rt_nonnull(n, "src/parser.sabk:1166:15"))->kind).tag == ((ast__NodeKind__Tag)69LL)) && (c == rhs))) {
+    arr2__ptr_ast__Node seq__4218 = ((arr2__ptr_ast__Node){{lhs, rhs}});
+    for (isize i__4219 = 0; i__4219 < 2; i__4219++) {
+      ast__Node* c = seq__4218.data[i__4219];
+      if (((((rt_nonnull(n, "src/parser.sabk:1250:15"))->kind).tag == ((ast__NodeKind__Tag)69LL)) && (c == rhs))) {
         break;
       }
       if ((parser__is_operator(ctx, n) && parser__mixes(ctx, n, c))) {
-        (*rt_nonnull(parent, "src/parser.sabk:1169:20")) = n;
-        (*rt_nonnull(child, "src/parser.sabk:1170:19")) = c;
+        (*rt_nonnull(parent, "src/parser.sabk:1253:20")) = n;
+        (*rt_nonnull(child, "src/parser.sabk:1254:19")) = c;
         return true;
       }
       if (parser__find_mixing(ctx, c, parent, child)) {
@@ -31218,9 +31318,9 @@ static bool parser__contains_span(prelude__Context *ctx, slice__u8 outer, slice_
 }
 
 static void parser__check_mixing(prelude__Context *ctx, parser__Parser* p, ast__Node* e) {
-  prelude__Any items__4218[2];
-  prelude__Any items__4219[2];
-  prelude__Any items__4222[3];
+  prelude__Any items__4222[2];
+  prelude__Any items__4223[2];
+  prelude__Any items__4226[3];
   ast__Node* parent = ((ast__Node*)0);
   ast__Node* child = ((ast__Node*)0);
   if ((!parser__find_mixing(ctx, e, (&parent), (&child)))) {
@@ -31228,27 +31328,27 @@ static void parser__check_mixing(prelude__Context *ctx, parser__Parser* p, ast__
   }
   ast__Node* top = e;
   while ((!parser__is_operator(ctx, top))) {
-    tuple__22 values__4216 = parser__operands(ctx, top);
-    ast__Node* lhs = values__4216._0;
-    ast__Node* rhs = values__4216._1;
-    top = (parser__contains_span(ctx, (rt_nonnull(rhs, "src/parser.sabk:1197:37"))->span, (rt_nonnull(parent, "src/parser.sabk:1197:50"))->span) ? rhs : lhs);
+    tuple__22 values__4220 = parser__operands(ctx, top);
+    ast__Node* lhs = values__4220._0;
+    ast__Node* rhs = values__4220._1;
+    top = (parser__contains_span(ctx, (rt_nonnull(rhs, "src/parser.sabk:1281:37"))->span, (rt_nonnull(parent, "src/parser.sabk:1281:50"))->span) ? rhs : lhs);
   }
-  token__Token first = (rt_nonnull(parent, "src/parser.sabk:1201:32"))->tok;
-  token__Token second = (rt_nonnull(child, "src/parser.sabk:1201:43"))->tok;
+  token__Token first = (rt_nonnull(parent, "src/parser.sabk:1285:32"))->tok;
+  token__Token second = (rt_nonnull(child, "src/parser.sabk:1285:43"))->tok;
   if ((((first).text).ptr > ((second).text).ptr)) {
-    ({ tuple__53 values__4217 = ((tuple__53){._0 = second, ._1 = first}); first = values__4217._0; second = values__4217._1; });
+    ({ tuple__53 values__4221 = ((tuple__53){._0 = second, ._1 = first}); first = values__4221._0; second = values__4221._1; });
   }
-  slice__u8 text = (rt_nonnull(top, "src/parser.sabk:1204:32"))->span;
+  slice__u8 text = (rt_nonnull(top, "src/parser.sabk:1288:32"))->span;
   slice__u8 as_grouped = parser__grouped(ctx, top);
-  slice__u8 how = (((((rt_nonnull(parent, "src/parser.sabk:1205:26"))->kind).tag == ((ast__NodeKind__Tag)69LL)) || (((rt_nonnull(child, "src/parser.sabk:1205:51"))->kind).tag == ((ast__NodeKind__Tag)69LL))) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%` would mean `%`", 18}), ((slice__prelude__Any){(items__4218[0] = ((prelude__Any){.value = (slice__u8[1]){text}, .info = (&ti__1)}), items__4218[1] = ((prelude__Any){.value = (slice__u8[1]){as_grouped}, .info = (&ti__1)}), items__4218), 2})) : fmt__tformat(ctx, ((slice__u8){(u8*)"C reads `%` as `%`", 18}), ((slice__prelude__Any){(items__4219[0] = ((prelude__Any){.value = (slice__u8[1]){text}, .info = (&ti__1)}), items__4219[1] = ((prelude__Any){.value = (slice__u8[1]){as_grouped}, .info = (&ti__1)}), items__4219), 2})));
-  ({ parser__Parser* v__4220 = p; token__Token v__4221 = second; slice__u8 v__4223 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` next to `%` needs parentheses: %", 36}), ((slice__prelude__Any){(items__4222[0] = ((prelude__Any){.value = (slice__u8[1]){(first).text}, .info = (&ti__1)}), items__4222[1] = ((prelude__Any){.value = (slice__u8[1]){(second).text}, .info = (&ti__1)}), items__4222[2] = ((prelude__Any){.value = (slice__u8[1]){how}, .info = (&ti__1)}), items__4222), 3})); parser__report_error(ctx, v__4220, v__4221, v__4223); });
+  slice__u8 how = (((((rt_nonnull(parent, "src/parser.sabk:1289:26"))->kind).tag == ((ast__NodeKind__Tag)69LL)) || (((rt_nonnull(child, "src/parser.sabk:1289:51"))->kind).tag == ((ast__NodeKind__Tag)69LL))) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%` would mean `%`", 18}), ((slice__prelude__Any){(items__4222[0] = ((prelude__Any){.value = (slice__u8[1]){text}, .info = (&ti__1)}), items__4222[1] = ((prelude__Any){.value = (slice__u8[1]){as_grouped}, .info = (&ti__1)}), items__4222), 2})) : fmt__tformat(ctx, ((slice__u8){(u8*)"C reads `%` as `%`", 18}), ((slice__prelude__Any){(items__4223[0] = ((prelude__Any){.value = (slice__u8[1]){text}, .info = (&ti__1)}), items__4223[1] = ((prelude__Any){.value = (slice__u8[1]){as_grouped}, .info = (&ti__1)}), items__4223), 2})));
+  ({ parser__Parser* v__4224 = p; token__Token v__4225 = second; slice__u8 v__4227 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` next to `%` needs parentheses: %", 36}), ((slice__prelude__Any){(items__4226[0] = ((prelude__Any){.value = (slice__u8[1]){(first).text}, .info = (&ti__1)}), items__4226[1] = ((prelude__Any){.value = (slice__u8[1]){(second).text}, .info = (&ti__1)}), items__4226[2] = ((prelude__Any){.value = (slice__u8[1]){how}, .info = (&ti__1)}), items__4226), 3})); parser__report_error(ctx, v__4224, v__4225, v__4227); });
 }
 
 static ast__Node* parser__cast(prelude__Context *ctx, parser__Parser* p) {
   ast__Node* e = parser__unary(ctx, p);
   while (parser__at(ctx, p, ((token__TokenKind)72LL), ((isize)0LL))) {
     token__Token t = parser__next(ctx, p);
-    e = ({ token__Token v__4224 = t; ast__NodeKind v__4227 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)50LL), .payload.Cast = ({ ast__Node* v__4225 = e; ast__Node* v__4226 = parser__type_(ctx, p); ((ast__NodeKind__variant_Cast){.value = v__4225, .to = v__4226}); })}); ast__new_node(ctx, v__4224, v__4227); });
+    e = ({ token__Token v__4228 = t; ast__NodeKind v__4231 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)50LL), .payload.Cast = ({ ast__Node* v__4229 = e; ast__Node* v__4230 = parser__type_(ctx, p); ((ast__NodeKind__variant_Cast){.value = v__4229, .to = v__4230}); })}); ast__new_node(ctx, v__4228, v__4231); });
   }
   return e;
 }
@@ -31256,8 +31356,8 @@ static ast__Node* parser__cast(prelude__Context *ctx, parser__Parser* p) {
 static ast__Node* parser__unary(prelude__Context *ctx, parser__Parser* p) {
   ast__UnaryOp op = 0;
   {
-    token__TokenKind switch__4228 = (parser__peek(ctx, p, ((isize)0LL))).kind;
-    switch (switch__4228) {
+    token__TokenKind switch__4232 = (parser__peek(ctx, p, ((isize)0LL))).kind;
+    switch (switch__4232) {
     case ((token__TokenKind)32LL):
     {
       op = ((ast__UnaryOp)1LL);
@@ -31293,42 +31393,45 @@ static ast__Node* parser__unary(prelude__Context *ctx, parser__Parser* p) {
   token__Token t = parser__next(ctx, p);
   u8* begin = ((parser__peek(ctx, p, ((isize)0LL))).text).ptr;
   ast__Node* operand = parser__unary(ctx, p);
-  if (((op == ((ast__UnaryOp)4LL)) && (((rt_nonnull(operand, "src/parser.sabk:1236:39"))->span).len == ((isize)0LL)))) {
-    ({ slice__u8 *target__4229 = &(rt_nonnull(operand, "src/parser.sabk:1237:17"))->span; *target__4229 = parser__span_from(ctx, p, begin); });
+  if (((op == ((ast__UnaryOp)4LL)) && (((rt_nonnull(operand, "src/parser.sabk:1320:39"))->span).len == ((isize)0LL)))) {
+    ({ slice__u8 *target__4233 = &(rt_nonnull(operand, "src/parser.sabk:1321:17"))->span; *target__4233 = parser__span_from(ctx, p, begin); });
   }
   return ast__new_node(ctx, t, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)42LL), .payload.Unary = ((ast__NodeKind__variant_Unary){.op = op, .operand = operand})}));
 }
 
 static ast__Node* parser__postfix(prelude__Context *ctx, parser__Parser* p) {
-  prelude__Any items__4244[1];
-  bool head = (rt_nonnull(p, "src/parser.sabk:1244:18"))->statement_head;
-  (rt_nonnull(p, "src/parser.sabk:1245:7"))->statement_head = false;
+  prelude__Any items__4248[1];
+  bool head = (rt_nonnull(p, "src/parser.sabk:1328:18"))->statement_head;
+  (rt_nonnull(p, "src/parser.sabk:1329:7"))->statement_head = false;
   u8* begin = ((parser__peek(ctx, p, ((isize)0LL))).text).ptr;
   ast__Node* e = parser__primary(ctx, p);
   while (true) {
     {
-      token__TokenKind switch__4230 = (parser__peek(ctx, p, ((isize)0LL))).kind;
-      switch (switch__4230) {
+      token__TokenKind switch__4234 = (parser__peek(ctx, p, ((isize)0LL))).kind;
+      switch (switch__4234) {
       case ((token__TokenKind)6LL):
       {
         token__Token open = parser__next(ctx, p);
         grow__ptr_ast__Node args = {0};
+        bool saved = (rt_nonnull(p, "src/parser.sabk:1337:27"))->bare_condition;
+        (rt_nonnull(p, "src/parser.sabk:1338:15"))->bare_condition = false;
         while ((!parser__at(ctx, p, ((token__TokenKind)7LL), ((isize)0LL)))) {
           u8* arg_begin = ((parser__peek(ctx, p, ((isize)0LL))).text).ptr;
           ast__Node* arg = 0;
           if (parser__at(ctx, p, ((token__TokenKind)13LL), ((isize)0LL))) {
             token__Token dots = parser__next(ctx, p);
-            arg = ({ token__Token v__4231 = dots; ast__NodeKind v__4232 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)53LL), .payload.Spread = ((ast__NodeKind__variant_Spread){.value = parser__expr(ctx, p, ((isize)1LL))})}); ast__new_node(ctx, v__4231, v__4232); });
+            arg = ({ token__Token v__4235 = dots; ast__NodeKind v__4236 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)53LL), .payload.Spread = ((ast__NodeKind__variant_Spread){.value = parser__expr(ctx, p, ((isize)1LL))})}); ast__new_node(ctx, v__4235, v__4236); });
           } else {
             arg = parser__expr(ctx, p, ((isize)1LL));
           }
-          ({ slice__u8 *target__4233 = &(rt_nonnull(arg, "src/parser.sabk:1262:21"))->span; *target__4233 = parser__span_from(ctx, p, arg_begin); });
+          ({ slice__u8 *target__4237 = &(rt_nonnull(arg, "src/parser.sabk:1348:21"))->span; *target__4237 = parser__span_from(ctx, p, arg_begin); });
           array__array_add__ptr_ast__Node(ctx, (&args), arg);
           if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
             break;
           }
         }
         parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`,` or `)` in the argument list", 31}));
+        (rt_nonnull(p, "src/parser.sabk:1354:15"))->bare_condition = saved;
         e = ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)46LL), .payload.Call = ((ast__NodeKind__variant_Call){.callee = e, .args = grow__ptr_ast__Node__view(args), .trailing_block = false})}));
       }
       break;
@@ -31348,7 +31451,7 @@ static ast__Node* parser__postfix(prelude__Context *ctx, parser__Parser* p) {
       break;
       case ((token__TokenKind)91LL):
       {
-        e = ({ token__Token v__4234 = parser__next(ctx, p); ast__NodeKind v__4235 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)55LL), .payload.OrReturn = ((ast__NodeKind__variant_OrReturn){.value = e})}); ast__new_node(ctx, v__4234, v__4235); });
+        e = ({ token__Token v__4238 = parser__next(ctx, p); ast__NodeKind v__4239 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)55LL), .payload.OrReturn = ((ast__NodeKind__variant_OrReturn){.value = e})}); ast__new_node(ctx, v__4238, v__4239); });
       }
       break;
       case ((token__TokenKind)12LL):
@@ -31361,9 +31464,9 @@ static ast__Node* parser__postfix(prelude__Context *ctx, parser__Parser* p) {
             e = parser__init_list(ctx, p, e, false);
           } else {
             if (parser__at(ctx, p, ((token__TokenKind)37LL), ((isize)0LL))) {
-              e = ({ token__Token v__4236 = parser__next(ctx, p); ast__NodeKind v__4237 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)44LL), .payload.Deref = ((ast__NodeKind__variant_Deref){.pointer = e})}); ast__new_node(ctx, v__4236, v__4237); });
+              e = ({ token__Token v__4240 = parser__next(ctx, p); ast__NodeKind v__4241 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)44LL), .payload.Deref = ((ast__NodeKind__variant_Deref){.pointer = e})}); ast__new_node(ctx, v__4240, v__4241); });
             } else {
-              e = ({ token__Token v__4238 = parser__field_name(ctx, p, ((slice__u8){(u8*)"a member name after `.`", 23})); ast__NodeKind v__4239 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)47LL), .payload.Member = ((ast__NodeKind__variant_Member){.object = e})}); ast__new_node(ctx, v__4238, v__4239); });
+              e = ({ token__Token v__4242 = parser__field_name(ctx, p, ((slice__u8){(u8*)"a member name after `.`", 23})); ast__NodeKind v__4243 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)47LL), .payload.Member = ((ast__NodeKind__variant_Member){.object = e})}); ast__new_node(ctx, v__4242, v__4243); });
             }
           }
         }
@@ -31371,29 +31474,32 @@ static ast__Node* parser__postfix(prelude__Context *ctx, parser__Parser* p) {
       break;
       case ((token__TokenKind)8LL):
       {
-        bool named = ((((rt_nonnull(e, "src/parser.sabk:1302:27"))->kind).tag == ((ast__NodeKind__Tag)34LL)) || (((rt_nonnull(e, "src/parser.sabk:1302:56"))->kind).tag == ((ast__NodeKind__Tag)47LL)));
+        if ((rt_nonnull(p, "src/parser.sabk:1388:19"))->bare_condition) {
+          return e;
+        }
+        bool named = ((((rt_nonnull(e, "src/parser.sabk:1390:27"))->kind).tag == ((ast__NodeKind__Tag)34LL)) || (((rt_nonnull(e, "src/parser.sabk:1390:56"))->kind).tag == ((ast__NodeKind__Tag)47LL)));
         bool generic_type = false;
         {
           ast__Node* callee;
-          if (((!head) && ({ ast__NodeKind is__4240 = (rt_nonnull(e, "src/parser.sabk:1304:28"))->kind; is__4240.tag == ((ast__NodeKind__Tag)46LL) ? (callee = is__4240.payload.Call.callee, 1) : 0; }))) {
-            generic_type = ((((rt_nonnull(callee, "src/parser.sabk:1305:39"))->kind).tag == ((ast__NodeKind__Tag)34LL)) || (((rt_nonnull(callee, "src/parser.sabk:1305:73"))->kind).tag == ((ast__NodeKind__Tag)47LL)));
+          if (((!head) && ({ ast__NodeKind is__4244 = (rt_nonnull(e, "src/parser.sabk:1392:28"))->kind; is__4244.tag == ((ast__NodeKind__Tag)46LL) ? (callee = is__4244.payload.Call.callee, 1) : 0; }))) {
+            generic_type = ((((rt_nonnull(callee, "src/parser.sabk:1393:39"))->kind).tag == ((ast__NodeKind__Tag)34LL)) || (((rt_nonnull(callee, "src/parser.sabk:1393:73"))->kind).tag == ((ast__NodeKind__Tag)47LL)));
           }
         }
         if (((!named) && (!generic_type))) {
           return e;
         }
-        if (((((rt_nonnull(e, "src/parser.sabk:1308:19"))->kind).tag == ((ast__NodeKind__Tag)47LL)) && (!head))) {
+        if (((((rt_nonnull(e, "src/parser.sabk:1396:19"))->kind).tag == ((ast__NodeKind__Tag)47LL)) && (!head))) {
           ast__Node* lit = parser__init_list(ctx, p, e, false);
           {
             bool* v;
-            if (({ ast__NodeKind *is__4241 = &(rt_nonnull(lit, "src/parser.sabk:1312:25"))->kind; (*is__4241).tag == ((ast__NodeKind__Tag)58LL) ? (v = &(*is__4241).payload.StructInit.variant, 1) : 0; })) {
-              (*rt_nonnull(v, "src/parser.sabk:1313:23")) = true;
+            if (({ ast__NodeKind *is__4245 = &(rt_nonnull(lit, "src/parser.sabk:1400:25"))->kind; (*is__4245).tag == ((ast__NodeKind__Tag)58LL) ? (v = &(*is__4245).payload.StructInit.variant, 1) : 0; })) {
+              (*rt_nonnull(v, "src/parser.sabk:1401:23")) = true;
             }
           }
           e = lit;
           continue;
         }
-        ({ parser__Parser* v__4242 = p; token__Token v__4243 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4245 = fmt__tformat(ctx, ((slice__u8){(u8*)"a struct literal is written with a dot before the `{`: `%.{ ... }`", 66}), ((slice__prelude__Any){(items__4244[0] = ((prelude__Any){.value = (slice__u8[1]){parser__span_from(ctx, p, begin)}, .info = (&ti__1)}), items__4244), 1})); parser__report_error(ctx, v__4242, v__4243, v__4245); });
+        ({ parser__Parser* v__4246 = p; token__Token v__4247 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4249 = fmt__tformat(ctx, ((slice__u8){(u8*)"a struct literal is written with a dot before the `{`: `%.{ ... }`", 66}), ((slice__prelude__Any){(items__4248[0] = ((prelude__Any){.value = (slice__u8[1]){parser__span_from(ctx, p, begin)}, .info = (&ti__1)}), items__4248), 1})); parser__report_error(ctx, v__4246, v__4247, v__4249); });
         e = parser__init_list(ctx, p, e, false);
       }
       break;
@@ -31415,9 +31521,9 @@ static ast__Node* parser__init_list(prelude__Context *ctx, parser__Parser* p, as
       parser__next(ctx, p);
       token__Token name = parser__field_name(ctx, p, ((slice__u8){(u8*)"a field name", 12}));
       parser__next(ctx, p);
-      ({ grow__ptr_ast__Node* v__4246 = (&items); ast__Node* v__4249 = ({ token__Token v__4247 = name; ast__NodeKind v__4248 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)59LL), .payload.FieldInit = ((ast__NodeKind__variant_FieldInit){.value = parser__expr(ctx, p, ((isize)1LL))})}); ast__new_node(ctx, v__4247, v__4248); }); array__array_add__ptr_ast__Node(ctx, v__4246, v__4249); });
+      ({ grow__ptr_ast__Node* v__4250 = (&items); ast__Node* v__4253 = ({ token__Token v__4251 = name; ast__NodeKind v__4252 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)59LL), .payload.FieldInit = ((ast__NodeKind__variant_FieldInit){.value = parser__expr(ctx, p, ((isize)1LL))})}); ast__new_node(ctx, v__4251, v__4252); }); array__array_add__ptr_ast__Node(ctx, v__4250, v__4253); });
     } else {
-      ({ grow__ptr_ast__Node* v__4250 = (&items); ast__Node* v__4251 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4250, v__4251); });
+      ({ grow__ptr_ast__Node* v__4254 = (&items); ast__Node* v__4255 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4254, v__4255); });
     }
     if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
       break;
@@ -31434,7 +31540,7 @@ static ast__Node* parser__array_items(prelude__Context *ctx, parser__Parser* p, 
   parser__expect(ctx, p, ((token__TokenKind)10LL), ((slice__u8){(u8*)"`[`", 3}));
   grow__ptr_ast__Node items = {0};
   while ((!parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)0LL)))) {
-    ({ grow__ptr_ast__Node* v__4252 = (&items); ast__Node* v__4253 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4252, v__4253); });
+    ({ grow__ptr_ast__Node* v__4256 = (&items); ast__Node* v__4257 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4256, v__4257); });
     if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
       break;
     }
@@ -31450,15 +31556,15 @@ static bool parser__can_start_type(prelude__Context *ctx, token__TokenKind kind)
 static bool parser__indexes_a_literal(prelude__Context *ctx, parser__Parser* p, isize k) {
   isize depth = ((isize)0LL);
   {
-    isize end__4254 = ((rt_nonnull(p, "src/parser.sabk:1372:28"))->tokens).len;
-    for (isize i = ((isize)((rt_nonnull(p, "src/parser.sabk:1372:17"))->idx + k)); i < end__4254; i++) {
-      if ((((*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:1373:15"))->tokens, i, "src/parser.sabk:1373:21"))).kind == ((token__TokenKind)10LL))) {
+    isize end__4258 = ((rt_nonnull(p, "src/parser.sabk:1460:28"))->tokens).len;
+    for (isize i = ((isize)((rt_nonnull(p, "src/parser.sabk:1460:17"))->idx + k)); i < end__4258; i++) {
+      if ((((*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:1461:15"))->tokens, i, "src/parser.sabk:1461:21"))).kind == ((token__TokenKind)10LL))) {
         depth++;
       } else {
-        if ((((*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:1375:22"))->tokens, i, "src/parser.sabk:1375:28"))).kind == ((token__TokenKind)11LL))) {
+        if ((((*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:1463:22"))->tokens, i, "src/parser.sabk:1463:28"))).kind == ((token__TokenKind)11LL))) {
           depth--;
           if ((depth == ((isize)0LL))) {
-            return ((((isize)(i + ((isize)1LL))) < ((rt_nonnull(p, "src/parser.sabk:1378:34"))->tokens).len) && (!parser__can_start_type(ctx, ((*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:1378:66"))->tokens, ((isize)(i + ((isize)1LL))), "src/parser.sabk:1378:72"))).kind)));
+            return ((((isize)(i + ((isize)1LL))) < ((rt_nonnull(p, "src/parser.sabk:1466:34"))->tokens).len) && (!parser__can_start_type(ctx, ((*slice__token__Token__at((rt_nonnull(p, "src/parser.sabk:1466:66"))->tokens, ((isize)(i + ((isize)1LL))), "src/parser.sabk:1466:72"))).kind)));
           }
         }
       }
@@ -31469,23 +31575,23 @@ static bool parser__indexes_a_literal(prelude__Context *ctx, parser__Parser* p, 
 
 static ast__Node* parser__element_of(prelude__Context *ctx, ast__Node* t) {
   {
-    ast__NodeKind switch__4255 = (rt_nonnull(t, "src/parser.sabk:1386:15"))->kind;
-    switch (switch__4255.tag) {
+    ast__NodeKind switch__4259 = (rt_nonnull(t, "src/parser.sabk:1474:15"))->kind;
+    switch (switch__4259.tag) {
     case ((ast__NodeKind__Tag)77LL):
     {
-      ast__Node* elem = switch__4255.payload.TypeArray.elem;
+      ast__Node* elem = switch__4259.payload.TypeArray.elem;
       return elem;
     }
     break;
     case ((ast__NodeKind__Tag)78LL):
     {
-      ast__Node* elem = switch__4255.payload.TypeSlice.elem;
+      ast__Node* elem = switch__4259.payload.TypeSlice.elem;
       return elem;
     }
     break;
     case ((ast__NodeKind__Tag)79LL):
     {
-      ast__Node* elem = switch__4255.payload.TypeGrowable.elem;
+      ast__Node* elem = switch__4259.payload.TypeGrowable.elem;
       return elem;
     }
     break;
@@ -31499,64 +31605,64 @@ static ast__Node* parser__element_of(prelude__Context *ctx, ast__Node* t) {
 }
 
 static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
-  prelude__Any items__4291[1];
-  prelude__Any items__4310[1];
-  prelude__Any items__4316[1];
-  prelude__Any items__4321[1];
-  prelude__Any items__4324[1];
-  prelude__Any items__4330[1];
+  prelude__Any items__4295[1];
+  prelude__Any items__4314[1];
+  prelude__Any items__4320[1];
+  prelude__Any items__4325[1];
+  prelude__Any items__4328[1];
+  prelude__Any items__4334[1];
   token__Token t = parser__peek(ctx, p, ((isize)0LL));
   {
-    token__TokenKind switch__4256 = (t).kind;
-    switch (switch__4256) {
+    token__TokenKind switch__4260 = (t).kind;
+    switch (switch__4260) {
     case ((token__TokenKind)2LL):
     {
-      return ({ token__Token v__4257 = parser__next(ctx, p); ast__NodeKind v__4258 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)35LL)}); ast__new_node(ctx, v__4257, v__4258); });
+      return ({ token__Token v__4261 = parser__next(ctx, p); ast__NodeKind v__4262 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)35LL)}); ast__new_node(ctx, v__4261, v__4262); });
     }
     break;
     case ((token__TokenKind)3LL):
     {
-      return ({ token__Token v__4259 = parser__next(ctx, p); ast__NodeKind v__4260 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)36LL)}); ast__new_node(ctx, v__4259, v__4260); });
+      return ({ token__Token v__4263 = parser__next(ctx, p); ast__NodeKind v__4264 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)36LL)}); ast__new_node(ctx, v__4263, v__4264); });
     }
     break;
     case ((token__TokenKind)4LL):
     {
-      return ({ token__Token v__4261 = parser__next(ctx, p); ast__NodeKind v__4262 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)41LL), .payload.String = ((ast__NodeKind__variant_String){.quoted = ((slice__u8){(u8*)"", 0})})}); ast__new_node(ctx, v__4261, v__4262); });
+      return ({ token__Token v__4265 = parser__next(ctx, p); ast__NodeKind v__4266 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)41LL), .payload.String = ((ast__NodeKind__variant_String){.quoted = ((slice__u8){(u8*)"", 0})})}); ast__new_node(ctx, v__4265, v__4266); });
     }
     break;
     case ((token__TokenKind)5LL):
     {
-      return ({ token__Token v__4263 = parser__next(ctx, p); ast__NodeKind v__4264 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)37LL)}); ast__new_node(ctx, v__4263, v__4264); });
+      return ({ token__Token v__4267 = parser__next(ctx, p); ast__NodeKind v__4268 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)37LL)}); ast__new_node(ctx, v__4267, v__4268); });
     }
     break;
     case ((token__TokenKind)92LL):
     case ((token__TokenKind)93LL):
     {
-      return ({ token__Token v__4265 = parser__next(ctx, p); ast__NodeKind v__4266 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)38LL)}); ast__new_node(ctx, v__4265, v__4266); });
+      return ({ token__Token v__4269 = parser__next(ctx, p); ast__NodeKind v__4270 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)38LL)}); ast__new_node(ctx, v__4269, v__4270); });
     }
     break;
     case ((token__TokenKind)94LL):
     {
-      return ({ token__Token v__4267 = parser__next(ctx, p); ast__NodeKind v__4268 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)39LL)}); ast__new_node(ctx, v__4267, v__4268); });
+      return ({ token__Token v__4271 = parser__next(ctx, p); ast__NodeKind v__4272 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)39LL)}); ast__new_node(ctx, v__4271, v__4272); });
     }
     break;
     case ((token__TokenKind)1LL):
     {
-      if ((((!(rt_nonnull(p, "src/parser.sabk:1406:16"))->in_pattern) && parser__at(ctx, p, ((token__TokenKind)15LL), ((isize)1LL))) && ((parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)2LL)) || parser__at(ctx, p, ((token__TokenKind)79LL), ((isize)2LL)))))) {
-        ast__Node* label = ({ token__Token v__4269 = parser__next(ctx, p); ast__NodeKind v__4270 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4269, v__4270); });
+      if ((((!(rt_nonnull(p, "src/parser.sabk:1494:16"))->in_pattern) && parser__at(ctx, p, ((token__TokenKind)15LL), ((isize)1LL))) && ((parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)2LL)) || parser__at(ctx, p, ((token__TokenKind)79LL), ((isize)2LL)))))) {
+        ast__Node* label = ({ token__Token v__4273 = parser__next(ctx, p); ast__NodeKind v__4274 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4273, v__4274); });
         parser__next(ctx, p);
         if (parser__at(ctx, p, ((token__TokenKind)79LL), ((isize)0LL))) {
-          return ({ parser__Parser* v__4271 = p; token__Token v__4272 = parser__next(ctx, p); ast__Node* v__4273 = label; parser__switch_body(ctx, v__4271, v__4272, true, v__4273); });
+          return ({ parser__Parser* v__4275 = p; token__Token v__4276 = parser__next(ctx, p); ast__Node* v__4277 = label; parser__switch_body(ctx, v__4275, v__4276, true, v__4277); });
         }
         ast__Node* n = parser__block(ctx, p);
         {
-          ast__NodeKind *switch__4274 = &(rt_nonnull(n, "src/parser.sabk:1412:23"))->kind;
-          switch ((*switch__4274).tag) {
+          ast__NodeKind *switch__4278 = &(rt_nonnull(n, "src/parser.sabk:1500:23"))->kind;
+          switch ((*switch__4278).tag) {
           case ((ast__NodeKind__Tag)14LL):
           {
-            ast__NodeKind__variant_Block* b = &(*switch__4274).payload.Block;
-            (rt_nonnull(b, "src/parser.sabk:1414:19"))->label = label;
-            (rt_nonnull(b, "src/parser.sabk:1415:19"))->gives_value = true;
+            ast__NodeKind__variant_Block* b = &(*switch__4278).payload.Block;
+            (rt_nonnull(b, "src/parser.sabk:1502:19"))->label = label;
+            (rt_nonnull(b, "src/parser.sabk:1503:19"))->gives_value = true;
           }
           break;
           default:
@@ -31567,7 +31673,7 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
         }
         return n;
       }
-      return ({ token__Token v__4275 = parser__next(ctx, p); ast__NodeKind v__4276 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4275, v__4276); });
+      return ({ token__Token v__4279 = parser__next(ctx, p); ast__NodeKind v__4280 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4279, v__4280); });
     }
     break;
     case ((token__TokenKind)73LL):
@@ -31578,12 +31684,12 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
       parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` after the condition", 23}));
       ast__Node* then = parser__expr(ctx, p, ((isize)1LL));
       parser__expect(ctx, p, ((token__TokenKind)74LL), ((slice__u8){(u8*)"`else` and a second value: an `if` that gives a value needs both", 64}));
-      return ({ token__Token v__4277 = t; ast__NodeKind v__4281 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)23LL), .payload.If = ({ ast__Node* v__4278 = cond; ast__Node* v__4279 = then; ast__Node* v__4280 = parser__expr(ctx, p, ((isize)1LL)); ((ast__NodeKind__variant_If){.cond = v__4278, .then = v__4279, .else_ = v__4280, .gives_value = true}); })}); ast__new_node(ctx, v__4277, v__4281); });
+      return ({ token__Token v__4281 = t; ast__NodeKind v__4285 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)23LL), .payload.If = ({ ast__Node* v__4282 = cond; ast__Node* v__4283 = then; ast__Node* v__4284 = parser__expr(ctx, p, ((isize)1LL)); ((ast__NodeKind__variant_If){.cond = v__4282, .then = v__4283, .else_ = v__4284, .gives_value = true}); })}); ast__new_node(ctx, v__4281, v__4285); });
     }
     break;
     case ((token__TokenKind)89LL):
     {
-      return ({ token__Token v__4282 = parser__next(ctx, p); ast__NodeKind v__4283 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)40LL)}); ast__new_node(ctx, v__4282, v__4283); });
+      return ({ token__Token v__4286 = parser__next(ctx, p); ast__NodeKind v__4287 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)40LL)}); ast__new_node(ctx, v__4286, v__4287); });
     }
     break;
     case ((token__TokenKind)12LL):
@@ -31591,20 +31697,20 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
       token__Token dot = parser__next(ctx, p);
       if (parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL))) {
         ast__Node* n = parser__init_list(ctx, p, ((ast__Node*)0), false);
-        (rt_nonnull(n, "src/parser.sabk:1438:15"))->tok = dot;
+        (rt_nonnull(n, "src/parser.sabk:1526:15"))->tok = dot;
         return n;
       }
       if (parser__at(ctx, p, ((token__TokenKind)10LL), ((isize)0LL))) {
         return parser__array_items(ctx, p, dot, ((ast__Node*)0));
       }
       token__Token name = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"`{`, `[` or an enum variant after `.`", 37}));
-      ast__Node* shorthand = ({ token__Token v__4284 = parser__joined(ctx, dot, name); ast__NodeKind v__4285 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)61LL)}); ast__new_node(ctx, v__4284, v__4285); });
-      if (parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL))) {
+      ast__Node* shorthand = ({ token__Token v__4288 = parser__joined(ctx, dot, name); ast__NodeKind v__4289 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)61LL)}); ast__new_node(ctx, v__4288, v__4289); });
+      if ((parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL)) && (!(rt_nonnull(p, "src/parser.sabk:1533:34"))->bare_condition))) {
         ast__Node* lit = parser__init_list(ctx, p, shorthand, false);
         {
           bool* v;
-          if (({ ast__NodeKind *is__4286 = &(rt_nonnull(lit, "src/parser.sabk:1447:21"))->kind; (*is__4286).tag == ((ast__NodeKind__Tag)58LL) ? (v = &(*is__4286).payload.StructInit.variant, 1) : 0; })) {
-            (*rt_nonnull(v, "src/parser.sabk:1448:19")) = true;
+          if (({ ast__NodeKind *is__4290 = &(rt_nonnull(lit, "src/parser.sabk:1535:21"))->kind; (*is__4290).tag == ((ast__NodeKind__Tag)58LL) ? (v = &(*is__4290).payload.StructInit.variant, 1) : 0; })) {
+            (*rt_nonnull(v, "src/parser.sabk:1536:19")) = true;
           }
         }
         return lit;
@@ -31615,45 +31721,48 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
     case ((token__TokenKind)28LL):
     {
       parser__next(ctx, p);
-      ast__Node* n = ({ token__Token v__4287 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a name after the backtick", 25})); ast__NodeKind v__4288 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4287, v__4288); });
-      (rt_nonnull(n, "src/parser.sabk:1457:11"))->caller = true;
+      ast__Node* n = ({ token__Token v__4291 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a name after the backtick", 25})); ast__NodeKind v__4292 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)34LL)}); ast__new_node(ctx, v__4291, v__4292); });
+      (rt_nonnull(n, "src/parser.sabk:1545:11"))->caller = true;
       return n;
     }
     break;
     case ((token__TokenKind)27LL):
     {
       if ((!parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)1LL)))) {
-        ({ parser__Parser* v__4289 = p; token__Token v__4290 = parser__peek(ctx, p, ((isize)1LL)); slice__u8 v__4292 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected a directive name after `#`, found %", 44}), ((slice__prelude__Any){(items__4291[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, parser__peek(ctx, p, ((isize)1LL)))}, .info = (&ti__1)}), items__4291), 1})); parser__fail(ctx, v__4289, v__4290, v__4292); });
+        ({ parser__Parser* v__4293 = p; token__Token v__4294 = parser__peek(ctx, p, ((isize)1LL)); slice__u8 v__4296 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected a directive name after `#`, found %", 44}), ((slice__prelude__Any){(items__4295[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, parser__peek(ctx, p, ((isize)1LL)))}, .info = (&ti__1)}), items__4295), 1})); parser__fail(ctx, v__4293, v__4294, v__4296); });
       }
       token__Token name = parser__directive(ctx, p);
-      slice__u8 d = (str__starts_with(ctx, (name).text, ((slice__u8){(u8*)"#", 1})) ? slice__u8__from((name).text, ((isize)1LL), "src/parser.sabk:1464:59") : (name).text);
-      if ((({ slice__u8 a__4293 = d, b__4294 = ((slice__u8){(u8*)"insert", 6}); rt_bytes_equal(a__4293.ptr, a__4293.len, b__4294.ptr, b__4294.len); }) && (!parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)0LL))))) {
-        return ({ token__Token v__4295 = name; ast__NodeKind v__4296 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)13LL), .payload.InsertString = ((ast__NodeKind__variant_InsertString){.value = parser__unary(ctx, p)})}); ast__new_node(ctx, v__4295, v__4296); });
+      slice__u8 d = (str__starts_with(ctx, (name).text, ((slice__u8){(u8*)"#", 1})) ? slice__u8__from((name).text, ((isize)1LL), "src/parser.sabk:1552:59") : (name).text);
+      if ((({ slice__u8 a__4297 = d, b__4298 = ((slice__u8){(u8*)"insert", 6}); rt_bytes_equal(a__4297.ptr, a__4297.len, b__4298.ptr, b__4298.len); }) && (!parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)0LL))))) {
+        return ({ token__Token v__4299 = name; ast__NodeKind v__4300 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)13LL), .payload.InsertString = ((ast__NodeKind__variant_InsertString){.value = parser__unary(ctx, p)})}); ast__new_node(ctx, v__4299, v__4300); });
       }
-      if (({ slice__u8 a__4297 = d, b__4298 = ((slice__u8){(u8*)"insert", 6}); rt_bytes_equal(a__4297.ptr, a__4297.len, b__4298.ptr, b__4298.len); })) {
-        return ({ token__Token v__4299 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a Code parameter after `#insert`", 32})); ast__NodeKind v__4300 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)33LL)}); ast__new_node(ctx, v__4299, v__4300); });
+      if (({ slice__u8 a__4301 = d, b__4302 = ((slice__u8){(u8*)"insert", 6}); rt_bytes_equal(a__4301.ptr, a__4301.len, b__4302.ptr, b__4302.len); })) {
+        return ({ token__Token v__4303 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a Code parameter after `#insert`", 32})); ast__NodeKind v__4304 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)33LL)}); ast__new_node(ctx, v__4303, v__4304); });
       }
-      if (({ slice__u8 a__4301 = d, b__4302 = ((slice__u8){(u8*)"run", 3}); rt_bytes_equal(a__4301.ptr, a__4301.len, b__4302.ptr, b__4302.len); })) {
-        return ({ token__Token v__4303 = name; ast__NodeKind v__4304 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)12LL), .payload.Run = ((ast__NodeKind__variant_Run){.value = parser__unary(ctx, p)})}); ast__new_node(ctx, v__4303, v__4304); });
+      if (({ slice__u8 a__4305 = d, b__4306 = ((slice__u8){(u8*)"run", 3}); rt_bytes_equal(a__4305.ptr, a__4305.len, b__4306.ptr, b__4306.len); })) {
+        return ({ token__Token v__4307 = name; ast__NodeKind v__4308 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)12LL), .payload.Run = ((ast__NodeKind__variant_Run){.value = parser__unary(ctx, p)})}); ast__new_node(ctx, v__4307, v__4308); });
       }
-      if ((({ slice__u8 a__4305 = d, b__4306 = ((slice__u8){(u8*)"text", 4}); rt_bytes_equal(a__4305.ptr, a__4305.len, b__4306.ptr, b__4306.len); }) || ({ slice__u8 a__4307 = d, b__4308 = ((slice__u8){(u8*)"location", 8}); rt_bytes_equal(a__4307.ptr, a__4307.len, b__4308.ptr, b__4308.len); }))) {
-        ({ parser__Parser* v__4309 = p; slice__u8 v__4311 = fmt__tformat(ctx, ((slice__u8){(u8*)"`(` after `#%`", 14}), ((slice__prelude__Any){(items__4310[0] = ((prelude__Any){.value = (slice__u8[1]){d}, .info = (&ti__1)}), items__4310), 1})); parser__expect(ctx, v__4309, ((token__TokenKind)6LL), v__4311); });
+      if ((({ slice__u8 a__4309 = d, b__4310 = ((slice__u8){(u8*)"text", 4}); rt_bytes_equal(a__4309.ptr, a__4309.len, b__4310.ptr, b__4310.len); }) || ({ slice__u8 a__4311 = d, b__4312 = ((slice__u8){(u8*)"location", 8}); rt_bytes_equal(a__4311.ptr, a__4311.len, b__4312.ptr, b__4312.len); }))) {
+        ({ parser__Parser* v__4313 = p; slice__u8 v__4315 = fmt__tformat(ctx, ((slice__u8){(u8*)"`(` after `#%`", 14}), ((slice__prelude__Any){(items__4314[0] = ((prelude__Any){.value = (slice__u8[1]){d}, .info = (&ti__1)}), items__4314), 1})); parser__expect(ctx, v__4313, ((token__TokenKind)6LL), v__4315); });
         token__Token code = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a Code parameter", 16}));
         parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)`", 3}));
-        return ast__new_node(ctx, code, (({ slice__u8 a__4312 = d, b__4313 = ((slice__u8){(u8*)"text", 4}); rt_bytes_equal(a__4312.ptr, a__4312.len, b__4313.ptr, b__4313.len); }) ? ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)62LL)}) : ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)63LL)})));
+        return ast__new_node(ctx, code, (({ slice__u8 a__4316 = d, b__4317 = ((slice__u8){(u8*)"text", 4}); rt_bytes_equal(a__4316.ptr, a__4316.len, b__4317.ptr, b__4317.len); }) ? ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)62LL)}) : ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)63LL)})));
       }
-      return ({ parser__Parser* v__4314 = p; token__Token v__4315 = name; slice__u8 v__4317 = fmt__tformat(ctx, ((slice__u8){(u8*)"unknown directive `#%`", 22}), ((slice__prelude__Any){(items__4316[0] = ((prelude__Any){.value = (slice__u8[1]){d}, .info = (&ti__1)}), items__4316), 1})); parser__fail(ctx, v__4314, v__4315, v__4317); });
+      return ({ parser__Parser* v__4318 = p; token__Token v__4319 = name; slice__u8 v__4321 = fmt__tformat(ctx, ((slice__u8){(u8*)"unknown directive `#%`", 22}), ((slice__prelude__Any){(items__4320[0] = ((prelude__Any){.value = (slice__u8[1]){d}, .info = (&ti__1)}), items__4320), 1})); parser__fail(ctx, v__4318, v__4319, v__4321); });
     }
     break;
     case ((token__TokenKind)79LL):
     {
-      return ({ parser__Parser* v__4318 = p; token__Token v__4319 = parser__next(ctx, p); parser__switch_body(ctx, v__4318, v__4319, true, ((ast__Node*)0)); });
+      return ({ parser__Parser* v__4322 = p; token__Token v__4323 = parser__next(ctx, p); parser__switch_body(ctx, v__4322, v__4323, true, ((ast__Node*)0)); });
     }
     break;
     case ((token__TokenKind)6LL):
     {
       token__Token open = parser__next(ctx, p);
+      bool saved = (rt_nonnull(p, "src/parser.sabk:1572:23"))->bare_condition;
+      (rt_nonnull(p, "src/parser.sabk:1573:11"))->bare_condition = false;
       ast__Node* inner = parser__expr(ctx, p, ((isize)1LL));
+      (rt_nonnull(p, "src/parser.sabk:1575:11"))->bare_condition = saved;
       parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`)` to close the parenthesis", 28}));
       return ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)45LL), .payload.Grouped = ((ast__NodeKind__variant_Grouped){.inner = inner})}));
     }
@@ -31663,9 +31772,9 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
     {
       parser__next(ctx, p);
       slice__u8 what = (((t).kind == ((token__TokenKind)85LL)) ? ((slice__u8){(u8*)"sizeof", 6}) : ((slice__u8){(u8*)"type_info", 9}));
-      ({ parser__Parser* v__4320 = p; slice__u8 v__4322 = fmt__tformat(ctx, ((slice__u8){(u8*)"`(` after `%`", 13}), ((slice__prelude__Any){(items__4321[0] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4321), 1})); parser__expect(ctx, v__4320, ((token__TokenKind)6LL), v__4322); });
+      ({ parser__Parser* v__4324 = p; slice__u8 v__4326 = fmt__tformat(ctx, ((slice__u8){(u8*)"`(` after `%`", 13}), ((slice__prelude__Any){(items__4325[0] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4325), 1})); parser__expect(ctx, v__4324, ((token__TokenKind)6LL), v__4326); });
       ast__Node* of = parser__expr(ctx, p, ((isize)1LL));
-      ({ parser__Parser* v__4323 = p; slice__u8 v__4325 = fmt__tformat(ctx, ((slice__u8){(u8*)"`)` after `%(...`", 17}), ((slice__prelude__Any){(items__4324[0] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4324), 1})); parser__expect(ctx, v__4323, ((token__TokenKind)7LL), v__4325); });
+      ({ parser__Parser* v__4327 = p; slice__u8 v__4329 = fmt__tformat(ctx, ((slice__u8){(u8*)"`)` after `%(...`", 17}), ((slice__prelude__Any){(items__4328[0] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4328), 1})); parser__expect(ctx, v__4327, ((token__TokenKind)7LL), v__4329); });
       if (((t).kind == ((token__TokenKind)85LL))) {
         return ast__new_node(ctx, t, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)51LL), .payload.SizeOf = ((ast__NodeKind__variant_SizeOf){.of = of, .is_type = false})}));
       }
@@ -31676,7 +31785,7 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
     {
       parser__next(ctx, p);
       parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(` after `new`", 15}));
-      isize start = (rt_nonnull(p, "src/parser.sabk:1507:23"))->idx;
+      isize start = (rt_nonnull(p, "src/parser.sabk:1598:23"))->idx;
       ast__Node* declared = ((ast__Node*)0);
       ast__Node* value = ((ast__Node*)0);
       ast__Node* first = ((ast__Node*)0);
@@ -31686,7 +31795,7 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
       } else {
         declared = parser__type_(ctx, p);
         if (parser__literal_ahead(ctx, p)) {
-          (rt_nonnull(p, "src/parser.sabk:1519:19"))->idx = start;
+          (rt_nonnull(p, "src/parser.sabk:1610:19"))->idx = start;
           declared = ((ast__Node*)0);
           value = parser__expr(ctx, p, ((isize)1LL));
         }
@@ -31709,7 +31818,7 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
     case ((token__TokenKind)61LL):
     case ((token__TokenKind)24LL):
     {
-      return ({ token__Token v__4326 = t; ast__NodeKind v__4327 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)64LL), .payload.TypeExpr = ((ast__NodeKind__variant_TypeExpr){.declared = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4326, v__4327); });
+      return ({ token__Token v__4330 = t; ast__NodeKind v__4331 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)64LL), .payload.TypeExpr = ((ast__NodeKind__variant_TypeExpr){.declared = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4330, v__4331); });
     }
     break;
     case ((token__TokenKind)35LL):
@@ -31719,7 +31828,7 @@ static ast__Node* parser__primary(prelude__Context *ctx, parser__Parser* p) {
     break;
     default:
     {
-      return ({ parser__Parser* v__4328 = p; token__Token v__4329 = t; slice__u8 v__4331 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected an expression, found %", 31}), ((slice__prelude__Any){(items__4330[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, t)}, .info = (&ti__1)}), items__4330), 1})); parser__fail(ctx, v__4328, v__4329, v__4331); });
+      return ({ parser__Parser* v__4332 = p; token__Token v__4333 = t; slice__u8 v__4335 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected an expression, found %", 31}), ((slice__prelude__Any){(items__4334[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, t)}, .info = (&ti__1)}), items__4334), 1})); parser__fail(ctx, v__4332, v__4333, v__4335); });
     }
     break;
     }
@@ -31731,46 +31840,46 @@ static bool parser__literal_ahead(prelude__Context *ctx, parser__Parser* p) {
 }
 
 static ast__Node* parser__bracket(prelude__Context *ctx, parser__Parser* p) {
-  prelude__Any items__4350[1];
+  prelude__Any items__4354[1];
   token__Token open = parser__next(ctx, p);
   ast__Node* declared = 0;
   if ((parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)0LL)) && (!parser__can_start_type(ctx, (parser__peek(ctx, p, ((isize)1LL))).kind)))) {
     parser__next(ctx, p);
-    return ({ parser__Parser* v__4332 = p; token__Token v__4333 = open; ast__Node* v__4334 = ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)60LL), .payload.ArrayLiteral = ((ast__NodeKind__variant_ArrayLiteral){.elem = ((ast__Node*)0), .items = ((slice__ptr_ast__Node){0})})})); parser__old_literal(ctx, v__4332, v__4333, v__4334); });
+    return ({ parser__Parser* v__4336 = p; token__Token v__4337 = open; ast__Node* v__4338 = ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)60LL), .payload.ArrayLiteral = ((ast__NodeKind__variant_ArrayLiteral){.elem = ((ast__Node*)0), .items = ((slice__ptr_ast__Node){0})})})); parser__old_literal(ctx, v__4336, v__4337, v__4338); });
   }
   if (parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)0LL))) {
     parser__next(ctx, p);
-    declared = ({ token__Token v__4335 = open; ast__NodeKind v__4336 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)78LL), .payload.TypeSlice = ((ast__NodeKind__variant_TypeSlice){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4335, v__4336); });
+    declared = ({ token__Token v__4339 = open; ast__NodeKind v__4340 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)78LL), .payload.TypeSlice = ((ast__NodeKind__variant_TypeSlice){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4339, v__4340); });
   } else {
     if ((parser__at(ctx, p, ((token__TokenKind)13LL), ((isize)0LL)) && parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)1LL)))) {
       parser__next(ctx, p);
       parser__next(ctx, p);
-      declared = ({ token__Token v__4337 = open; ast__NodeKind v__4338 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)79LL), .payload.TypeGrowable = ((ast__NodeKind__variant_TypeGrowable){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4337, v__4338); });
+      declared = ({ token__Token v__4341 = open; ast__NodeKind v__4342 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)79LL), .payload.TypeGrowable = ((ast__NodeKind__variant_TypeGrowable){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4341, v__4342); });
     } else {
       ast__Node* first = parser__expr(ctx, p, ((isize)1LL));
       if (((parser__at(ctx, p, ((token__TokenKind)21LL), ((isize)0LL)) || ((parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)0LL)) && (!parser__can_start_type(ctx, (parser__peek(ctx, p, ((isize)1LL))).kind))))) || (((parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)0LL)) && parser__at(ctx, p, ((token__TokenKind)10LL), ((isize)1LL))) && parser__indexes_a_literal(ctx, p, ((isize)1LL)))))) {
         grow__ptr_ast__Node items = {0};
         array__array_add__ptr_ast__Node(ctx, (&items), first);
         while ((parser__eat(ctx, p, ((token__TokenKind)21LL)) && (!parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)0LL))))) {
-          ({ grow__ptr_ast__Node* v__4339 = (&items); ast__Node* v__4340 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4339, v__4340); });
+          ({ grow__ptr_ast__Node* v__4343 = (&items); ast__Node* v__4344 = parser__expr(ctx, p, ((isize)1LL)); array__array_add__ptr_ast__Node(ctx, v__4343, v__4344); });
         }
         parser__expect(ctx, p, ((token__TokenKind)11LL), ((slice__u8){(u8*)"`,` or `]` after the element", 28}));
-        return ({ parser__Parser* v__4341 = p; token__Token v__4342 = open; ast__Node* v__4343 = ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)60LL), .payload.ArrayLiteral = ((ast__NodeKind__variant_ArrayLiteral){.elem = ((ast__Node*)0), .items = grow__ptr_ast__Node__view(items)})})); parser__old_literal(ctx, v__4341, v__4342, v__4343); });
+        return ({ parser__Parser* v__4345 = p; token__Token v__4346 = open; ast__Node* v__4347 = ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)60LL), .payload.ArrayLiteral = ((ast__NodeKind__variant_ArrayLiteral){.elem = ((ast__Node*)0), .items = grow__ptr_ast__Node__view(items)})})); parser__old_literal(ctx, v__4345, v__4346, v__4347); });
       }
       parser__expect(ctx, p, ((token__TokenKind)11LL), ((slice__u8){(u8*)"`]` after the array length", 26}));
-      declared = ({ token__Token v__4344 = open; ast__NodeKind v__4347 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)77LL), .payload.TypeArray = ({ ast__Node* v__4345 = parser__type_(ctx, p); ast__Node* v__4346 = first; ((ast__NodeKind__variant_TypeArray){.elem = v__4345, .len = v__4346}); })}); ast__new_node(ctx, v__4344, v__4347); });
+      declared = ({ token__Token v__4348 = open; ast__NodeKind v__4351 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)77LL), .payload.TypeArray = ({ ast__Node* v__4349 = parser__type_(ctx, p); ast__Node* v__4350 = first; ((ast__NodeKind__variant_TypeArray){.elem = v__4349, .len = v__4350}); })}); ast__new_node(ctx, v__4348, v__4351); });
     }
   }
   if (parser__at(ctx, p, ((token__TokenKind)8LL), ((isize)0LL))) {
-    ({ parser__Parser* v__4348 = p; token__Token v__4349 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4351 = fmt__tformat(ctx, ((slice__u8){(u8*)"an array literal is written with its element type before `.[`: `%.[ ... ]`, or `.[ ... ]` where the type is known", 113}), ((slice__prelude__Any){(items__4350[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(parser__element_of(ctx, declared), "src/parser.sabk:1585:63"))->tok).text}, .info = (&ti__1)}), items__4350), 1})); parser__report_error(ctx, v__4348, v__4349, v__4351); });
+    ({ parser__Parser* v__4352 = p; token__Token v__4353 = parser__peek(ctx, p, ((isize)0LL)); slice__u8 v__4355 = fmt__tformat(ctx, ((slice__u8){(u8*)"an array literal is written with its element type before `.[`: `%.[ ... ]`, or `.[ ... ]` where the type is known", 113}), ((slice__prelude__Any){(items__4354[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(parser__element_of(ctx, declared), "src/parser.sabk:1676:63"))->tok).text}, .info = (&ti__1)}), items__4354), 1})); parser__report_error(ctx, v__4352, v__4353, v__4355); });
     return parser__init_list(ctx, p, ((ast__Node*)0), true);
   }
   return ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)64LL), .payload.TypeExpr = ((ast__NodeKind__variant_TypeExpr){.declared = declared})}));
 }
 
 static ast__Node* parser__old_literal(prelude__Context *ctx, parser__Parser* p, token__Token open, ast__Node* n) {
-  prelude__Any items__4354[1];
-  ({ parser__Parser* v__4352 = p; token__Token v__4353 = open; slice__u8 v__4355 = fmt__tformat(ctx, ((slice__u8){(u8*)"`[` in an expression starts a type; an array literal is written with a dot before the `[`: `.%`", 95}), ((slice__prelude__Any){(items__4354[0] = ((prelude__Any){.value = (slice__u8[1]){parser__span_from(ctx, p, ((open).text).ptr)}, .info = (&ti__1)}), items__4354), 1})); parser__report_error(ctx, v__4352, v__4353, v__4355); });
+  prelude__Any items__4358[1];
+  ({ parser__Parser* v__4356 = p; token__Token v__4357 = open; slice__u8 v__4359 = fmt__tformat(ctx, ((slice__u8){(u8*)"`[` in an expression starts a type; an array literal is written with a dot before the `[`: `.%`", 95}), ((slice__prelude__Any){(items__4358[0] = ((prelude__Any){.value = (slice__u8[1]){parser__span_from(ctx, p, ((open).text).ptr)}, .info = (&ti__1)}), items__4358), 1})); parser__report_error(ctx, v__4356, v__4357, v__4359); });
   return n;
 }
 
@@ -31780,43 +31889,43 @@ static ast__Node* parser__result_type(prelude__Context *ctx, parser__Parser* p) 
   }
   token__Token open = parser__next(ctx, p);
   grow__ptr_ast__Node items = {0};
-  ({ grow__ptr_ast__Node* v__4356 = (&items); ast__Node* v__4357 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4356, v__4357); });
+  ({ grow__ptr_ast__Node* v__4360 = (&items); ast__Node* v__4361 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4360, v__4361); });
   while (parser__eat(ctx, p, ((token__TokenKind)21LL))) {
-    ({ grow__ptr_ast__Node* v__4358 = (&items); ast__Node* v__4359 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4358, v__4359); });
+    ({ grow__ptr_ast__Node* v__4362 = (&items); ast__Node* v__4363 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4362, v__4363); });
   }
   parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`,` or `)` after the result types", 33}));
   if (((items).len == ((isize)1LL))) {
-    return (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(items), ((isize)0LL), "src/parser.sabk:1611:21"));
+    return (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(items), ((isize)0LL), "src/parser.sabk:1702:21"));
   }
   return ast__new_node(ctx, open, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)81LL), .payload.TypeTuple = ((ast__NodeKind__variant_TypeTuple){.items = grow__ptr_ast__Node__view(items)})}));
 }
 
 static ast__Node* parser__type_(prelude__Context *ctx, parser__Parser* p) {
-  prelude__Any items__4386[1];
+  prelude__Any items__4390[1];
   token__Token t = parser__peek(ctx, p, ((isize)0LL));
   {
-    token__TokenKind switch__4360 = (t).kind;
-    switch (switch__4360) {
+    token__TokenKind switch__4364 = (t).kind;
+    switch (switch__4364) {
     case ((token__TokenKind)37LL):
     {
       parser__next(ctx, p);
-      return ({ token__Token v__4361 = t; ast__NodeKind v__4362 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)76LL), .payload.TypePointer = ((ast__NodeKind__variant_TypePointer){.to = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4361, v__4362); });
+      return ({ token__Token v__4365 = t; ast__NodeKind v__4366 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)76LL), .payload.TypePointer = ((ast__NodeKind__variant_TypePointer){.to = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4365, v__4366); });
     }
     break;
     case ((token__TokenKind)10LL):
     {
       parser__next(ctx, p);
       if (parser__eat(ctx, p, ((token__TokenKind)11LL))) {
-        return ({ token__Token v__4363 = t; ast__NodeKind v__4364 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)78LL), .payload.TypeSlice = ((ast__NodeKind__variant_TypeSlice){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4363, v__4364); });
+        return ({ token__Token v__4367 = t; ast__NodeKind v__4368 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)78LL), .payload.TypeSlice = ((ast__NodeKind__variant_TypeSlice){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4367, v__4368); });
       }
       if ((parser__at(ctx, p, ((token__TokenKind)13LL), ((isize)0LL)) && parser__at(ctx, p, ((token__TokenKind)11LL), ((isize)1LL)))) {
         parser__next(ctx, p);
         parser__next(ctx, p);
-        return ({ token__Token v__4365 = t; ast__NodeKind v__4366 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)79LL), .payload.TypeGrowable = ((ast__NodeKind__variant_TypeGrowable){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4365, v__4366); });
+        return ({ token__Token v__4369 = t; ast__NodeKind v__4370 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)79LL), .payload.TypeGrowable = ((ast__NodeKind__variant_TypeGrowable){.elem = parser__type_(ctx, p)})}); ast__new_node(ctx, v__4369, v__4370); });
       }
       ast__Node* len = parser__expr(ctx, p, ((isize)1LL));
       parser__expect(ctx, p, ((token__TokenKind)11LL), ((slice__u8){(u8*)"`]` after the array length", 26}));
-      return ({ token__Token v__4367 = t; ast__NodeKind v__4370 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)77LL), .payload.TypeArray = ({ ast__Node* v__4368 = parser__type_(ctx, p); ast__Node* v__4369 = len; ((ast__NodeKind__variant_TypeArray){.elem = v__4368, .len = v__4369}); })}); ast__new_node(ctx, v__4367, v__4370); });
+      return ({ token__Token v__4371 = t; ast__NodeKind v__4374 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)77LL), .payload.TypeArray = ({ ast__Node* v__4372 = parser__type_(ctx, p); ast__Node* v__4373 = len; ((ast__NodeKind__variant_TypeArray){.elem = v__4372, .len = v__4373}); })}); ast__new_node(ctx, v__4371, v__4374); });
     }
     break;
     case ((token__TokenKind)61LL):
@@ -31825,7 +31934,7 @@ static ast__Node* parser__type_(prelude__Context *ctx, parser__Parser* p) {
       parser__expect(ctx, p, ((token__TokenKind)6LL), ((slice__u8){(u8*)"`(` after `fn`", 14}));
       grow__ptr_ast__Node params = {0};
       while ((!parser__at(ctx, p, ((token__TokenKind)7LL), ((isize)0LL)))) {
-        ({ grow__ptr_ast__Node* v__4371 = (&params); ast__Node* v__4372 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4371, v__4372); });
+        ({ grow__ptr_ast__Node* v__4375 = (&params); ast__Node* v__4376 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4375, v__4376); });
         if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
           break;
         }
@@ -31842,22 +31951,22 @@ static ast__Node* parser__type_(prelude__Context *ctx, parser__Parser* p) {
     {
       parser__next(ctx, p);
       grow__ptr_ast__Node args = {0};
-      ({ grow__ptr_ast__Node* v__4373 = (&args); ast__Node* v__4374 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4373, v__4374); });
+      ({ grow__ptr_ast__Node* v__4377 = (&args); ast__Node* v__4378 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4377, v__4378); });
       return ast__new_node(ctx, t, ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)74LL), .payload.TypeName = ((ast__NodeKind__variant_TypeName){.args = grow__ptr_ast__Node__view(args)})}));
     }
     break;
     case ((token__TokenKind)1LL):
     {
-      ast__Node* name = ({ token__Token v__4375 = parser__next(ctx, p); ast__NodeKind v__4376 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)74LL), .payload.TypeName = ((ast__NodeKind__variant_TypeName){.args = ((slice__ptr_ast__Node){0})})}); ast__new_node(ctx, v__4375, v__4376); });
+      ast__Node* name = ({ token__Token v__4379 = parser__next(ctx, p); ast__NodeKind v__4380 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)74LL), .payload.TypeName = ((ast__NodeKind__variant_TypeName){.args = ((slice__ptr_ast__Node){0})})}); ast__new_node(ctx, v__4379, v__4380); });
       ast__Node* member = ((ast__Node*)0);
       if ((parser__at(ctx, p, ((token__TokenKind)12LL), ((isize)0LL)) && parser__at(ctx, p, ((token__TokenKind)1LL), ((isize)1LL)))) {
         parser__next(ctx, p);
-        member = ({ token__Token v__4377 = parser__next(ctx, p); ast__NodeKind v__4378 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)75LL), .payload.TypeMember = ((ast__NodeKind__variant_TypeMember){.module = name, .args = ((slice__ptr_ast__Node){0})})}); ast__new_node(ctx, v__4377, v__4378); });
+        member = ({ token__Token v__4381 = parser__next(ctx, p); ast__NodeKind v__4382 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)75LL), .payload.TypeMember = ((ast__NodeKind__variant_TypeMember){.module = name, .args = ((slice__ptr_ast__Node){0})})}); ast__new_node(ctx, v__4381, v__4382); });
       }
       if (parser__eat(ctx, p, ((token__TokenKind)6LL))) {
         grow__ptr_ast__Node args = {0};
         while ((!parser__at(ctx, p, ((token__TokenKind)7LL), ((isize)0LL)))) {
-          ({ grow__ptr_ast__Node* v__4379 = (&args); ast__Node* v__4380 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4379, v__4380); });
+          ({ grow__ptr_ast__Node* v__4383 = (&args); ast__Node* v__4384 = parser__type_(ctx, p); array__array_add__ptr_ast__Node(ctx, v__4383, v__4384); });
           if ((!parser__eat(ctx, p, ((token__TokenKind)21LL)))) {
             break;
           }
@@ -31865,18 +31974,18 @@ static ast__Node* parser__type_(prelude__Context *ctx, parser__Parser* p) {
         parser__expect(ctx, p, ((token__TokenKind)7LL), ((slice__u8){(u8*)"`,` or `)` after the type arguments", 35}));
         ast__Node* n = ((member != ((ast__Node*)0)) ? member : name);
         {
-          ast__NodeKind *switch__4381 = &(rt_nonnull(n, "src/parser.sabk:1673:23"))->kind;
-          switch ((*switch__4381).tag) {
+          ast__NodeKind *switch__4385 = &(rt_nonnull(n, "src/parser.sabk:1764:23"))->kind;
+          switch ((*switch__4385).tag) {
           case ((ast__NodeKind__Tag)74LL):
           {
-            slice__ptr_ast__Node* a = &(*switch__4381).payload.TypeName.args;
-            (*rt_nonnull(a, "src/parser.sabk:1674:41")) = grow__ptr_ast__Node__view(args);
+            slice__ptr_ast__Node* a = &(*switch__4385).payload.TypeName.args;
+            (*rt_nonnull(a, "src/parser.sabk:1765:41")) = grow__ptr_ast__Node__view(args);
           }
           break;
           case ((ast__NodeKind__Tag)75LL):
           {
-            slice__ptr_ast__Node* a = &(*switch__4381).payload.TypeMember.args;
-            (*rt_nonnull(a, "src/parser.sabk:1675:43")) = grow__ptr_ast__Node__view(args);
+            slice__ptr_ast__Node* a = &(*switch__4385).payload.TypeMember.args;
+            (*rt_nonnull(a, "src/parser.sabk:1766:43")) = grow__ptr_ast__Node__view(args);
           }
           break;
           default:
@@ -31892,12 +32001,12 @@ static ast__Node* parser__type_(prelude__Context *ctx, parser__Parser* p) {
     case ((token__TokenKind)25LL):
     {
       parser__next(ctx, p);
-      return ({ token__Token v__4382 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a type parameter name after `$`", 31})); ast__NodeKind v__4383 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)82LL)}); ast__new_node(ctx, v__4382, v__4383); });
+      return ({ token__Token v__4386 = parser__expect(ctx, p, ((token__TokenKind)1LL), ((slice__u8){(u8*)"a type parameter name after `$`", 31})); ast__NodeKind v__4387 = ((ast__NodeKind){.tag = ((ast__NodeKind__Tag)82LL)}); ast__new_node(ctx, v__4386, v__4387); });
     }
     break;
     default:
     {
-      return ({ parser__Parser* v__4384 = p; token__Token v__4385 = t; slice__u8 v__4387 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected a type, found %", 24}), ((slice__prelude__Any){(items__4386[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, t)}, .info = (&ti__1)}), items__4386), 1})); parser__fail(ctx, v__4384, v__4385, v__4387); });
+      return ({ parser__Parser* v__4388 = p; token__Token v__4389 = t; slice__u8 v__4391 = fmt__tformat(ctx, ((slice__u8){(u8*)"expected a type, found %", 24}), ((slice__prelude__Any){(items__4390[0] = ((prelude__Any){.value = (slice__u8[1]){parser__describe(ctx, t)}, .info = (&ti__1)}), items__4390), 1})); parser__fail(ctx, v__4388, v__4389, v__4391); });
     }
     break;
     }
@@ -31921,8 +32030,8 @@ static bool memory__is_local(prelude__Context *ctx, ast__Node* d) {
     return false;
   }
   {
-    ast__NodeKind__Tag switch__4388 = ((rt_nonnull(d, "src/memory.sabk:44:15"))->kind).tag;
-    switch (switch__4388) {
+    ast__NodeKind__Tag switch__4392 = ((rt_nonnull(d, "src/memory.sabk:44:15"))->kind).tag;
+    switch (switch__4392) {
     case ((ast__NodeKind__Tag)9LL):
     case ((ast__NodeKind__Tag)11LL):
     case ((ast__NodeKind__Tag)73LL):
@@ -31948,11 +32057,11 @@ static bool memory__is_local(prelude__Context *ctx, ast__Node* d) {
 
 static ast__Node* memory__root(prelude__Context *ctx, ast__Node* n) {
   {
-    ast__NodeKind switch__4389 = (rt_nonnull(n, "src/memory.sabk:54:15"))->kind;
-    switch (switch__4389.tag) {
+    ast__NodeKind switch__4393 = (rt_nonnull(n, "src/memory.sabk:54:15"))->kind;
+    switch (switch__4393.tag) {
     case ((ast__NodeKind__Tag)45LL):
     {
-      ast__Node* inner = switch__4389.payload.Grouped.inner;
+      ast__Node* inner = switch__4393.payload.Grouped.inner;
       return memory__root(ctx, inner);
     }
     break;
@@ -31963,7 +32072,7 @@ static ast__Node* memory__root(prelude__Context *ctx, ast__Node* n) {
     break;
     case ((ast__NodeKind__Tag)47LL):
     {
-      ast__Node* object = switch__4389.payload.Member.object;
+      ast__Node* object = switch__4393.payload.Member.object;
       if (((rt_nonnull(n, "src/memory.sabk:60:15"))->decl != ((ast__Node*)0))) {
         return (rt_nonnull(n, "src/memory.sabk:61:22"))->decl;
       }
@@ -31975,7 +32084,7 @@ static ast__Node* memory__root(prelude__Context *ctx, ast__Node* n) {
     break;
     case ((ast__NodeKind__Tag)48LL):
     {
-      ast__Node* object = switch__4389.payload.Index.object;
+      ast__Node* object = switch__4393.payload.Index.object;
       if ((((rt_nonnull(object, "src/memory.sabk:66:20"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:66:41"))->ty, "src/memory.sabk:66:44"))->kind == ((types__TypeKind)7LL)))) {
         return memory__root(ctx, object);
       }
@@ -31984,7 +32093,7 @@ static ast__Node* memory__root(prelude__Context *ctx, ast__Node* n) {
     break;
     case ((ast__NodeKind__Tag)68LL):
     {
-      ast__Node* object = switch__4389.payload.VariantAccess.object;
+      ast__Node* object = switch__4393.payload.VariantAccess.object;
       if ((((rt_nonnull(object, "src/memory.sabk:70:20"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:70:41"))->ty, "src/memory.sabk:70:44"))->kind == ((types__TypeKind)6LL)))) {
         return ((ast__Node*)0);
       }
@@ -32002,23 +32111,23 @@ static ast__Node* memory__root(prelude__Context *ctx, ast__Node* n) {
 
 static ast__Node* memory__param_target(prelude__Context *ctx, ast__Node* n) {
   {
-    ast__NodeKind switch__4390 = (rt_nonnull(n, "src/memory.sabk:81:15"))->kind;
-    switch (switch__4390.tag) {
+    ast__NodeKind switch__4394 = (rt_nonnull(n, "src/memory.sabk:81:15"))->kind;
+    switch (switch__4394.tag) {
     case ((ast__NodeKind__Tag)45LL):
     {
-      ast__Node* inner = switch__4390.payload.Grouped.inner;
+      ast__Node* inner = switch__4394.payload.Grouped.inner;
       return memory__param_target(ctx, inner);
     }
     break;
     case ((ast__NodeKind__Tag)44LL):
     {
-      ast__Node* pointer = switch__4390.payload.Deref.pointer;
+      ast__Node* pointer = switch__4394.payload.Deref.pointer;
       return memory__pointer_param(ctx, pointer);
     }
     break;
     case ((ast__NodeKind__Tag)47LL):
     {
-      ast__Node* object = switch__4390.payload.Member.object;
+      ast__Node* object = switch__4394.payload.Member.object;
       if (((rt_nonnull(n, "src/memory.sabk:87:15"))->decl != ((ast__Node*)0))) {
         return ((ast__Node*)0);
       }
@@ -32030,7 +32139,7 @@ static ast__Node* memory__param_target(prelude__Context *ctx, ast__Node* n) {
     break;
     case ((ast__NodeKind__Tag)48LL):
     {
-      ast__Node* object = switch__4390.payload.Index.object;
+      ast__Node* object = switch__4394.payload.Index.object;
       if ((((rt_nonnull(object, "src/memory.sabk:93:20"))->ty != ((types__Type*)0)) && (((((rt_nonnull((rt_nonnull(object, "src/memory.sabk:93:42"))->ty, "src/memory.sabk:93:45"))->kind == ((types__TypeKind)8LL)) || ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:93:70"))->ty, "src/memory.sabk:93:73"))->kind == ((types__TypeKind)9LL))) || ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:93:101"))->ty, "src/memory.sabk:93:104"))->kind == ((types__TypeKind)6LL)))))) {
         return memory__pointer_param(ctx, object);
       }
@@ -32039,7 +32148,7 @@ static ast__Node* memory__param_target(prelude__Context *ctx, ast__Node* n) {
     break;
     case ((ast__NodeKind__Tag)68LL):
     {
-      ast__Node* object = switch__4390.payload.VariantAccess.object;
+      ast__Node* object = switch__4394.payload.VariantAccess.object;
       if ((((rt_nonnull(object, "src/memory.sabk:97:20"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:97:41"))->ty, "src/memory.sabk:97:44"))->kind == ((types__TypeKind)6LL)))) {
         return memory__pointer_param(ctx, object);
       }
@@ -32078,15 +32187,15 @@ static ast__Node* memory__into_frame(prelude__Context *ctx, memory__Escapes* x, 
     return (((!generics__is_place(ctx, e)) || memory__is_local(ctx, memory__root(ctx, e))) ? e : ((ast__Node*)0));
   }
   {
-    ast__NodeKind switch__4391 = (rt_nonnull(e, "src/memory.sabk:126:15"))->kind;
+    ast__NodeKind switch__4395 = (rt_nonnull(e, "src/memory.sabk:126:15"))->kind;
     switch (0) { default:
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)42LL) && (switch__4391.payload.Unary.op == ((ast__UnaryOp)3LL)))) {
-      ast__Node* operand = switch__4391.payload.Unary.operand;
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)42LL) && (switch__4395.payload.Unary.op == ((ast__UnaryOp)3LL)))) {
+      ast__Node* operand = switch__4395.payload.Unary.operand;
       return (memory__is_local(ctx, memory__root(ctx, operand)) ? e : ((ast__Node*)0));
       break;
     }
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)49LL))) {
-      ast__Node* object = switch__4391.payload.Slice.object;
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)49LL))) {
+      ast__Node* object = switch__4395.payload.Slice.object;
       types__Type* t = (rt_nonnull(object, "src/memory.sabk:130:24"))->ty;
       if (((t != ((types__Type*)0)) && ((rt_nonnull(t, "src/memory.sabk:131:28"))->kind == ((types__TypeKind)7LL)))) {
         return (memory__is_local(ctx, memory__root(ctx, object)) ? e : ((ast__Node*)0));
@@ -32094,16 +32203,16 @@ static ast__Node* memory__into_frame(prelude__Context *ctx, memory__Escapes* x, 
       return memory__into_frame(ctx, x, object);
       break;
     }
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)60LL)) || (switch__4391.tag == ((ast__NodeKind__Tag)58LL)) || (switch__4391.tag == ((ast__NodeKind__Tag)54LL))) {
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)60LL)) || (switch__4395.tag == ((ast__NodeKind__Tag)58LL)) || (switch__4395.tag == ((ast__NodeKind__Tag)54LL))) {
       slice__ptr_ast__Node items = check__items_of(ctx, e);
       if ((((rt_nonnull((rt_nonnull(e, "src/memory.sabk:136:15"))->ty, "src/memory.sabk:136:18"))->kind == ((types__TypeKind)8LL)) && ((items).len > ((isize)0LL)))) {
         return e;
       }
       {
-        slice__ptr_ast__Node seq__4392 = items;
-        for (isize i__4393 = 0; i__4393 < seq__4392.len; i__4393++) {
-          ast__Node* item = seq__4392.ptr[i__4393];
-          ast__Node* found = ({ memory__Escapes* v__4394 = x; ast__Node* v__4395 = check__item_value(ctx, item); memory__into_frame(ctx, v__4394, v__4395); });
+        slice__ptr_ast__Node seq__4396 = items;
+        for (isize i__4397 = 0; i__4397 < seq__4396.len; i__4397++) {
+          ast__Node* item = seq__4396.ptr[i__4397];
+          ast__Node* found = ({ memory__Escapes* v__4398 = x; ast__Node* v__4399 = check__item_value(ctx, item); memory__into_frame(ctx, v__4398, v__4399); });
           if ((found != ((ast__Node*)0))) {
             return found;
           }
@@ -32112,46 +32221,46 @@ static ast__Node* memory__into_frame(prelude__Context *ctx, memory__Escapes* x, 
       return ((ast__Node*)0);
       break;
     }
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)59LL))) {
-      ast__Node* value = switch__4391.payload.FieldInit.value;
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)59LL))) {
+      ast__Node* value = switch__4395.payload.FieldInit.value;
       return memory__into_frame(ctx, x, value);
       break;
     }
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)67LL)) || (switch__4391.tag == ((ast__NodeKind__Tag)45LL)) || (switch__4391.tag == ((ast__NodeKind__Tag)50LL))) {
-      return ({ memory__Escapes* v__4396 = x; ast__Node* v__4397 = memory__first_part(ctx, e); memory__into_frame(ctx, v__4396, v__4397); });
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)67LL)) || (switch__4395.tag == ((ast__NodeKind__Tag)45LL)) || (switch__4395.tag == ((ast__NodeKind__Tag)50LL))) {
+      return ({ memory__Escapes* v__4400 = x; ast__Node* v__4401 = memory__first_part(ctx, e); memory__into_frame(ctx, v__4400, v__4401); });
       break;
     }
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)43LL))) {
-      ast__BinaryOp op = switch__4391.payload.Binary.op;
-      ast__Node* lhs = switch__4391.payload.Binary.lhs;
-      ast__Node* rhs = switch__4391.payload.Binary.rhs;
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)43LL))) {
+      ast__BinaryOp op = switch__4395.payload.Binary.op;
+      ast__Node* lhs = switch__4395.payload.Binary.lhs;
+      ast__Node* rhs = switch__4395.payload.Binary.rhs;
       if (((((op != ((ast__BinaryOp)0LL)) && (op != ((ast__BinaryOp)1LL)))) || ((rt_nonnull((rt_nonnull(e, "src/memory.sabk:149:45"))->ty, "src/memory.sabk:149:48"))->kind != ((types__TypeKind)6LL)))) {
         return ((ast__Node*)0);
       }
       return memory__into_frame(ctx, x, ((((rt_nonnull(lhs, "src/memory.sabk:151:38"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(lhs, "src/memory.sabk:151:56"))->ty, "src/memory.sabk:151:59"))->kind == ((types__TypeKind)6LL))) ? lhs : rhs));
       break;
     }
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)34LL))) {
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)34LL))) {
       return ({
-        tuple__25 result__4398 = map__map_get__ptr_ast__Node__ptr_ast__Node(ctx, (&(rt_nonnull(x, "src/memory.sabk:153:27"))->held), (rt_nonnull(e, "src/memory.sabk:153:35"))->decl);
-        ast__Node* value__4399;
-        if (!result__4398._1)
-          value__4399 = ((ast__Node*)0);
+        tuple__25 result__4402 = map__map_get__ptr_ast__Node__ptr_ast__Node(ctx, (&(rt_nonnull(x, "src/memory.sabk:153:27"))->held), (rt_nonnull(e, "src/memory.sabk:153:35"))->decl);
+        ast__Node* value__4403;
+        if (!result__4402._1)
+          value__4403 = ((ast__Node*)0);
         else
-          value__4399 = result__4398._0;
-        value__4399;
+          value__4403 = result__4402._0;
+        value__4403;
       });
       break;
     }
-    if ((switch__4391.tag == ((ast__NodeKind__Tag)47LL))) {
-      ast__Node* object = switch__4391.payload.Member.object;
+    if ((switch__4395.tag == ((ast__NodeKind__Tag)47LL))) {
+      ast__Node* object = switch__4395.payload.Member.object;
       if ((((rt_nonnull(e, "src/memory.sabk:155:15"))->decl != ((ast__Node*)0)) || ((rt_nonnull(object, "src/memory.sabk:155:38"))->ty == ((types__Type*)0)))) {
         return ((ast__Node*)0);
       }
-      if ((({ slice__u8 a__4400 = ((rt_nonnull(e, "src/memory.sabk:157:15"))->tok).text, b__4401 = ((slice__u8){(u8*)"ptr", 3}); rt_bytes_equal(a__4400.ptr, a__4400.len, b__4401.ptr, b__4401.len); }) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:157:43"))->ty, "src/memory.sabk:157:46"))->kind == ((types__TypeKind)7LL)))) {
+      if ((({ slice__u8 a__4404 = ((rt_nonnull(e, "src/memory.sabk:157:15"))->tok).text, b__4405 = ((slice__u8){(u8*)"ptr", 3}); rt_bytes_equal(a__4404.ptr, a__4404.len, b__4405.ptr, b__4405.len); }) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:157:43"))->ty, "src/memory.sabk:157:46"))->kind == ((types__TypeKind)7LL)))) {
         return (memory__is_local(ctx, memory__root(ctx, object)) ? e : ((ast__Node*)0));
       }
-      if (((({ slice__u8 a__4402 = ((rt_nonnull(e, "src/memory.sabk:159:15"))->tok).text, b__4403 = ((slice__u8){(u8*)"ptr", 3}); rt_bytes_equal(a__4402.ptr, a__4402.len, b__4403.ptr, b__4403.len); }) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:159:43"))->ty, "src/memory.sabk:159:46"))->kind == ((types__TypeKind)6LL))) && ((rt_nonnull((rt_nonnull((rt_nonnull(object, "src/memory.sabk:159:69"))->ty, "src/memory.sabk:159:72"))->elem, "src/memory.sabk:159:77"))->kind == ((types__TypeKind)7LL)))) {
+      if (((({ slice__u8 a__4406 = ((rt_nonnull(e, "src/memory.sabk:159:15"))->tok).text, b__4407 = ((slice__u8){(u8*)"ptr", 3}); rt_bytes_equal(a__4406.ptr, a__4406.len, b__4407.ptr, b__4407.len); }) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:159:43"))->ty, "src/memory.sabk:159:46"))->kind == ((types__TypeKind)6LL))) && ((rt_nonnull((rt_nonnull((rt_nonnull(object, "src/memory.sabk:159:69"))->ty, "src/memory.sabk:159:72"))->elem, "src/memory.sabk:159:77"))->kind == ((types__TypeKind)7LL)))) {
         return memory__into_frame(ctx, x, object);
       }
       if (((rt_nonnull((rt_nonnull(object, "src/memory.sabk:161:20"))->ty, "src/memory.sabk:161:23"))->kind == ((types__TypeKind)6LL))) {
@@ -32187,14 +32296,14 @@ static tuple__23 memory__each_assignment(prelude__Context *ctx, ast__Node* n) {
   {
     ast__Node* target;
     ast__Node* value;
-    if (({ ast__NodeKind is__4404 = (rt_nonnull(n, "src/memory.sabk:186:11"))->kind; is__4404.tag == ((ast__NodeKind__Tag)16LL) ? (target = is__4404.payload.Assign.target, value = is__4404.payload.Assign.value, 1) : 0; })) {
+    if (({ ast__NodeKind is__4408 = (rt_nonnull(n, "src/memory.sabk:186:11"))->kind; is__4408.tag == ((ast__NodeKind__Tag)16LL) ? (target = is__4408.payload.Assign.target, value = is__4408.payload.Assign.value, 1) : 0; })) {
       {
         slice__ptr_ast__Node ts;
         slice__ptr_ast__Node vs;
-        if ((({ ast__NodeKind is__4405 = (rt_nonnull(target, "src/memory.sabk:187:20"))->kind; is__4405.tag == ((ast__NodeKind__Tag)54LL) ? (ts = is__4405.payload.Values.items, 1) : 0; }) && ({ ast__NodeKind is__4406 = (rt_nonnull(value, "src/memory.sabk:187:56"))->kind; is__4406.tag == ((ast__NodeKind__Tag)54LL) ? (vs = is__4406.payload.Values.items, 1) : 0; }))) {
+        if ((({ ast__NodeKind is__4409 = (rt_nonnull(target, "src/memory.sabk:187:20"))->kind; is__4409.tag == ((ast__NodeKind__Tag)54LL) ? (ts = is__4409.payload.Values.items, 1) : 0; }) && ({ ast__NodeKind is__4410 = (rt_nonnull(value, "src/memory.sabk:187:56"))->kind; is__4410.tag == ((ast__NodeKind__Tag)54LL) ? (vs = is__4410.payload.Values.items, 1) : 0; }))) {
           {
-            isize end__4407 = (ts).len;
-            for (isize i = ((isize)0LL); i < end__4407; i++) {
+            isize end__4411 = (ts).len;
+            for (isize i = ((isize)0LL); i < end__4411; i++) {
               if (resolve__is_discard(ctx, (*slice__ptr_ast__Node__at(ts, i, "src/memory.sabk:189:34")))) {
                 continue;
               }
@@ -32203,7 +32312,7 @@ static tuple__23 memory__each_assignment(prelude__Context *ctx, ast__Node* n) {
             }
           }
         } else {
-          if ((({ slice__u8 a__4408 = ((rt_nonnull(n, "src/memory.sabk:194:22"))->tok).text, b__4409 = ((slice__u8){(u8*)"=", 1}); rt_bytes_equal(a__4408.ptr, a__4408.len, b__4409.ptr, b__4409.len); }) && (((rt_nonnull(target, "src/memory.sabk:194:48"))->kind).tag != ((ast__NodeKind__Tag)54LL)))) {
+          if ((({ slice__u8 a__4412 = ((rt_nonnull(n, "src/memory.sabk:194:22"))->tok).text, b__4413 = ((slice__u8){(u8*)"=", 1}); rt_bytes_equal(a__4412.ptr, a__4412.len, b__4413.ptr, b__4413.len); }) && (((rt_nonnull(target, "src/memory.sabk:194:48"))->kind).tag != ((ast__NodeKind__Tag)54LL)))) {
             array__array_add__ptr_ast__Node(ctx, (&targets), target);
             array__array_add__ptr_ast__Node(ctx, (&values), value);
           }
@@ -32219,34 +32328,34 @@ static void memory__find_held(prelude__Context *ctx, memory__Escapes* x, ast__No
     return;
   }
   {
-    ast__NodeKind switch__4410 = (rt_nonnull(n, "src/memory.sabk:206:15"))->kind;
-    switch (switch__4410.tag) {
+    ast__NodeKind switch__4414 = (rt_nonnull(n, "src/memory.sabk:206:15"))->kind;
+    switch (switch__4414.tag) {
     case ((ast__NodeKind__Tag)24LL):
     {
-      ({ memory__Escapes* v__4411 = x; ast__Node* v__4412 = check__static_if_branch(ctx, n); memory__find_held(ctx, v__4411, v__4412); });
+      ({ memory__Escapes* v__4415 = x; ast__Node* v__4416 = check__static_if_branch(ctx, n); memory__find_held(ctx, v__4415, v__4416); });
       return;
     }
     break;
     case ((ast__NodeKind__Tag)9LL):
     {
-      ast__Node* value = switch__4410.payload.Let.value;
+      ast__Node* value = switch__4414.payload.Let.value;
       memory__held_by_decl(ctx, x, n, value);
     }
     break;
     case ((ast__NodeKind__Tag)11LL):
     {
-      ast__Node* value = switch__4410.payload.Const.value;
+      ast__Node* value = switch__4414.payload.Const.value;
       memory__held_by_decl(ctx, x, n, value);
     }
     break;
     case ((ast__NodeKind__Tag)16LL):
     {
-      tuple__23 values__4413 = memory__each_assignment(ctx, n);
-      grow__ptr_ast__Node targets = values__4413._0;
-      grow__ptr_ast__Node values = values__4413._1;
+      tuple__23 values__4417 = memory__each_assignment(ctx, n);
+      grow__ptr_ast__Node targets = values__4417._0;
+      grow__ptr_ast__Node values = values__4417._1;
       {
-        isize end__4414 = (targets).len;
-        for (isize i = ((isize)0LL); i < end__4414; i++) {
+        isize end__4418 = (targets).len;
+        for (isize i = ((isize)0LL); i < end__4418; i++) {
           memory__hold(ctx, x, (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(targets), i, "src/memory.sabk:217:28")), (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(values), i, "src/memory.sabk:217:39")));
         }
       }
@@ -32259,9 +32368,9 @@ static void memory__find_held(prelude__Context *ctx, memory__Escapes* x, ast__No
     }
   }
   {
-    grow__ptr_ast__Node seq__4415 = ast__code_children(ctx, n);
-    for (isize i__4416 = 0; i__4416 < seq__4415.len; i__4416++) {
-      ast__Node* child = seq__4415.ptr[i__4416];
+    grow__ptr_ast__Node seq__4419 = ast__code_children(ctx, n);
+    for (isize i__4420 = 0; i__4420 < seq__4419.len; i__4420++) {
+      ast__Node* child = seq__4419.ptr[i__4420];
       memory__find_held(ctx, x, child);
     }
   }
@@ -32279,57 +32388,57 @@ static void memory__held_by_decl(prelude__Context *ctx, memory__Escapes* x, ast_
 }
 
 static slice__u8 memory__local_name(prelude__Context *ctx, ast__Node* n) {
-  prelude__Any items__4417[1];
+  prelude__Any items__4421[1];
   ast__Node* r = memory__root(ctx, n);
-  return ((r != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4417[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:237:44"))->tok).text}, .info = (&ti__1)}), items__4417), 1})) : ((slice__u8){(u8*)"this local", 10}));
+  return ((r != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4421[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:237:44"))->tok).text}, .info = (&ti__1)}), items__4421), 1})) : ((slice__u8){(u8*)"this local", 10}));
 }
 
 static slice__u8 memory__explain_escape(prelude__Context *ctx, memory__Escapes* x, ast__Node* origin, slice__u8 name) {
-  prelude__Any items__4418[1];
-  prelude__Any items__4419[1];
-  prelude__Any items__4420[1];
-  prelude__Any items__4421[1];
   prelude__Any items__4422[1];
-  prelude__Any items__4423[2];
-  prelude__Any items__4425[2];
-  prelude__Any items__4426[2];
+  prelude__Any items__4423[1];
+  prelude__Any items__4424[1];
+  prelude__Any items__4425[1];
+  prelude__Any items__4426[1];
   prelude__Any items__4427[2];
-  prelude__Any items__4428[1];
-  slice__u8 until = fmt__tformat(ctx, ((slice__u8){(u8*)" until % returns", 16}), ((slice__prelude__Any){(items__4418[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4418), 1}));
+  prelude__Any items__4429[2];
+  prelude__Any items__4430[2];
+  prelude__Any items__4431[2];
+  prelude__Any items__4432[1];
+  slice__u8 until = fmt__tformat(ctx, ((slice__u8){(u8*)" until % returns", 16}), ((slice__prelude__Any){(items__4422[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4422), 1}));
   if ((((rt_nonnull(origin, "src/memory.sabk:243:16"))->conv != ((types__Type*)0)) && ((rt_nonnull(origin, "src/memory.sabk:243:39"))->conv == (rt_nonnull((rt_nonnull(x, "src/memory.sabk:243:49"))->c, "src/memory.sabk:243:51"))->any_type))) {
-    return fmt__tformat(ctx, ((slice__u8){(u8*)"the copy of this value made for an `Any` only lives%", 52}), ((slice__prelude__Any){(items__4419[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4419), 1}));
+    return fmt__tformat(ctx, ((slice__u8){(u8*)"the copy of this value made for an `Any` only lives%", 52}), ((slice__prelude__Any){(items__4423[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4423), 1}));
   }
   if (((((rt_nonnull(origin, "src/memory.sabk:245:16"))->conv != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(origin, "src/memory.sabk:245:39"))->conv, "src/memory.sabk:245:44"))->kind == ((types__TypeKind)8LL))) && ((rt_nonnull((rt_nonnull(origin, "src/memory.sabk:245:69"))->ty, "src/memory.sabk:245:72"))->kind == ((types__TypeKind)7LL)))) {
     if ((!generics__is_place(ctx, origin))) {
-      return fmt__tformat(ctx, ((slice__u8){(u8*)"this array, used as a slice, is a copy that only lives%; to keep its elements, allocate a copy: `clone_slice(...)` (std/mem)", 124}), ((slice__prelude__Any){(items__4420[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4420), 1}));
+      return fmt__tformat(ctx, ((slice__u8){(u8*)"this array, used as a slice, is a copy that only lives%; to keep its elements, allocate a copy: `clone_slice(...)` (std/mem)", 124}), ((slice__prelude__Any){(items__4424[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4424), 1}));
     }
-    slice__u8 what = ((((rt_nonnull(check__ungroup(ctx, origin), "src/memory.sabk:249:40"))->kind).tag == ((ast__NodeKind__Tag)34LL)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, used as a slice here, which", 47}), ((slice__prelude__Any){(items__4421[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, origin)}, .info = (&ti__1)}), items__4421), 1})) : fmt__tformat(ctx, ((slice__u8){(u8*)"this array is part of the local %, which", 40}), ((slice__prelude__Any){(items__4422[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, origin)}, .info = (&ti__1)}), items__4422), 1})));
-    return fmt__tformat(ctx, ((slice__u8){(u8*)"% only lives%; to keep its elements, copy them: `clone_slice(...)` (std/mem)", 76}), ((slice__prelude__Any){(items__4423[0] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4423[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4423), 2}));
+    slice__u8 what = ((((rt_nonnull(check__ungroup(ctx, origin), "src/memory.sabk:249:40"))->kind).tag == ((ast__NodeKind__Tag)34LL)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, used as a slice here, which", 47}), ((slice__prelude__Any){(items__4425[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, origin)}, .info = (&ti__1)}), items__4425), 1})) : fmt__tformat(ctx, ((slice__u8){(u8*)"this array is part of the local %, which", 40}), ((slice__prelude__Any){(items__4426[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, origin)}, .info = (&ti__1)}), items__4426), 1})));
+    return fmt__tformat(ctx, ((slice__u8){(u8*)"% only lives%; to keep its elements, copy them: `clone_slice(...)` (std/mem)", 76}), ((slice__prelude__Any){(items__4427[0] = ((prelude__Any){.value = (slice__u8[1]){what}, .info = (&ti__1)}), items__4427[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4427), 2}));
   }
   {
-    ast__NodeKind switch__4424 = (rt_nonnull(origin, "src/memory.sabk:254:20"))->kind;
-    switch (switch__4424.tag) {
+    ast__NodeKind switch__4428 = (rt_nonnull(origin, "src/memory.sabk:254:20"))->kind;
+    switch (switch__4428.tag) {
     case ((ast__NodeKind__Tag)42LL):
     {
-      ast__Node* operand = switch__4424.payload.Unary.operand;
-      return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local, which only lives%; to keep the value, allocate it: `new(T)` or `new(value)`", 89}), ((slice__prelude__Any){(items__4425[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, operand)}, .info = (&ti__1)}), items__4425[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4425), 2}));
+      ast__Node* operand = switch__4428.payload.Unary.operand;
+      return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local, which only lives%; to keep the value, allocate it: `new(T)` or `new(value)`", 89}), ((slice__prelude__Any){(items__4429[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, operand)}, .info = (&ti__1)}), items__4429[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4429), 2}));
     }
     break;
     case ((ast__NodeKind__Tag)49LL):
     {
-      ast__Node* object = switch__4424.payload.Slice.object;
-      return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, which only lives%; to keep its elements, copy them: `clone_slice(...)` (std/mem)", 100}), ((slice__prelude__Any){(items__4426[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, object)}, .info = (&ti__1)}), items__4426[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4426), 2}));
+      ast__Node* object = switch__4428.payload.Slice.object;
+      return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, which only lives%; to keep its elements, copy them: `clone_slice(...)` (std/mem)", 100}), ((slice__prelude__Any){(items__4430[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, object)}, .info = (&ti__1)}), items__4430[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4430), 2}));
     }
     break;
     case ((ast__NodeKind__Tag)47LL):
     {
-      ast__Node* object = switch__4424.payload.Member.object;
-      return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, which only lives%; to keep its elements, copy them: `clone_slice(...)` (std/mem)", 100}), ((slice__prelude__Any){(items__4427[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, object)}, .info = (&ti__1)}), items__4427[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4427), 2}));
+      ast__Node* object = switch__4428.payload.Member.object;
+      return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, which only lives%; to keep its elements, copy them: `clone_slice(...)` (std/mem)", 100}), ((slice__prelude__Any){(items__4431[0] = ((prelude__Any){.value = (slice__u8[1]){memory__local_name(ctx, object)}, .info = (&ti__1)}), items__4431[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4431), 2}));
     }
     break;
     default:
     {
-      return fmt__tformat(ctx, ((slice__u8){(u8*)"this slice literal's elements only live%; to keep them, allocate a copy: `clone_slice(...)` (std/mem)", 101}), ((slice__prelude__Any){(items__4428[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4428), 1}));
+      return fmt__tformat(ctx, ((slice__u8){(u8*)"this slice literal's elements only live%; to keep them, allocate a copy: `clone_slice(...)` (std/mem)", 101}), ((slice__prelude__Any){(items__4432[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4432), 1}));
     }
     break;
     }
@@ -32337,28 +32446,28 @@ static slice__u8 memory__explain_escape(prelude__Context *ctx, memory__Escapes* 
 }
 
 static void memory__report_escape(prelude__Context *ctx, memory__Escapes* x, ast__Node* at, ast__Node* origin, slice__u8 action, slice__u8 place) {
-  prelude__Any items__4429[1];
-  prelude__Any items__4432[3];
-  slice__u8 name = fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4429[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((rt_nonnull(x, "src/memory.sabk:273:33"))->fun, "src/memory.sabk:273:37"))->tok).text}, .info = (&ti__1)}), items__4429), 1}));
-  ({ check__Checker* v__4430 = (rt_nonnull(x, "src/memory.sabk:274:13"))->c; token__Token v__4431 = (rt_nonnull(at, "src/memory.sabk:274:19"))->tok; slice__u8 v__4433 = fmt__tformat(ctx, ((slice__u8){(u8*)"this % memory that's gone once % returns%", 41}), ((slice__prelude__Any){(items__4432[0] = ((prelude__Any){.value = (slice__u8[1]){action}, .info = (&ti__1)}), items__4432[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4432[2] = ((prelude__Any){.value = (slice__u8[1]){place}, .info = (&ti__1)}), items__4432), 3})); check__error(ctx, v__4430, v__4431, v__4433); });
-  ({ check__Checker* v__4434 = (rt_nonnull(x, "src/memory.sabk:275:12"))->c; token__Token v__4435 = (rt_nonnull(origin, "src/memory.sabk:275:22"))->tok; slice__u8 v__4436 = memory__explain_escape(ctx, x, origin, name); check__note(ctx, v__4434, v__4435, v__4436); });
+  prelude__Any items__4433[1];
+  prelude__Any items__4436[3];
+  slice__u8 name = fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4433[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((rt_nonnull(x, "src/memory.sabk:273:33"))->fun, "src/memory.sabk:273:37"))->tok).text}, .info = (&ti__1)}), items__4433), 1}));
+  ({ check__Checker* v__4434 = (rt_nonnull(x, "src/memory.sabk:274:13"))->c; token__Token v__4435 = (rt_nonnull(at, "src/memory.sabk:274:19"))->tok; slice__u8 v__4437 = fmt__tformat(ctx, ((slice__u8){(u8*)"this % memory that's gone once % returns%", 41}), ((slice__prelude__Any){(items__4436[0] = ((prelude__Any){.value = (slice__u8[1]){action}, .info = (&ti__1)}), items__4436[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4436[2] = ((prelude__Any){.value = (slice__u8[1]){place}, .info = (&ti__1)}), items__4436), 3})); check__error(ctx, v__4434, v__4435, v__4437); });
+  ({ check__Checker* v__4438 = (rt_nonnull(x, "src/memory.sabk:275:12"))->c; token__Token v__4439 = (rt_nonnull(origin, "src/memory.sabk:275:22"))->tok; slice__u8 v__4440 = memory__explain_escape(ctx, x, origin, name); check__note(ctx, v__4438, v__4439, v__4440); });
 }
 
 static void memory__stored_escape(prelude__Context *ctx, memory__Escapes* x, ast__Node* target, ast__Node* value) {
-  prelude__Any items__4440[1];
-  prelude__Any items__4445[1];
+  prelude__Any items__4444[1];
+  prelude__Any items__4449[1];
   ast__Node* origin = memory__into_frame(ctx, x, value);
   if ((origin == ((ast__Node*)0))) {
     return;
   }
   ast__Node* r = memory__root(ctx, target);
   if (((r != ((ast__Node*)0)) && ((rt_nonnull(r, "src/memory.sabk:284:24"))->owner != ((module__Module*)0)))) {
-    ({ memory__Escapes* v__4437 = x; ast__Node* v__4438 = value; ast__Node* v__4439 = origin; slice__u8 v__4441 = fmt__tformat(ctx, ((slice__u8){(u8*)" into the global `%`", 20}), ((slice__prelude__Any){(items__4440[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:285:85"))->tok).text}, .info = (&ti__1)}), items__4440), 1})); memory__report_escape(ctx, v__4437, v__4438, v__4439, ((slice__u8){(u8*)"stores", 6}), v__4441); });
+    ({ memory__Escapes* v__4441 = x; ast__Node* v__4442 = value; ast__Node* v__4443 = origin; slice__u8 v__4445 = fmt__tformat(ctx, ((slice__u8){(u8*)" into the global `%`", 20}), ((slice__prelude__Any){(items__4444[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:285:85"))->tok).text}, .info = (&ti__1)}), items__4444), 1})); memory__report_escape(ctx, v__4441, v__4442, v__4443, ((slice__u8){(u8*)"stores", 6}), v__4445); });
     return;
   }
   ast__Node* p = memory__param_target(ctx, target);
   if ((p != ((ast__Node*)0))) {
-    ({ memory__Escapes* v__4442 = x; ast__Node* v__4443 = value; ast__Node* v__4444 = origin; slice__u8 v__4446 = fmt__tformat(ctx, ((slice__u8){(u8*)" into what the parameter `%` points at, which outlives it", 57}), ((slice__prelude__Any){(items__4445[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(p, "src/memory.sabk:291:94"))->tok).text}, .info = (&ti__1)}), items__4445), 1})); memory__report_escape(ctx, v__4442, v__4443, v__4444, ((slice__u8){(u8*)"stores", 6}), v__4446); });
+    ({ memory__Escapes* v__4446 = x; ast__Node* v__4447 = value; ast__Node* v__4448 = origin; slice__u8 v__4450 = fmt__tformat(ctx, ((slice__u8){(u8*)" into what the parameter `%` points at, which outlives it", 57}), ((slice__prelude__Any){(items__4449[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(p, "src/memory.sabk:291:94"))->tok).text}, .info = (&ti__1)}), items__4449), 1})); memory__report_escape(ctx, v__4446, v__4447, v__4448, ((slice__u8){(u8*)"stores", 6}), v__4450); });
   }
 }
 
@@ -32367,17 +32476,17 @@ static void memory__find_escapes(prelude__Context *ctx, memory__Escapes* x, ast_
     return;
   }
   {
-    ast__NodeKind switch__4447 = (rt_nonnull(n, "src/memory.sabk:297:15"))->kind;
-    switch (switch__4447.tag) {
+    ast__NodeKind switch__4451 = (rt_nonnull(n, "src/memory.sabk:297:15"))->kind;
+    switch (switch__4451.tag) {
     case ((ast__NodeKind__Tag)24LL):
     {
-      ({ memory__Escapes* v__4448 = x; ast__Node* v__4449 = check__static_if_branch(ctx, n); memory__find_escapes(ctx, v__4448, v__4449); });
+      ({ memory__Escapes* v__4452 = x; ast__Node* v__4453 = check__static_if_branch(ctx, n); memory__find_escapes(ctx, v__4452, v__4453); });
       return;
     }
     break;
     case ((ast__NodeKind__Tag)19LL):
     {
-      ast__Node* value = switch__4447.payload.Return.value;
+      ast__Node* value = switch__4451.payload.Return.value;
       if ((((rt_nonnull(n, "src/memory.sabk:302:15"))->decl == ((ast__Node*)0)) && (value != ((ast__Node*)0)))) {
         ast__Node* origin = memory__into_frame(ctx, x, value);
         if ((origin != ((ast__Node*)0))) {
@@ -32388,12 +32497,12 @@ static void memory__find_escapes(prelude__Context *ctx, memory__Escapes* x, ast_
     break;
     case ((ast__NodeKind__Tag)16LL):
     {
-      tuple__23 values__4450 = memory__each_assignment(ctx, n);
-      grow__ptr_ast__Node targets = values__4450._0;
-      grow__ptr_ast__Node values = values__4450._1;
+      tuple__23 values__4454 = memory__each_assignment(ctx, n);
+      grow__ptr_ast__Node targets = values__4454._0;
+      grow__ptr_ast__Node values = values__4454._1;
       {
-        isize end__4451 = (targets).len;
-        for (isize i = ((isize)0LL); i < end__4451; i++) {
+        isize end__4455 = (targets).len;
+        for (isize i = ((isize)0LL); i < end__4455; i++) {
           memory__stored_escape(ctx, x, (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(targets), i, "src/memory.sabk:310:37")), (*slice__ptr_ast__Node__at(grow__ptr_ast__Node__view(values), i, "src/memory.sabk:310:48")));
         }
       }
@@ -32406,9 +32515,9 @@ static void memory__find_escapes(prelude__Context *ctx, memory__Escapes* x, ast_
     }
   }
   {
-    grow__ptr_ast__Node seq__4452 = ast__code_children(ctx, n);
-    for (isize i__4453 = 0; i__4453 < seq__4452.len; i__4453++) {
-      ast__Node* child = seq__4452.ptr[i__4453];
+    grow__ptr_ast__Node seq__4456 = ast__code_children(ctx, n);
+    for (isize i__4457 = 0; i__4457 < seq__4456.len; i__4457++) {
+      ast__Node* child = seq__4456.ptr[i__4457];
       memory__find_escapes(ctx, x, child);
     }
   }
@@ -32418,9 +32527,9 @@ static void memory__check_traps(prelude__Context *ctx, check__Checker* c, ast__N
   memory__Traps t = ((memory__Traps){.c = c, .fun = fun});
   memory__push(ctx, (&t), false);
   {
-    slice__ptr_ast__Node seq__4454 = check__block_list(ctx, check__fn_body(ctx, fun));
-    for (isize i__4455 = 0; i__4455 < seq__4454.len; i__4455++) {
-      ast__Node* s = seq__4454.ptr[i__4455];
+    slice__ptr_ast__Node seq__4458 = check__block_list(ctx, check__fn_body(ctx, fun));
+    for (isize i__4459 = 0; i__4459 < seq__4458.len; i__4459++) {
+      ast__Node* s = seq__4458.ptr[i__4459];
       memory__visit(ctx, (&t), s);
     }
   }
@@ -32453,18 +32562,18 @@ static void memory__pop(prelude__Context *ctx, memory__Traps* t) {
   grow__ptr_ast__Node ended = {0};
   (ended).allocator = ((*ctx)).temp_allocator;
   {
-    grow__map__MapEntry__ptr_ast__Node__memory__Short seq__4456 = ((rt_nonnull(t, "src/memory.sabk:409:17"))->held).entries;
-    for (isize i__4457 = 0; i__4457 < seq__4456.len; i__4457++) {
-      map__MapEntry__ptr_ast__Node__memory__Short e = seq__4456.ptr[i__4457];
+    grow__map__MapEntry__ptr_ast__Node__memory__Short seq__4460 = ((rt_nonnull(t, "src/memory.sabk:409:17"))->held).entries;
+    for (isize i__4461 = 0; i__4461 < seq__4460.len; i__4461++) {
+      map__MapEntry__ptr_ast__Node__memory__Short e = seq__4460.ptr[i__4461];
       if ((((e).value).scope >= gone)) {
         array__array_add__ptr_ast__Node(ctx, (&ended), (e).key);
       }
     }
   }
   {
-    grow__ptr_ast__Node seq__4458 = ended;
-    for (isize i__4459 = 0; i__4459 < seq__4458.len; i__4459++) {
-      ast__Node* k = seq__4458.ptr[i__4459];
+    grow__ptr_ast__Node seq__4462 = ended;
+    for (isize i__4463 = 0; i__4463 < seq__4462.len; i__4463++) {
+      ast__Node* k = seq__4462.ptr[i__4463];
       map__map_remove__ptr_ast__Node__memory__Short(ctx, (&(rt_nonnull(t, "src/memory.sabk:413:23"))->held), k);
     }
   }
@@ -32475,12 +32584,12 @@ static ast__Node* memory__bare(prelude__Context *ctx, ast__Node* n) {
   while ((e != ((ast__Node*)0))) {
     {
       ast__Node* inner;
-      if (({ ast__NodeKind is__4460 = (rt_nonnull(e, "src/memory.sabk:419:15"))->kind; is__4460.tag == ((ast__NodeKind__Tag)45LL) ? (inner = is__4460.payload.Grouped.inner, 1) : 0; })) {
+      if (({ ast__NodeKind is__4464 = (rt_nonnull(e, "src/memory.sabk:419:15"))->kind; is__4464.tag == ((ast__NodeKind__Tag)45LL) ? (inner = is__4464.payload.Grouped.inner, 1) : 0; })) {
         e = inner;
       } else {
         {
           ast__Node* value;
-          if (({ ast__NodeKind is__4461 = (rt_nonnull(e, "src/memory.sabk:421:20"))->kind; is__4461.tag == ((ast__NodeKind__Tag)50LL) ? (value = is__4461.payload.Cast.value, 1) : 0; })) {
+          if (({ ast__NodeKind is__4465 = (rt_nonnull(e, "src/memory.sabk:421:20"))->kind; is__4465.tag == ((ast__NodeKind__Tag)50LL) ? (value = is__4465.payload.Cast.value, 1) : 0; })) {
             e = value;
           } else {
             break;
@@ -32500,13 +32609,13 @@ static i32 memory__decl_scope(prelude__Context *ctx, memory__Traps* t, ast__Node
     return ((i32)-1LL);
   }
   return ({
-    tuple__28 result__4462 = map__map_get__ptr_ast__Node__i32(ctx, (&(rt_nonnull(t, "src/memory.sabk:436:23"))->scope_of), d);
-    i32 value__4463;
-    if (!result__4462._1)
-      value__4463 = ((i32)2147483647LL);
+    tuple__28 result__4466 = map__map_get__ptr_ast__Node__i32(ctx, (&(rt_nonnull(t, "src/memory.sabk:436:23"))->scope_of), d);
+    i32 value__4467;
+    if (!result__4466._1)
+      value__4467 = ((i32)2147483647LL);
     else
-      value__4463 = result__4462._0;
-    value__4463;
+      value__4467 = result__4466._0;
+    value__4467;
   });
 }
 
@@ -32518,9 +32627,9 @@ static memory__Short memory__of_local(prelude__Context *ctx, memory__Traps* t, a
   if ((((rt_nonnull(r, "src/memory.sabk:443:11"))->kind).tag == ((ast__NodeKind__Tag)3LL))) {
     return ((memory__Short){.origin = e, .scope = ((i32)0LL)});
   }
-  tuple__28 values__4464 = map__map_get__ptr_ast__Node__i32(ctx, (&(rt_nonnull(t, "src/memory.sabk:445:35"))->scope_of), r);
-  i32 scope = values__4464._0;
-  bool found = values__4464._1;
+  tuple__28 values__4468 = map__map_get__ptr_ast__Node__i32(ctx, (&(rt_nonnull(t, "src/memory.sabk:445:35"))->scope_of), r);
+  i32 scope = values__4468._0;
+  bool found = values__4468._1;
   if ((!found)) {
     return none;
   }
@@ -32532,8 +32641,8 @@ static bool memory__is_fixed(prelude__Context *ctx, ast__Node* n) {
     return true;
   }
   {
-    ast__NodeKind__Tag switch__4465 = ((rt_nonnull(n, "src/memory.sabk:455:15"))->kind).tag;
-    switch (switch__4465) {
+    ast__NodeKind__Tag switch__4469 = ((rt_nonnull(n, "src/memory.sabk:455:15"))->kind).tag;
+    switch (switch__4469) {
     case ((ast__NodeKind__Tag)41LL):
     case ((ast__NodeKind__Tag)39LL):
     case ((ast__NodeKind__Tag)52LL):
@@ -32557,53 +32666,53 @@ static memory__Short memory__short_of(prelude__Context *ctx, memory__Traps* t, a
     return none;
   }
   if ((((rt_nonnull(e, "src/memory.sabk:465:11"))->conv != ((types__Type*)0)) && ((rt_nonnull(e, "src/memory.sabk:465:29"))->conv == (rt_nonnull((rt_nonnull(t, "src/memory.sabk:465:39"))->c, "src/memory.sabk:465:41"))->any_type))) {
-    return ({ ast__Node* v__4466 = e; i32 v__4467 = memory__current(ctx, t); ((memory__Short){.origin = v__4466, .scope = v__4467}); });
+    return ({ ast__Node* v__4470 = e; i32 v__4471 = memory__current(ctx, t); ((memory__Short){.origin = v__4470, .scope = v__4471}); });
   }
   if (((((rt_nonnull(e, "src/memory.sabk:467:11"))->conv != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(e, "src/memory.sabk:467:29"))->conv, "src/memory.sabk:467:34"))->kind == ((types__TypeKind)8LL))) && ((rt_nonnull((rt_nonnull(e, "src/memory.sabk:467:54"))->ty, "src/memory.sabk:467:57"))->kind == ((types__TypeKind)7LL)))) {
     if (generics__is_place(ctx, e)) {
-      return ({ memory__Traps* v__4468 = t; ast__Node* v__4469 = e; ast__Node* v__4470 = memory__root(ctx, e); memory__of_local(ctx, v__4468, v__4469, v__4470); });
+      return ({ memory__Traps* v__4472 = t; ast__Node* v__4473 = e; ast__Node* v__4474 = memory__root(ctx, e); memory__of_local(ctx, v__4472, v__4473, v__4474); });
     }
-    return ({ ast__Node* v__4471 = e; i32 v__4472 = memory__current(ctx, t); ((memory__Short){.origin = v__4471, .scope = v__4472}); });
+    return ({ ast__Node* v__4475 = e; i32 v__4476 = memory__current(ctx, t); ((memory__Short){.origin = v__4475, .scope = v__4476}); });
   }
   {
-    ast__NodeKind switch__4473 = (rt_nonnull(e, "src/memory.sabk:472:15"))->kind;
+    ast__NodeKind switch__4477 = (rt_nonnull(e, "src/memory.sabk:472:15"))->kind;
     switch (0) { default:
-    if ((switch__4473.tag == ((ast__NodeKind__Tag)42LL) && (switch__4473.payload.Unary.op == ((ast__UnaryOp)3LL)))) {
-      ast__Node* operand = switch__4473.payload.Unary.operand;
-      return ({ memory__Traps* v__4474 = t; ast__Node* v__4475 = e; ast__Node* v__4476 = memory__root(ctx, operand); memory__of_local(ctx, v__4474, v__4475, v__4476); });
+    if ((switch__4477.tag == ((ast__NodeKind__Tag)42LL) && (switch__4477.payload.Unary.op == ((ast__UnaryOp)3LL)))) {
+      ast__Node* operand = switch__4477.payload.Unary.operand;
+      return ({ memory__Traps* v__4478 = t; ast__Node* v__4479 = e; ast__Node* v__4480 = memory__root(ctx, operand); memory__of_local(ctx, v__4478, v__4479, v__4480); });
       break;
     }
-    if ((switch__4473.tag == ((ast__NodeKind__Tag)49LL))) {
-      ast__Node* object = switch__4473.payload.Slice.object;
+    if ((switch__4477.tag == ((ast__NodeKind__Tag)49LL))) {
+      ast__Node* object = switch__4477.payload.Slice.object;
       if ((((rt_nonnull(object, "src/memory.sabk:476:20"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:476:41"))->ty, "src/memory.sabk:476:44"))->kind == ((types__TypeKind)7LL)))) {
-        return ({ memory__Traps* v__4477 = t; ast__Node* v__4478 = e; ast__Node* v__4479 = memory__root(ctx, object); memory__of_local(ctx, v__4477, v__4478, v__4479); });
+        return ({ memory__Traps* v__4481 = t; ast__Node* v__4482 = e; ast__Node* v__4483 = memory__root(ctx, object); memory__of_local(ctx, v__4481, v__4482, v__4483); });
       }
       return memory__short_of(ctx, t, object);
       break;
     }
-    if ((switch__4473.tag == ((ast__NodeKind__Tag)60LL))) {
-      slice__ptr_ast__Node items = switch__4473.payload.ArrayLiteral.items;
+    if ((switch__4477.tag == ((ast__NodeKind__Tag)60LL))) {
+      slice__ptr_ast__Node items = switch__4477.payload.ArrayLiteral.items;
       if ((((rt_nonnull((rt_nonnull(e, "src/memory.sabk:480:15"))->ty, "src/memory.sabk:480:18"))->kind != ((types__TypeKind)8LL)) || ((items).len == ((isize)0LL)))) {
         return none;
       }
       bool changes = false;
       {
-        slice__ptr_ast__Node seq__4480 = items;
-        for (isize i__4481 = 0; i__4481 < seq__4480.len; i__4481++) {
-          ast__Node* item = seq__4480.ptr[i__4481];
-          changes = (changes || (!memory__is_fixed(ctx, item)));
-        }
-      }
-      return ({ ast__Node* v__4482 = e; i32 v__4483 = (changes ? memory__innermost_loop(ctx, t) : ((i32)0LL)); ((memory__Short){.origin = v__4482, .scope = v__4483}); });
-      break;
-    }
-    if ((switch__4473.tag == ((ast__NodeKind__Tag)58LL))) {
-      slice__ptr_ast__Node items = switch__4473.payload.StructInit.items;
-      {
         slice__ptr_ast__Node seq__4484 = items;
         for (isize i__4485 = 0; i__4485 < seq__4484.len; i__4485++) {
           ast__Node* item = seq__4484.ptr[i__4485];
-          memory__Short s = ({ memory__Traps* v__4486 = t; ast__Node* v__4487 = check__item_value(ctx, item); memory__short_of(ctx, v__4486, v__4487); });
+          changes = (changes || (!memory__is_fixed(ctx, item)));
+        }
+      }
+      return ({ ast__Node* v__4486 = e; i32 v__4487 = (changes ? memory__innermost_loop(ctx, t) : ((i32)0LL)); ((memory__Short){.origin = v__4486, .scope = v__4487}); });
+      break;
+    }
+    if ((switch__4477.tag == ((ast__NodeKind__Tag)58LL))) {
+      slice__ptr_ast__Node items = switch__4477.payload.StructInit.items;
+      {
+        slice__ptr_ast__Node seq__4488 = items;
+        for (isize i__4489 = 0; i__4489 < seq__4488.len; i__4489++) {
+          ast__Node* item = seq__4488.ptr[i__4489];
+          memory__Short s = ({ memory__Traps* v__4490 = t; ast__Node* v__4491 = check__item_value(ctx, item); memory__short_of(ctx, v__4490, v__4491); });
           if (((s).origin != ((ast__Node*)0))) {
             return s;
           }
@@ -32612,26 +32721,26 @@ static memory__Short memory__short_of(prelude__Context *ctx, memory__Traps* t, a
       return none;
       break;
     }
-    if ((switch__4473.tag == ((ast__NodeKind__Tag)45LL)) || (switch__4473.tag == ((ast__NodeKind__Tag)50LL)) || (switch__4473.tag == ((ast__NodeKind__Tag)67LL))) {
-      return ({ memory__Traps* v__4488 = t; ast__Node* v__4489 = memory__first_part(ctx, e); memory__short_of(ctx, v__4488, v__4489); });
+    if ((switch__4477.tag == ((ast__NodeKind__Tag)45LL)) || (switch__4477.tag == ((ast__NodeKind__Tag)50LL)) || (switch__4477.tag == ((ast__NodeKind__Tag)67LL))) {
+      return ({ memory__Traps* v__4492 = t; ast__Node* v__4493 = memory__first_part(ctx, e); memory__short_of(ctx, v__4492, v__4493); });
       break;
     }
-    if ((switch__4473.tag == ((ast__NodeKind__Tag)34LL))) {
+    if ((switch__4477.tag == ((ast__NodeKind__Tag)34LL))) {
       return ({
-        tuple__33 result__4490 = map__map_get__ptr_ast__Node__memory__Short(ctx, (&(rt_nonnull(t, "src/memory.sabk:498:27"))->held), (rt_nonnull(e, "src/memory.sabk:498:35"))->decl);
-        memory__Short value__4491;
-        if (!result__4490._1)
-          value__4491 = none;
+        tuple__33 result__4494 = map__map_get__ptr_ast__Node__memory__Short(ctx, (&(rt_nonnull(t, "src/memory.sabk:498:27"))->held), (rt_nonnull(e, "src/memory.sabk:498:35"))->decl);
+        memory__Short value__4495;
+        if (!result__4494._1)
+          value__4495 = none;
         else
-          value__4491 = result__4490._0;
-        value__4491;
+          value__4495 = result__4494._0;
+        value__4495;
       });
       break;
     }
-    if ((switch__4473.tag == ((ast__NodeKind__Tag)47LL))) {
-      ast__Node* object = switch__4473.payload.Member.object;
-      if ((((((rt_nonnull(e, "src/memory.sabk:500:15"))->decl == ((ast__Node*)0)) && ({ slice__u8 a__4492 = ((rt_nonnull(e, "src/memory.sabk:500:33"))->tok).text, b__4493 = ((slice__u8){(u8*)"ptr", 3}); rt_bytes_equal(a__4492.ptr, a__4492.len, b__4493.ptr, b__4493.len); })) && ((rt_nonnull(object, "src/memory.sabk:500:61"))->ty != ((types__Type*)0))) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:500:82"))->ty, "src/memory.sabk:500:85"))->kind == ((types__TypeKind)7LL)))) {
-        return ({ memory__Traps* v__4494 = t; ast__Node* v__4495 = e; ast__Node* v__4496 = memory__root(ctx, object); memory__of_local(ctx, v__4494, v__4495, v__4496); });
+    if ((switch__4477.tag == ((ast__NodeKind__Tag)47LL))) {
+      ast__Node* object = switch__4477.payload.Member.object;
+      if ((((((rt_nonnull(e, "src/memory.sabk:500:15"))->decl == ((ast__Node*)0)) && ({ slice__u8 a__4496 = ((rt_nonnull(e, "src/memory.sabk:500:33"))->tok).text, b__4497 = ((slice__u8){(u8*)"ptr", 3}); rt_bytes_equal(a__4496.ptr, a__4496.len, b__4497.ptr, b__4497.len); })) && ((rt_nonnull(object, "src/memory.sabk:500:61"))->ty != ((types__Type*)0))) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:500:82"))->ty, "src/memory.sabk:500:85"))->kind == ((types__TypeKind)7LL)))) {
+        return ({ memory__Traps* v__4498 = t; ast__Node* v__4499 = e; ast__Node* v__4500 = memory__root(ctx, object); memory__of_local(ctx, v__4498, v__4499, v__4500); });
       }
       return none;
       break;
@@ -32646,8 +32755,8 @@ static memory__Short memory__short_of(prelude__Context *ctx, memory__Traps* t, a
 static ast__Node* memory__pointer_base(prelude__Context *ctx, ast__Node* n) {
   ast__Node* e = memory__bare(ctx, n);
   {
-    ast__NodeKind switch__4497 = (rt_nonnull(e, "src/memory.sabk:511:15"))->kind;
-    switch (switch__4497.tag) {
+    ast__NodeKind switch__4501 = (rt_nonnull(e, "src/memory.sabk:511:15"))->kind;
+    switch (switch__4501.tag) {
     case ((ast__NodeKind__Tag)34LL):
     {
       return (rt_nonnull(e, "src/memory.sabk:512:32"))->decl;
@@ -32655,25 +32764,25 @@ static ast__Node* memory__pointer_base(prelude__Context *ctx, ast__Node* n) {
     break;
     case ((ast__NodeKind__Tag)44LL):
     {
-      ast__Node* pointer = switch__4497.payload.Deref.pointer;
+      ast__Node* pointer = switch__4501.payload.Deref.pointer;
       return memory__pointer_base(ctx, pointer);
     }
     break;
     case ((ast__NodeKind__Tag)47LL):
     {
-      ast__Node* object = switch__4497.payload.Member.object;
+      ast__Node* object = switch__4501.payload.Member.object;
       return (((rt_nonnull(e, "src/memory.sabk:514:40"))->decl != ((ast__Node*)0)) ? ((ast__Node*)0) : memory__pointer_base(ctx, object));
     }
     break;
     case ((ast__NodeKind__Tag)48LL):
     {
-      ast__Node* object = switch__4497.payload.Index.object;
+      ast__Node* object = switch__4501.payload.Index.object;
       return memory__pointer_base(ctx, object);
     }
     break;
     case ((ast__NodeKind__Tag)68LL):
     {
-      ast__Node* object = switch__4497.payload.VariantAccess.object;
+      ast__Node* object = switch__4501.payload.VariantAccess.object;
       return memory__pointer_base(ctx, object);
     }
     break;
@@ -32691,7 +32800,7 @@ static i32 memory__place_scope(prelude__Context *ctx, memory__Traps* t, ast__Nod
   if ((r != ((ast__Node*)0))) {
     return memory__decl_scope(ctx, t, r);
   }
-  return ({ memory__Traps* v__4498 = t; ast__Node* v__4499 = memory__pointer_base(ctx, place); memory__decl_scope(ctx, v__4498, v__4499); });
+  return ({ memory__Traps* v__4502 = t; ast__Node* v__4503 = memory__pointer_base(ctx, place); memory__decl_scope(ctx, v__4502, v__4503); });
 }
 
 static bool memory__keeps(prelude__Context *ctx, types__Type* t, types__Type* v, map__Map__ptr_types__Type__bool* seen) {
@@ -32703,8 +32812,8 @@ static bool memory__keeps(prelude__Context *ctx, types__Type* t, types__Type* v,
   }
   map__map_put__ptr_types__Type__bool(ctx, seen, t, true);
   {
-    types__TypeKind switch__4500 = (rt_nonnull(t, "src/memory.sabk:537:15"))->kind;
-    switch (switch__4500) {
+    types__TypeKind switch__4504 = (rt_nonnull(t, "src/memory.sabk:537:15"))->kind;
+    switch (switch__4504) {
     case ((types__TypeKind)7LL):
     case ((types__TypeKind)8LL):
     case ((types__TypeKind)9LL):
@@ -32716,9 +32825,9 @@ static bool memory__keeps(prelude__Context *ctx, types__Type* t, types__Type* v,
     case ((types__TypeKind)12LL):
     {
       {
-        grow__types__Field seq__4501 = (rt_nonnull(t, "src/memory.sabk:541:21"))->fields;
-        for (isize i__4502 = 0; i__4502 < seq__4501.len; i__4502++) {
-          types__Field f = seq__4501.ptr[i__4502];
+        grow__types__Field seq__4505 = (rt_nonnull(t, "src/memory.sabk:541:21"))->fields;
+        for (isize i__4506 = 0; i__4506 < seq__4505.len; i__4506++) {
+          types__Field f = seq__4505.ptr[i__4506];
           if (memory__keeps(ctx, (f).ty, v, seen)) {
             return true;
           }
@@ -32737,26 +32846,26 @@ static bool memory__keeps(prelude__Context *ctx, types__Type* t, types__Type* v,
 }
 
 static slice__u8 memory__name_of(prelude__Context *ctx, ast__Node* origin) {
-  prelude__Any items__4504[1];
+  prelude__Any items__4508[1];
   ast__Node* r = ((ast__Node*)0);
   {
-    ast__NodeKind switch__4503 = (rt_nonnull(origin, "src/memory.sabk:552:20"))->kind;
-    switch (switch__4503.tag) {
+    ast__NodeKind switch__4507 = (rt_nonnull(origin, "src/memory.sabk:552:20"))->kind;
+    switch (switch__4507.tag) {
     case ((ast__NodeKind__Tag)42LL):
     {
-      ast__Node* operand = switch__4503.payload.Unary.operand;
+      ast__Node* operand = switch__4507.payload.Unary.operand;
       r = memory__root(ctx, operand);
     }
     break;
     case ((ast__NodeKind__Tag)49LL):
     {
-      ast__Node* object = switch__4503.payload.Slice.object;
+      ast__Node* object = switch__4507.payload.Slice.object;
       r = memory__root(ctx, object);
     }
     break;
     case ((ast__NodeKind__Tag)47LL):
     {
-      ast__Node* object = switch__4503.payload.Member.object;
+      ast__Node* object = switch__4507.payload.Member.object;
       r = memory__root(ctx, object);
     }
     break;
@@ -32767,40 +32876,40 @@ static slice__u8 memory__name_of(prelude__Context *ctx, ast__Node* origin) {
     break;
     }
   }
-  return ((r != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4504[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:558:44"))->tok).text}, .info = (&ti__1)}), items__4504), 1})) : ((slice__u8){(u8*)"this array", 10}));
+  return ((r != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4508[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:558:44"))->tok).text}, .info = (&ti__1)}), items__4508), 1})) : ((slice__u8){(u8*)"this array", 10}));
 }
 
 static slice__u8 memory__explain(prelude__Context *ctx, memory__Traps* t, memory__Short s) {
-  prelude__Any items__4505[1];
-  prelude__Any items__4506[1];
-  prelude__Any items__4507[1];
-  prelude__Any items__4509[2];
+  prelude__Any items__4509[1];
   prelude__Any items__4510[1];
-  prelude__Any items__4511[2];
+  prelude__Any items__4511[1];
+  prelude__Any items__4513[2];
+  prelude__Any items__4514[1];
+  prelude__Any items__4515[2];
   ast__Node* o = (s).origin;
   bool pass = (((s).scope > ((i32)0LL)) && (*slice__bool__at(grow__bool__view((rt_nonnull(t, "src/memory.sabk:564:33"))->loop_scopes), (s).scope, "src/memory.sabk:564:44")));
-  slice__u8 until = (((s).scope == ((i32)0LL)) ? fmt__tformat(ctx, ((slice__u8){(u8*)" until `%` returns", 18}), ((slice__prelude__Any){(items__4505[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((rt_nonnull(t, "src/memory.sabk:565:67"))->fun, "src/memory.sabk:565:71"))->tok).text}, .info = (&ti__1)}), items__4505), 1})) : (pass ? ((slice__u8){(u8*)" for one pass of the loop", 25}) : ((slice__u8){(u8*)" until the end of its block", 27})));
+  slice__u8 until = (((s).scope == ((i32)0LL)) ? fmt__tformat(ctx, ((slice__u8){(u8*)" until `%` returns", 18}), ((slice__prelude__Any){(items__4509[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((rt_nonnull(t, "src/memory.sabk:565:67"))->fun, "src/memory.sabk:565:71"))->tok).text}, .info = (&ti__1)}), items__4509), 1})) : (pass ? ((slice__u8){(u8*)" for one pass of the loop", 25}) : ((slice__u8){(u8*)" until the end of its block", 27})));
   if ((((rt_nonnull(o, "src/memory.sabk:568:11"))->conv != ((types__Type*)0)) && ((rt_nonnull(o, "src/memory.sabk:568:29"))->conv == (rt_nonnull((rt_nonnull(t, "src/memory.sabk:568:39"))->c, "src/memory.sabk:568:41"))->any_type))) {
-    return fmt__tformat(ctx, ((slice__u8){(u8*)"the copy made for this `Any` only lives%", 40}), ((slice__prelude__Any){(items__4506[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4506), 1}));
+    return fmt__tformat(ctx, ((slice__u8){(u8*)"the copy made for this `Any` only lives%", 40}), ((slice__prelude__Any){(items__4510[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4510), 1}));
   }
   if ((((rt_nonnull(o, "src/memory.sabk:570:11"))->kind).tag == ((ast__NodeKind__Tag)60LL))) {
     if (((s).scope > ((i32)0LL))) {
       return ((slice__u8){(u8*)"this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem)", 173});
     }
-    return fmt__tformat(ctx, ((slice__u8){(u8*)"this slice literal's elements only live%; keep a copy: `clone_slice(...)` (std/mem)", 83}), ((slice__prelude__Any){(items__4507[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4507), 1}));
+    return fmt__tformat(ctx, ((slice__u8){(u8*)"this slice literal's elements only live%; keep a copy: `clone_slice(...)` (std/mem)", 83}), ((slice__prelude__Any){(items__4511[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4511), 1}));
   }
-  if (({ ast__NodeKind is__4508 = (rt_nonnull(o, "src/memory.sabk:575:11"))->kind; (is__4508.tag == ((ast__NodeKind__Tag)42LL) && (is__4508.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (1) : 0; })) {
-    return fmt__tformat(ctx, ((slice__u8){(u8*)"% only lives%; to keep the value, allocate it: `new(value)`", 59}), ((slice__prelude__Any){(items__4509[0] = ((prelude__Any){.value = (slice__u8[1]){memory__name_of(ctx, o)}, .info = (&ti__1)}), items__4509[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4509), 2}));
+  if (({ ast__NodeKind is__4512 = (rt_nonnull(o, "src/memory.sabk:575:11"))->kind; (is__4512.tag == ((ast__NodeKind__Tag)42LL) && (is__4512.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (1) : 0; })) {
+    return fmt__tformat(ctx, ((slice__u8){(u8*)"% only lives%; to keep the value, allocate it: `new(value)`", 59}), ((slice__prelude__Any){(items__4513[0] = ((prelude__Any){.value = (slice__u8[1]){memory__name_of(ctx, o)}, .info = (&ti__1)}), items__4513[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4513), 2}));
   }
   if ((((rt_nonnull(o, "src/memory.sabk:577:11"))->conv != ((types__Type*)0)) && (!generics__is_place(ctx, o)))) {
-    return fmt__tformat(ctx, ((slice__u8){(u8*)"this array, used as a slice, is a copy that only lives%; keep a copy: `clone_slice(...)` (std/mem)", 98}), ((slice__prelude__Any){(items__4510[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4510), 1}));
+    return fmt__tformat(ctx, ((slice__u8){(u8*)"this array, used as a slice, is a copy that only lives%; keep a copy: `clone_slice(...)` (std/mem)", 98}), ((slice__prelude__Any){(items__4514[0] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4514), 1}));
   }
-  return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, which only lives%; keep a copy of its elements: `clone_slice(...)` (std/mem)", 96}), ((slice__prelude__Any){(items__4511[0] = ((prelude__Any){.value = (slice__u8[1]){memory__name_of(ctx, o)}, .info = (&ti__1)}), items__4511[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4511), 2}));
+  return fmt__tformat(ctx, ((slice__u8){(u8*)"% is a local array, which only lives%; keep a copy of its elements: `clone_slice(...)` (std/mem)", 96}), ((slice__prelude__Any){(items__4515[0] = ((prelude__Any){.value = (slice__u8[1]){memory__name_of(ctx, o)}, .info = (&ti__1)}), items__4515[1] = ((prelude__Any){.value = (slice__u8[1]){until}, .info = (&ti__1)}), items__4515), 2}));
 }
 
 static void memory__stored(prelude__Context *ctx, memory__Traps* t, ast__Node* place, ast__Node* value) {
-  prelude__Any items__4512[1];
-  prelude__Any items__4515[2];
+  prelude__Any items__4516[1];
+  prelude__Any items__4519[2];
   memory__Short s = memory__short_of(ctx, t, value);
   if (((s).origin == ((ast__Node*)0))) {
     return;
@@ -32818,28 +32927,28 @@ static void memory__stored(prelude__Context *ctx, memory__Traps* t, ast__Node* p
   }
   ast__Node* r = memory__root(ctx, place);
   ast__Node* b = ((r != ((ast__Node*)0)) ? r : memory__pointer_base(ctx, place));
-  slice__u8 where = ((b != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4512[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(b, "src/memory.sabk:600:49"))->tok).text}, .info = (&ti__1)}), items__4512), 1})) : ((slice__u8){(u8*)"memory", 6}));
-  ({ check__Checker* v__4513 = (rt_nonnull(t, "src/memory.sabk:601:15"))->c; token__Token v__4514 = (rt_nonnull(value, "src/memory.sabk:601:24"))->tok; slice__u8 v__4516 = fmt__tformat(ctx, ((slice__u8){(u8*)"this is kept in %, which outlives it: %", 39}), ((slice__prelude__Any){(items__4515[0] = ((prelude__Any){.value = (slice__u8[1]){where}, .info = (&ti__1)}), items__4515[1] = ((prelude__Any){.value = (slice__u8[1]){memory__explain(ctx, t, s)}, .info = (&ti__1)}), items__4515), 2})); check__warning(ctx, v__4513, v__4514, v__4516); });
+  slice__u8 where = ((b != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4516[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(b, "src/memory.sabk:600:49"))->tok).text}, .info = (&ti__1)}), items__4516), 1})) : ((slice__u8){(u8*)"memory", 6}));
+  ({ check__Checker* v__4517 = (rt_nonnull(t, "src/memory.sabk:601:15"))->c; token__Token v__4518 = (rt_nonnull(value, "src/memory.sabk:601:24"))->tok; slice__u8 v__4520 = fmt__tformat(ctx, ((slice__u8){(u8*)"this is kept in %, which outlives it: %", 39}), ((slice__prelude__Any){(items__4519[0] = ((prelude__Any){.value = (slice__u8[1]){where}, .info = (&ti__1)}), items__4519[1] = ((prelude__Any){.value = (slice__u8[1]){memory__explain(ctx, t, s)}, .info = (&ti__1)}), items__4519), 2})); check__warning(ctx, v__4517, v__4518, v__4520); });
   memory__made_here(ctx, t, value, s);
 }
 
 static void memory__made_here(prelude__Context *ctx, memory__Traps* t, ast__Node* value, memory__Short s) {
-  if (({ ast__Node* v__4517 = memory__bare(ctx, value); ast__Node* v__4518 = (s).origin; (v__4517 != v__4518); })) {
+  if (({ ast__Node* v__4521 = memory__bare(ctx, value); ast__Node* v__4522 = (s).origin; (v__4521 != v__4522); })) {
     check__note(ctx, (rt_nonnull(t, "src/memory.sabk:608:16"))->c, (rt_nonnull((s).origin, "src/memory.sabk:608:28"))->tok, ((slice__u8){(u8*)"it's made here", 14}));
   }
 }
 
 static slice__u8 memory__traps_callee_name(prelude__Context *ctx, ast__Node* call) {
-  prelude__Any items__4520[1];
+  prelude__Any items__4524[1];
   ast__Node* callee = ((ast__Node*)0);
   {
     ast__Node* e;
-    if (({ ast__NodeKind is__4519 = (rt_nonnull(call, "src/memory.sabk:613:14"))->kind; is__4519.tag == ((ast__NodeKind__Tag)46LL) ? (e = is__4519.payload.Call.callee, 1) : 0; })) {
+    if (({ ast__NodeKind is__4523 = (rt_nonnull(call, "src/memory.sabk:613:14"))->kind; is__4523.tag == ((ast__NodeKind__Tag)46LL) ? (e = is__4523.payload.Call.callee, 1) : 0; })) {
       callee = memory__bare(ctx, e);
     }
   }
   if (((callee != ((ast__Node*)0)) && (((((rt_nonnull(callee, "src/memory.sabk:615:35"))->kind).tag == ((ast__NodeKind__Tag)34LL)) || (((rt_nonnull(callee, "src/memory.sabk:615:69"))->kind).tag == ((ast__NodeKind__Tag)47LL)))))) {
-    return fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4520[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(callee, "src/memory.sabk:616:38"))->tok).text}, .info = (&ti__1)}), items__4520), 1}));
+    return fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4524[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(callee, "src/memory.sabk:616:38"))->tok).text}, .info = (&ti__1)}), items__4524), 1}));
   }
   return ((slice__u8){(u8*)"this call", 9});
 }
@@ -32856,7 +32965,7 @@ static i32 memory__pointee_scope(prelude__Context *ctx, memory__Traps* t, ast__N
   ast__Node* e = memory__bare(ctx, p);
   {
     ast__Node* operand;
-    if (({ ast__NodeKind is__4521 = (rt_nonnull(e, "src/memory.sabk:627:11"))->kind; (is__4521.tag == ((ast__NodeKind__Tag)42LL) && (is__4521.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (operand = is__4521.payload.Unary.operand, 1) : 0; })) {
+    if (({ ast__NodeKind is__4525 = (rt_nonnull(e, "src/memory.sabk:627:11"))->kind; (is__4525.tag == ((ast__NodeKind__Tag)42LL) && (is__4525.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (operand = is__4525.payload.Unary.operand, 1) : 0; })) {
       return memory__place_scope(ctx, t, operand);
     }
   }
@@ -32864,13 +32973,13 @@ static i32 memory__pointee_scope(prelude__Context *ctx, memory__Traps* t, ast__N
 }
 
 static void memory__kept_by_call(prelude__Context *ctx, memory__Traps* t, ast__Node* call) {
-  prelude__Any items__4530[1];
-  prelude__Any items__4533[3];
+  prelude__Any items__4534[1];
+  prelude__Any items__4537[3];
   slice__ptr_ast__Node args = check__items_of(ctx, call);
   {
-    slice__ptr_ast__Node seq__4522 = args;
-    for (isize i__4523 = 0; i__4523 < seq__4522.len; i__4523++) {
-      ast__Node* a = seq__4522.ptr[i__4523];
+    slice__ptr_ast__Node seq__4526 = args;
+    for (isize i__4527 = 0; i__4527 < seq__4526.len; i__4527++) {
+      ast__Node* a = seq__4526.ptr[i__4527];
       if (memory__is_pack(ctx, t, a)) {
         continue;
       }
@@ -32879,14 +32988,14 @@ static void memory__kept_by_call(prelude__Context *ctx, memory__Traps* t, ast__N
         continue;
       }
       {
-        slice__ptr_ast__Node seq__4524 = args;
-        for (isize i__4525 = 0; i__4525 < seq__4524.len; i__4525++) {
-          ast__Node* p = seq__4524.ptr[i__4525];
+        slice__ptr_ast__Node seq__4528 = args;
+        for (isize i__4529 = 0; i__4529 < seq__4528.len; i__4529++) {
+          ast__Node* p = seq__4528.ptr[i__4529];
           if (((((p == a) || memory__is_pack(ctx, t, p)) || ((rt_nonnull(p, "src/memory.sabk:643:46"))->ty == ((types__Type*)0))) || ((rt_nonnull(memory__type_of(ctx, p), "src/memory.sabk:643:71"))->kind != ((types__TypeKind)6LL)))) {
             continue;
           }
           map__Map__ptr_types__Type__bool seen = {0};
-          bool can_keep = ({ types__Type* v__4526 = (rt_nonnull(memory__type_of(ctx, p), "src/memory.sabk:646:45"))->elem; types__Type* v__4527 = memory__type_of(ctx, a); map__Map__ptr_types__Type__bool* v__4528 = (&seen); memory__keeps(ctx, v__4526, v__4527, v__4528); });
+          bool can_keep = ({ types__Type* v__4530 = (rt_nonnull(memory__type_of(ctx, p), "src/memory.sabk:646:45"))->elem; types__Type* v__4531 = memory__type_of(ctx, a); map__Map__ptr_types__Type__bool* v__4532 = (&seen); memory__keeps(ctx, v__4530, v__4531, v__4532); });
           map__map_free__ptr_types__Type__bool(ctx, (&seen));
           if ((!can_keep)) {
             continue;
@@ -32899,12 +33008,12 @@ static void memory__kept_by_call(prelude__Context *ctx, memory__Traps* t, ast__N
           ast__Node* b = memory__pointer_base(ctx, p);
           {
             ast__Node* operand;
-            if (({ ast__NodeKind is__4529 = (rt_nonnull(memory__bare(ctx, p), "src/memory.sabk:655:25"))->kind; (is__4529.tag == ((ast__NodeKind__Tag)42LL) && (is__4529.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (operand = is__4529.payload.Unary.operand, 1) : 0; })) {
+            if (({ ast__NodeKind is__4533 = (rt_nonnull(memory__bare(ctx, p), "src/memory.sabk:655:25"))->kind; (is__4533.tag == ((ast__NodeKind__Tag)42LL) && (is__4533.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (operand = is__4533.payload.Unary.operand, 1) : 0; })) {
               b = memory__pointer_base(ctx, operand);
             }
           }
-          slice__u8 where = ((b != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4530[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(b, "src/memory.sabk:657:57"))->tok).text}, .info = (&ti__1)}), items__4530), 1})) : ((slice__u8){(u8*)"what it's given", 15}));
-          ({ check__Checker* v__4531 = (rt_nonnull(t, "src/memory.sabk:658:23"))->c; token__Token v__4532 = (rt_nonnull(a, "src/memory.sabk:658:28"))->tok; slice__u8 v__4534 = fmt__tformat(ctx, ((slice__u8){(u8*)"% may keep this in %, which outlives it: %", 42}), ((slice__prelude__Any){(items__4533[0] = ((prelude__Any){.value = (slice__u8[1]){memory__traps_callee_name(ctx, call)}, .info = (&ti__1)}), items__4533[1] = ((prelude__Any){.value = (slice__u8[1]){where}, .info = (&ti__1)}), items__4533[2] = ((prelude__Any){.value = (slice__u8[1]){memory__explain(ctx, t, s)}, .info = (&ti__1)}), items__4533), 3})); check__warning(ctx, v__4531, v__4532, v__4534); });
+          slice__u8 where = ((b != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"`%`", 3}), ((slice__prelude__Any){(items__4534[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(b, "src/memory.sabk:657:57"))->tok).text}, .info = (&ti__1)}), items__4534), 1})) : ((slice__u8){(u8*)"what it's given", 15}));
+          ({ check__Checker* v__4535 = (rt_nonnull(t, "src/memory.sabk:658:23"))->c; token__Token v__4536 = (rt_nonnull(a, "src/memory.sabk:658:28"))->tok; slice__u8 v__4538 = fmt__tformat(ctx, ((slice__u8){(u8*)"% may keep this in %, which outlives it: %", 42}), ((slice__prelude__Any){(items__4537[0] = ((prelude__Any){.value = (slice__u8[1]){memory__traps_callee_name(ctx, call)}, .info = (&ti__1)}), items__4537[1] = ((prelude__Any){.value = (slice__u8[1]){where}, .info = (&ti__1)}), items__4537[2] = ((prelude__Any){.value = (slice__u8[1]){memory__explain(ctx, t, s)}, .info = (&ti__1)}), items__4537), 3})); check__warning(ctx, v__4535, v__4536, v__4538); });
           memory__made_here(ctx, t, a, s);
           break;
         }
@@ -32914,41 +33023,41 @@ static void memory__kept_by_call(prelude__Context *ctx, memory__Traps* t, ast__N
 }
 
 static slice__u8 memory__place_key(prelude__Context *ctx, ast__Node* n) {
-  prelude__Any items__4536[1];
-  prelude__Any items__4537[1];
-  prelude__Any items__4538[1];
-  prelude__Any items__4539[1];
-  prelude__Any items__4540[2];
+  prelude__Any items__4540[1];
+  prelude__Any items__4541[1];
+  prelude__Any items__4542[1];
+  prelude__Any items__4543[1];
+  prelude__Any items__4544[2];
   ast__Node* e = memory__bare(ctx, n);
   {
-    ast__NodeKind switch__4535 = (rt_nonnull(e, "src/memory.sabk:670:15"))->kind;
-    switch (switch__4535.tag) {
+    ast__NodeKind switch__4539 = (rt_nonnull(e, "src/memory.sabk:670:15"))->kind;
+    switch (switch__4539.tag) {
     case ((ast__NodeKind__Tag)34LL):
     {
-      return (((rt_nonnull(e, "src/memory.sabk:672:22"))->decl != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4536[0] = ((prelude__Any){.value = (usize[1]){((usize)((rt_nonnull(e, "src/memory.sabk:672:51"))->decl))}, .info = (&ti__12)}), items__4536), 1})) : ((slice__u8){(u8*)"", 0}));
+      return (((rt_nonnull(e, "src/memory.sabk:672:22"))->decl != ((ast__Node*)0)) ? fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4540[0] = ((prelude__Any){.value = (usize[1]){((usize)((rt_nonnull(e, "src/memory.sabk:672:51"))->decl))}, .info = (&ti__12)}), items__4540), 1})) : ((slice__u8){(u8*)"", 0}));
     }
     break;
     case ((ast__NodeKind__Tag)44LL):
     {
-      ast__Node* pointer = switch__4535.payload.Deref.pointer;
+      ast__Node* pointer = switch__4539.payload.Deref.pointer;
       slice__u8 k = memory__place_key(ctx, pointer);
-      return (((k).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : fmt__tformat(ctx, ((slice__u8){(u8*)"%.*", 3}), ((slice__prelude__Any){(items__4537[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4537), 1})));
+      return (((k).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : fmt__tformat(ctx, ((slice__u8){(u8*)"%.*", 3}), ((slice__prelude__Any){(items__4541[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4541), 1})));
     }
     break;
     case ((ast__NodeKind__Tag)47LL):
     {
-      ast__Node* object = switch__4535.payload.Member.object;
+      ast__Node* object = switch__4539.payload.Member.object;
       if (((rt_nonnull(e, "src/memory.sabk:677:15"))->decl != ((ast__Node*)0))) {
-        return fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4538[0] = ((prelude__Any){.value = (usize[1]){((usize)((rt_nonnull(e, "src/memory.sabk:678:35"))->decl))}, .info = (&ti__12)}), items__4538), 1}));
+        return fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4542[0] = ((prelude__Any){.value = (usize[1]){((usize)((rt_nonnull(e, "src/memory.sabk:678:35"))->decl))}, .info = (&ti__12)}), items__4542), 1}));
       }
       slice__u8 k = memory__place_key(ctx, object);
       if (((k).len == ((isize)0LL))) {
         return ((slice__u8){(u8*)"", 0});
       }
       if ((((rt_nonnull(object, "src/memory.sabk:682:20"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(object, "src/memory.sabk:682:41"))->ty, "src/memory.sabk:682:44"))->kind == ((types__TypeKind)6LL)))) {
-        k = fmt__tformat(ctx, ((slice__u8){(u8*)"%.*", 3}), ((slice__prelude__Any){(items__4539[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4539), 1}));
+        k = fmt__tformat(ctx, ((slice__u8){(u8*)"%.*", 3}), ((slice__prelude__Any){(items__4543[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4543), 1}));
       }
-      return fmt__tformat(ctx, ((slice__u8){(u8*)"%.%", 3}), ((slice__prelude__Any){(items__4540[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4540[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(e, "src/memory.sabk:684:36"))->tok).text}, .info = (&ti__1)}), items__4540), 2}));
+      return fmt__tformat(ctx, ((slice__u8){(u8*)"%.%", 3}), ((slice__prelude__Any){(items__4544[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4544[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(e, "src/memory.sabk:684:36"))->tok).text}, .info = (&ti__1)}), items__4544), 2}));
     }
     break;
     default:
@@ -32961,16 +33070,16 @@ static slice__u8 memory__place_key(prelude__Context *ctx, ast__Node* n) {
 }
 
 static slice__u8 memory__pointee_key(prelude__Context *ctx, ast__Node* p) {
-  prelude__Any items__4542[1];
+  prelude__Any items__4546[1];
   ast__Node* e = memory__bare(ctx, p);
   {
     ast__Node* operand;
-    if (({ ast__NodeKind is__4541 = (rt_nonnull(e, "src/memory.sabk:693:11"))->kind; (is__4541.tag == ((ast__NodeKind__Tag)42LL) && (is__4541.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (operand = is__4541.payload.Unary.operand, 1) : 0; })) {
+    if (({ ast__NodeKind is__4545 = (rt_nonnull(e, "src/memory.sabk:693:11"))->kind; (is__4545.tag == ((ast__NodeKind__Tag)42LL) && (is__4545.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (operand = is__4545.payload.Unary.operand, 1) : 0; })) {
       return memory__place_key(ctx, operand);
     }
   }
   slice__u8 k = memory__place_key(ctx, e);
-  return (((k).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : fmt__tformat(ctx, ((slice__u8){(u8*)"%.*", 3}), ((slice__prelude__Any){(items__4542[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4542), 1})));
+  return (((k).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : fmt__tformat(ctx, ((slice__u8){(u8*)"%.*", 3}), ((slice__prelude__Any){(items__4546[0] = ((prelude__Any){.value = (slice__u8[1]){k}, .info = (&ti__1)}), items__4546), 1})));
 }
 
 static bool memory__owns(prelude__Context *ctx, types__Type* t) {
@@ -32982,9 +33091,9 @@ static bool memory__owns(prelude__Context *ctx, types__Type* t) {
   }
   if ((((rt_nonnull(t, "src/memory.sabk:705:11"))->kind == ((types__TypeKind)11LL)) && (!(rt_nonnull(t, "src/memory.sabk:705:33"))->is_tuple))) {
     {
-      grow__types__Field seq__4543 = (rt_nonnull(t, "src/memory.sabk:706:21"))->fields;
-      for (isize i__4544 = 0; i__4544 < seq__4543.len; i__4544++) {
-        types__Field f = seq__4543.ptr[i__4544];
+      grow__types__Field seq__4547 = (rt_nonnull(t, "src/memory.sabk:706:21"))->fields;
+      for (isize i__4548 = 0; i__4548 < seq__4547.len; i__4548++) {
+        types__Field f = seq__4547.ptr[i__4548];
         if (memory__owns(ctx, (f).ty)) {
           return true;
         }
@@ -32995,12 +33104,12 @@ static bool memory__owns(prelude__Context *ctx, types__Type* t) {
 }
 
 static void memory__grows(prelude__Context *ctx, memory__Traps* t, ast__Node* call) {
-  prelude__Any items__4553[1];
-  prelude__Any items__4558[4];
+  prelude__Any items__4557[1];
+  prelude__Any items__4562[4];
   {
-    slice__ptr_ast__Node seq__4545 = check__items_of(ctx, call);
-    for (isize i__4546 = 0; i__4546 < seq__4545.len; i__4546++) {
-      ast__Node* a = seq__4545.ptr[i__4546];
+    slice__ptr_ast__Node seq__4549 = check__items_of(ctx, call);
+    for (isize i__4550 = 0; i__4550 < seq__4549.len; i__4550++) {
+      ast__Node* a = seq__4549.ptr[i__4550];
       if (((memory__is_pack(ctx, t, a) || ((rt_nonnull(a, "src/memory.sabk:714:32"))->ty == ((types__Type*)0))) || ((rt_nonnull(memory__type_of(ctx, a), "src/memory.sabk:714:57"))->kind != ((types__TypeKind)6LL)))) {
         continue;
       }
@@ -33012,11 +33121,11 @@ static void memory__grows(prelude__Context *ctx, memory__Traps* t, ast__Node* ca
       if (((rt_nonnull(target, "src/memory.sabk:721:20"))->kind == ((types__TypeKind)9LL))) {
         slice__u8 key = memory__pointee_key(ctx, arg);
         {
-          grow__memory__Loop seq__4547 = (rt_nonnull(t, "src/memory.sabk:723:25"))->looping;
-          for (isize i__4548 = 0; i__4548 < seq__4547.len; i__4548++) {
-            memory__Loop l = seq__4547.ptr[i__4548];
-            if ((((key).len > ((isize)0LL)) && ({ slice__u8 a__4549 = (l).key, b__4550 = key; rt_bytes_equal(a__4549.ptr, a__4549.len, b__4550.ptr, b__4550.len); }))) {
-              ({ check__Checker* v__4551 = (rt_nonnull(t, "src/memory.sabk:725:31"))->c; token__Token v__4552 = (rt_nonnull(a, "src/memory.sabk:725:36"))->tok; slice__u8 v__4554 = fmt__tformat(ctx, ((slice__u8){(u8*)"% gets the array the loop around it reads: if it grows or frees it, the loop goes on reading the old elements; collect the changes, and make them after the loop", 160}), ((slice__prelude__Any){(items__4553[0] = ((prelude__Any){.value = (slice__u8[1]){memory__traps_callee_name(ctx, call)}, .info = (&ti__1)}), items__4553), 1})); check__warning(ctx, v__4551, v__4552, v__4554); });
+          grow__memory__Loop seq__4551 = (rt_nonnull(t, "src/memory.sabk:723:25"))->looping;
+          for (isize i__4552 = 0; i__4552 < seq__4551.len; i__4552++) {
+            memory__Loop l = seq__4551.ptr[i__4552];
+            if ((((key).len > ((isize)0LL)) && ({ slice__u8 a__4553 = (l).key, b__4554 = key; rt_bytes_equal(a__4553.ptr, a__4553.len, b__4554.ptr, b__4554.len); }))) {
+              ({ check__Checker* v__4555 = (rt_nonnull(t, "src/memory.sabk:725:31"))->c; token__Token v__4556 = (rt_nonnull(a, "src/memory.sabk:725:36"))->tok; slice__u8 v__4558 = fmt__tformat(ctx, ((slice__u8){(u8*)"% gets the array the loop around it reads: if it grows or frees it, the loop goes on reading the old elements; collect the changes, and make them after the loop", 160}), ((slice__prelude__Any){(items__4557[0] = ((prelude__Any){.value = (slice__u8[1]){memory__traps_callee_name(ctx, call)}, .info = (&ti__1)}), items__4557), 1})); check__warning(ctx, v__4555, v__4556, v__4558); });
               check__note(ctx, (rt_nonnull(t, "src/memory.sabk:727:28"))->c, (rt_nonnull((l).loop, "src/memory.sabk:727:38"))->tok, ((slice__u8){(u8*)"the loop", 8}));
               break;
             }
@@ -33026,7 +33135,7 @@ static void memory__grows(prelude__Context *ctx, memory__Traps* t, ast__Node* ca
       ast__Node* operand = ((ast__Node*)0);
       {
         ast__Node* o;
-        if (({ ast__NodeKind is__4555 = (rt_nonnull(arg, "src/memory.sabk:733:17"))->kind; (is__4555.tag == ((ast__NodeKind__Tag)42LL) && (is__4555.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (o = is__4555.payload.Unary.operand, 1) : 0; })) {
+        if (({ ast__NodeKind is__4559 = (rt_nonnull(arg, "src/memory.sabk:733:17"))->kind; (is__4559.tag == ((ast__NodeKind__Tag)42LL) && (is__4559.payload.Unary.op == ((ast__UnaryOp)3LL))) ? (o = is__4559.payload.Unary.operand, 1) : 0; })) {
           operand = o;
         }
       }
@@ -33035,7 +33144,7 @@ static void memory__grows(prelude__Context *ctx, memory__Traps* t, ast__Node* ca
       }
       ast__Node* r = memory__root(ctx, operand);
       if ((((r != ((ast__Node*)0)) && (((rt_nonnull(r, "src/memory.sabk:739:28"))->kind).tag == ((ast__NodeKind__Tag)3LL))) && ((rt_nonnull(target, "src/memory.sabk:739:57"))->kind == ((types__TypeKind)9LL)))) {
-        ({ check__Checker* v__4556 = (rt_nonnull(t, "src/memory.sabk:740:23"))->c; token__Token v__4557 = (rt_nonnull(a, "src/memory.sabk:740:28"))->tok; slice__u8 v__4559 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` is a copy of the caller's %, sharing its elements: if % grows or frees it, the caller's points at freed memory; to change the caller's, take `%`", 148}), ((slice__prelude__Any){(items__4558[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:741:43"))->tok).text}, .info = (&ti__1)}), items__4558[1] = (((rt_nonnull(r, "src/memory.sabk:741:59"))->ty == target) ? ((prelude__Any){.value = (slice__u8[1]){check__qt(ctx, target)}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"value", 5})}, .info = (&ti__1)})), items__4558[2] = ((prelude__Any){.value = (slice__u8[1]){memory__traps_callee_name(ctx, call)}, .info = (&ti__1)}), items__4558[3] = ((prelude__Any){.value = (slice__u8[1]){types__type_name(ctx, types__ptr_to(ctx, (&(rt_nonnull((rt_nonnull(t, "src/memory.sabk:742:86"))->c, "src/memory.sabk:742:88"))->types), (rt_nonnull(r, "src/memory.sabk:742:97"))->ty))}, .info = (&ti__1)}), items__4558), 4})); check__warning(ctx, v__4556, v__4557, v__4559); });
+        ({ check__Checker* v__4560 = (rt_nonnull(t, "src/memory.sabk:740:23"))->c; token__Token v__4561 = (rt_nonnull(a, "src/memory.sabk:740:28"))->tok; slice__u8 v__4563 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` is a copy of the caller's %, sharing its elements: if % grows or frees it, the caller's points at freed memory; to change the caller's, take `%`", 148}), ((slice__prelude__Any){(items__4562[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(r, "src/memory.sabk:741:43"))->tok).text}, .info = (&ti__1)}), items__4562[1] = (((rt_nonnull(r, "src/memory.sabk:741:59"))->ty == target) ? ((prelude__Any){.value = (slice__u8[1]){check__qt(ctx, target)}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"value", 5})}, .info = (&ti__1)})), items__4562[2] = ((prelude__Any){.value = (slice__u8[1]){memory__traps_callee_name(ctx, call)}, .info = (&ti__1)}), items__4562[3] = ((prelude__Any){.value = (slice__u8[1]){types__type_name(ctx, types__ptr_to(ctx, (&(rt_nonnull((rt_nonnull(t, "src/memory.sabk:742:86"))->c, "src/memory.sabk:742:88"))->types), (rt_nonnull(r, "src/memory.sabk:742:97"))->ty))}, .info = (&ti__1)}), items__4562), 4})); check__warning(ctx, v__4560, v__4561, v__4563); });
       }
       if (((r != ((ast__Node*)0)) && (((rt_nonnull(operand, "src/memory.sabk:743:34"))->kind).tag == ((ast__NodeKind__Tag)34LL)))) {
         grow__memory__Grow* list = map__map_find__ptr_ast__Node__grow__memory__Grow(ctx, (&(rt_nonnull(t, "src/memory.sabk:744:36"))->grown), r);
@@ -33062,9 +33171,9 @@ static void memory__mark_used(prelude__Context *ctx, memory__Traps* t, ast__Node
 
 static void memory__visit_children(prelude__Context *ctx, memory__Traps* t, ast__Node* n) {
   {
-    grow__ptr_ast__Node seq__4560 = ast__code_children(ctx, n);
-    for (isize i__4561 = 0; i__4561 < seq__4560.len; i__4561++) {
-      ast__Node* child = seq__4560.ptr[i__4561];
+    grow__ptr_ast__Node seq__4564 = ast__code_children(ctx, n);
+    for (isize i__4565 = 0; i__4565 < seq__4564.len; i__4565++) {
+      ast__Node* child = seq__4564.ptr[i__4565];
       memory__visit(ctx, t, child);
     }
   }
@@ -33076,61 +33185,61 @@ static void memory__visit(prelude__Context *ctx, memory__Traps* t, ast__Node* n)
   }
   (rt_nonnull(t, "src/memory.sabk:773:7"))->order++;
   {
-    ast__NodeKind switch__4562 = (rt_nonnull(n, "src/memory.sabk:774:15"))->kind;
+    ast__NodeKind switch__4566 = (rt_nonnull(n, "src/memory.sabk:774:15"))->kind;
     switch (0) { default:
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)24LL))) {
-      ({ memory__Traps* v__4563 = t; ast__Node* v__4564 = check__static_if_branch(ctx, n); memory__visit(ctx, v__4563, v__4564); });
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)24LL))) {
+      ({ memory__Traps* v__4567 = t; ast__Node* v__4568 = check__static_if_branch(ctx, n); memory__visit(ctx, v__4567, v__4568); });
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)2LL))) {
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)2LL))) {
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)14LL))) {
-      slice__ptr_ast__Node stmts = switch__4562.payload.Block.stmts;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)14LL))) {
+      slice__ptr_ast__Node stmts = switch__4566.payload.Block.stmts;
       memory__push(ctx, t, false);
       {
-        slice__ptr_ast__Node seq__4565 = stmts;
-        for (isize i__4566 = 0; i__4566 < seq__4565.len; i__4566++) {
-          ast__Node* s = seq__4565.ptr[i__4566];
+        slice__ptr_ast__Node seq__4569 = stmts;
+        for (isize i__4570 = 0; i__4570 < seq__4569.len; i__4570++) {
+          ast__Node* s = seq__4569.ptr[i__4570];
           memory__visit(ctx, t, s);
         }
       }
       memory__pop(ctx, t);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)65LL))) {
-      slice__ptr_ast__Node stmts = switch__4562.payload.MacroExpansion.stmts;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)65LL))) {
+      slice__ptr_ast__Node stmts = switch__4566.payload.MacroExpansion.stmts;
       memory__push(ctx, t, false);
       {
-        slice__ptr_ast__Node seq__4567 = stmts;
-        for (isize i__4568 = 0; i__4568 < seq__4567.len; i__4568++) {
-          ast__Node* s = seq__4567.ptr[i__4568];
+        slice__ptr_ast__Node seq__4571 = stmts;
+        for (isize i__4572 = 0; i__4572 < seq__4571.len; i__4572++) {
+          ast__Node* s = seq__4571.ptr[i__4572];
           memory__visit(ctx, t, s);
         }
       }
       memory__pop(ctx, t);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)25LL))) {
-      ast__Node* cond = switch__4562.payload.While.cond;
-      ast__Node* body = switch__4562.payload.While.body;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)25LL))) {
+      ast__Node* cond = switch__4566.payload.While.cond;
+      ast__Node* body = switch__4566.payload.While.body;
       memory__visit(ctx, t, cond);
       memory__push(ctx, t, true);
       memory__visit(ctx, t, body);
       memory__pop(ctx, t);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)26LL))) {
-      ast__Node* body = switch__4562.payload.DoWhile.body;
-      ast__Node* cond = switch__4562.payload.DoWhile.cond;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)26LL))) {
+      ast__Node* body = switch__4566.payload.DoWhile.body;
+      ast__Node* cond = switch__4566.payload.DoWhile.cond;
       memory__visit(ctx, t, cond);
       memory__push(ctx, t, true);
       memory__visit(ctx, t, body);
       memory__pop(ctx, t);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)27LL))) {
-      ast__NodeKind__variant_For f = switch__4562.payload.For;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)27LL))) {
+      ast__NodeKind__variant_For f = switch__4566.payload.For;
       memory__push(ctx, t, false);
       memory__visit(ctx, t, (f).init);
       memory__push(ctx, t, true);
@@ -33141,24 +33250,24 @@ static void memory__visit(prelude__Context *ctx, memory__Traps* t, ast__Node* n)
       memory__pop(ctx, t);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)28LL))) {
-      ast__Node* iterable = switch__4562.payload.ForIn.iterable;
-      ast__Node* range_end = switch__4562.payload.ForIn.range_end;
-      ast__Node* body = switch__4562.payload.ForIn.body;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)28LL))) {
+      ast__Node* iterable = switch__4566.payload.ForIn.iterable;
+      ast__Node* range_end = switch__4566.payload.ForIn.range_end;
+      ast__Node* body = switch__4566.payload.ForIn.body;
       memory__visit(ctx, t, iterable);
       memory__visit(ctx, t, range_end);
       memory__push(ctx, t, true);
-      ({ map__Map__ptr_ast__Node__i32* v__4569 = (&(rt_nonnull(t, "src/memory.sabk:811:20"))->scope_of); ast__Node* v__4570 = n; i32 v__4571 = memory__current(ctx, t); map__map_put__ptr_ast__Node__i32(ctx, v__4569, v__4570, v__4571); });
+      ({ map__Map__ptr_ast__Node__i32* v__4573 = (&(rt_nonnull(t, "src/memory.sabk:811:20"))->scope_of); ast__Node* v__4574 = n; i32 v__4575 = memory__current(ctx, t); map__map_put__ptr_ast__Node__i32(ctx, v__4573, v__4574, v__4575); });
       ast__Node* subject = memory__bare(ctx, iterable);
       {
         ast__Node* object;
-        if (((subject != ((ast__Node*)0)) && ({ ast__NodeKind is__4572 = (rt_nonnull(subject, "src/memory.sabk:813:40"))->kind; is__4572.tag == ((ast__NodeKind__Tag)49LL) ? (object = is__4572.payload.Slice.object, 1) : 0; }))) {
+        if (((subject != ((ast__Node*)0)) && ({ ast__NodeKind is__4576 = (rt_nonnull(subject, "src/memory.sabk:813:40"))->kind; is__4576.tag == ((ast__NodeKind__Tag)49LL) ? (object = is__4576.payload.Slice.object, 1) : 0; }))) {
           subject = memory__bare(ctx, object);
         }
       }
       bool reads = ((((subject != ((ast__Node*)0)) && ((rt_nonnull(subject, "src/memory.sabk:815:48"))->ty != ((types__Type*)0))) && ((rt_nonnull((rt_nonnull(subject, "src/memory.sabk:815:70"))->ty, "src/memory.sabk:815:73"))->kind == ((types__TypeKind)9LL))) && ((memory__place_key(ctx, subject)).len > ((isize)0LL)));
       if (reads) {
-        ({ grow__memory__Loop* v__4573 = (&(rt_nonnull(t, "src/memory.sabk:818:26"))->looping); memory__Loop v__4576 = ({ slice__u8 v__4574 = memory__place_key(ctx, subject); ast__Node* v__4575 = n; ((memory__Loop){.key = v__4574, .loop = v__4575}); }); array__array_add__memory__Loop(ctx, v__4573, v__4576); });
+        ({ grow__memory__Loop* v__4577 = (&(rt_nonnull(t, "src/memory.sabk:818:26"))->looping); memory__Loop v__4580 = ({ slice__u8 v__4578 = memory__place_key(ctx, subject); ast__Node* v__4579 = n; ((memory__Loop){.key = v__4578, .loop = v__4579}); }); array__array_add__memory__Loop(ctx, v__4577, v__4580); });
       }
       memory__visit(ctx, t, body);
       if (reads) {
@@ -33167,23 +33276,23 @@ static void memory__visit(prelude__Context *ctx, memory__Traps* t, ast__Node* n)
       memory__pop(ctx, t);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)9LL))) {
-      ast__Node* value = switch__4562.payload.Let.value;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)9LL))) {
+      ast__Node* value = switch__4566.payload.Let.value;
       memory__visit_decl(ctx, t, n, value);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)73LL))) {
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)73LL))) {
       memory__visit_decl(ctx, t, n, ((ast__Node*)0));
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)16LL))) {
-      ast__Node* target = switch__4562.payload.Assign.target;
-      ast__Node* value = switch__4562.payload.Assign.value;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)16LL))) {
+      ast__Node* target = switch__4566.payload.Assign.target;
+      ast__Node* value = switch__4566.payload.Assign.value;
       memory__visit_assign(ctx, t, n, target, value);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)42LL) && (switch__4562.payload.Unary.op == ((ast__UnaryOp)3LL)))) {
-      ast__Node* operand = switch__4562.payload.Unary.operand;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)42LL) && (switch__4566.payload.Unary.op == ((ast__UnaryOp)3LL)))) {
+      ast__Node* operand = switch__4566.payload.Unary.operand;
       ast__Node* target = memory__bare(ctx, operand);
       if (((((rt_nonnull(target, "src/memory.sabk:831:20"))->kind).tag == ((ast__NodeKind__Tag)34LL)) && map__map_has__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:831:58"))->literal_only), (rt_nonnull(target, "src/memory.sabk:831:79"))->decl))) {
         map__map_put__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:832:24"))->literal_only), (rt_nonnull(target, "src/memory.sabk:832:45"))->decl, false);
@@ -33191,20 +33300,20 @@ static void memory__visit(prelude__Context *ctx, memory__Traps* t, ast__Node* n)
       memory__visit_children(ctx, t, n);
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)34LL))) {
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)34LL))) {
       if (((rt_nonnull(n, "src/memory.sabk:835:15"))->decl != ((ast__Node*)0))) {
         memory__mark_used(ctx, t, (rt_nonnull(n, "src/memory.sabk:836:28"))->decl);
       }
       break;
     }
-    if ((switch__4562.tag == ((ast__NodeKind__Tag)46LL))) {
-      ast__Node* callee = switch__4562.payload.Call.callee;
-      slice__ptr_ast__Node args = switch__4562.payload.Call.args;
+    if ((switch__4566.tag == ((ast__NodeKind__Tag)46LL))) {
+      ast__Node* callee = switch__4566.payload.Call.callee;
+      slice__ptr_ast__Node args = switch__4566.payload.Call.args;
       memory__visit(ctx, t, callee);
       {
-        slice__ptr_ast__Node seq__4577 = args;
-        for (isize i__4578 = 0; i__4578 < seq__4577.len; i__4578++) {
-          ast__Node* a = seq__4577.ptr[i__4578];
+        slice__ptr_ast__Node seq__4581 = args;
+        for (isize i__4582 = 0; i__4582 < seq__4581.len; i__4582++) {
+          ast__Node* a = seq__4581.ptr[i__4582];
           memory__visit(ctx, t, a);
         }
       }
@@ -33224,7 +33333,7 @@ static void memory__visit_decl(prelude__Context *ctx, memory__Traps* t, ast__Nod
   if (((rt_nonnull(n, "src/memory.sabk:850:11"))->owner != ((module__Module*)0))) {
     return;
   }
-  ({ map__Map__ptr_ast__Node__i32* v__4579 = (&(rt_nonnull(t, "src/memory.sabk:852:16"))->scope_of); ast__Node* v__4580 = n; i32 v__4581 = memory__current(ctx, t); map__map_put__ptr_ast__Node__i32(ctx, v__4579, v__4580, v__4581); });
+  ({ map__Map__ptr_ast__Node__i32* v__4583 = (&(rt_nonnull(t, "src/memory.sabk:852:16"))->scope_of); ast__Node* v__4584 = n; i32 v__4585 = memory__current(ctx, t); map__map_put__ptr_ast__Node__i32(ctx, v__4583, v__4584, v__4585); });
   if ((value == ((ast__Node*)0))) {
     return;
   }
@@ -33233,7 +33342,7 @@ static void memory__visit_decl(prelude__Context *ctx, memory__Traps* t, ast__Nod
     map__map_put__ptr_ast__Node__memory__Short(ctx, (&(rt_nonnull(t, "src/memory.sabk:857:20"))->held), n, s);
   }
   ast__Node* v = memory__bare(ctx, value);
-  if (((((rt_nonnull(v, "src/memory.sabk:859:11"))->kind).tag == ((ast__NodeKind__Tag)41LL)) && (((rt_nonnull((rt_nonnull(n, "src/memory.sabk:859:37"))->ty, "src/memory.sabk:859:40"))->is_string || ({ types__Type* v__4582 = (rt_nonnull(n, "src/memory.sabk:859:55"))->ty; types__Type* v__4583 = types__slice_of(ctx, (&(rt_nonnull((rt_nonnull(t, "src/memory.sabk:859:73"))->c, "src/memory.sabk:859:75"))->types), ((rt_nonnull((rt_nonnull(t, "src/memory.sabk:859:84"))->c, "src/memory.sabk:859:86"))->types).u8_); (v__4582 == v__4583); }))))) {
+  if (((((rt_nonnull(v, "src/memory.sabk:859:11"))->kind).tag == ((ast__NodeKind__Tag)41LL)) && (((rt_nonnull((rt_nonnull(n, "src/memory.sabk:859:37"))->ty, "src/memory.sabk:859:40"))->is_string || ({ types__Type* v__4586 = (rt_nonnull(n, "src/memory.sabk:859:55"))->ty; types__Type* v__4587 = types__slice_of(ctx, (&(rt_nonnull((rt_nonnull(t, "src/memory.sabk:859:73"))->c, "src/memory.sabk:859:75"))->types), ((rt_nonnull((rt_nonnull(t, "src/memory.sabk:859:84"))->c, "src/memory.sabk:859:86"))->types).u8_); (v__4586 == v__4587); }))))) {
     map__map_put__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:860:20"))->literal_only), n, true);
   }
   if (((((((rt_nonnull(v, "src/memory.sabk:861:11"))->kind).tag == ((ast__NodeKind__Tag)34LL)) && ((rt_nonnull(v, "src/memory.sabk:861:40"))->decl != ((ast__Node*)0))) && memory__owns(ctx, (rt_nonnull(n, "src/memory.sabk:861:63"))->ty)) && memory__is_local(ctx, (rt_nonnull(v, "src/memory.sabk:861:81"))->decl))) {
@@ -33244,14 +33353,14 @@ static void memory__visit_decl(prelude__Context *ctx, memory__Traps* t, ast__Nod
 static void memory__visit_assign(prelude__Context *ctx, memory__Traps* t, ast__Node* n, ast__Node* lhs, ast__Node* rhs) {
   memory__visit(ctx, t, rhs);
   memory__visit(ctx, t, lhs);
-  bool plain = ({ slice__u8 a__4584 = ((rt_nonnull(n, "src/memory.sabk:868:19"))->tok).text, b__4585 = ((slice__u8){(u8*)"=", 1}); rt_bytes_equal(a__4584.ptr, a__4584.len, b__4585.ptr, b__4585.len); });
+  bool plain = ({ slice__u8 a__4588 = ((rt_nonnull(n, "src/memory.sabk:868:19"))->tok).text, b__4589 = ((slice__u8){(u8*)"=", 1}); rt_bytes_equal(a__4588.ptr, a__4588.len, b__4589.ptr, b__4589.len); });
   ast__Node* target = memory__bare(ctx, lhs);
   if (((((rt_nonnull(target, "src/memory.sabk:870:16"))->kind).tag == ((ast__NodeKind__Tag)34LL)) && map__map_has__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:870:54"))->literal_only), (rt_nonnull(target, "src/memory.sabk:870:75"))->decl))) {
     map__map_put__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:871:20"))->literal_only), (rt_nonnull(target, "src/memory.sabk:871:41"))->decl, false);
   }
   {
     ast__Node* object;
-    if (({ ast__NodeKind is__4586 = (rt_nonnull(target, "src/memory.sabk:872:16"))->kind; is__4586.tag == ((ast__NodeKind__Tag)48LL) ? (object = is__4586.payload.Index.object, 1) : 0; })) {
+    if (({ ast__NodeKind is__4590 = (rt_nonnull(target, "src/memory.sabk:872:16"))->kind; is__4590.tag == ((ast__NodeKind__Tag)48LL) ? (object = is__4590.payload.Index.object, 1) : 0; })) {
       ast__Node* base = memory__bare(ctx, object);
       if (((((rt_nonnull(base, "src/memory.sabk:874:18"))->kind).tag == ((ast__NodeKind__Tag)34LL)) && map__map_has__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:874:56"))->literal_only), (rt_nonnull(base, "src/memory.sabk:874:75"))->decl))) {
         array__array_add__memory__LiteralWrite(ctx, (&(rt_nonnull(t, "src/memory.sabk:875:26"))->literal_writes), ((memory__LiteralWrite){.local = (rt_nonnull(base, "src/memory.sabk:875:71"))->decl, .write = n}));
@@ -33264,10 +33373,10 @@ static void memory__visit_assign(prelude__Context *ctx, memory__Traps* t, ast__N
   {
     slice__ptr_ast__Node targets;
     slice__ptr_ast__Node values;
-    if ((({ ast__NodeKind is__4587 = (rt_nonnull(lhs, "src/memory.sabk:879:13"))->kind; is__4587.tag == ((ast__NodeKind__Tag)54LL) ? (targets = is__4587.payload.Values.items, 1) : 0; }) && ({ ast__NodeKind is__4588 = (rt_nonnull(rhs, "src/memory.sabk:879:52"))->kind; is__4588.tag == ((ast__NodeKind__Tag)54LL) ? (values = is__4588.payload.Values.items, 1) : 0; }))) {
+    if ((({ ast__NodeKind is__4591 = (rt_nonnull(lhs, "src/memory.sabk:879:13"))->kind; is__4591.tag == ((ast__NodeKind__Tag)54LL) ? (targets = is__4591.payload.Values.items, 1) : 0; }) && ({ ast__NodeKind is__4592 = (rt_nonnull(rhs, "src/memory.sabk:879:52"))->kind; is__4592.tag == ((ast__NodeKind__Tag)54LL) ? (values = is__4592.payload.Values.items, 1) : 0; }))) {
       {
-        isize end__4589 = (targets).len;
-        for (isize i = ((isize)0LL); i < end__4589; i++) {
+        isize end__4593 = (targets).len;
+        for (isize i = ((isize)0LL); i < end__4593; i++) {
           if ((!resolve__is_discard(ctx, (*slice__ptr_ast__Node__at(targets, i, "src/memory.sabk:881:36"))))) {
             memory__stored(ctx, t, (*slice__ptr_ast__Node__at(targets, i, "src/memory.sabk:882:34")), (*slice__ptr_ast__Node__at(values, i, "src/memory.sabk:882:45")));
           }
@@ -33290,9 +33399,9 @@ static tuple__24 memory__grown_after(prelude__Context *ctx, memory__Traps* t, as
   grow__memory__Grow* list = map__map_find__ptr_ast__Node__grow__memory__Grow(ctx, (&(rt_nonnull(t, "src/memory.sabk:896:28"))->grown), grown_one);
   if ((list != ((grow__memory__Grow*)0))) {
     {
-      grow__memory__Grow seq__4590 = (*rt_nonnull(list, "src/memory.sabk:898:24"));
-      for (isize i__4591 = 0; i__4591 < seq__4590.len; i__4591++) {
-        memory__Grow g = seq__4590.ptr[i__4591];
+      grow__memory__Grow seq__4594 = (*rt_nonnull(list, "src/memory.sabk:898:24"));
+      for (isize i__4595 = 0; i__4595 < seq__4594.len; i__4595++) {
+        memory__Grow g = seq__4594.ptr[i__4595];
         if (((g).when > when)) {
           return ((tuple__24){._0 = (g).arg, ._1 = (g).when});
         }
@@ -33306,9 +33415,9 @@ static bool memory__used_after(prelude__Context *ctx, memory__Traps* t, ast__Nod
   grow__i32* list = map__map_find__ptr_ast__Node__grow__i32(ctx, (&(rt_nonnull(t, "src/memory.sabk:905:28"))->used), d);
   if ((list != ((grow__i32*)0))) {
     {
-      grow__i32 seq__4592 = (*rt_nonnull(list, "src/memory.sabk:907:25"));
-      for (isize i__4593 = 0; i__4593 < seq__4592.len; i__4593++) {
-        i32 at = seq__4592.ptr[i__4593];
+      grow__i32 seq__4596 = (*rt_nonnull(list, "src/memory.sabk:907:25"));
+      for (isize i__4597 = 0; i__4597 < seq__4596.len; i__4597++) {
+        i32 at = seq__4596.ptr[i__4597];
         if ((at > when)) {
           return true;
         }
@@ -33319,26 +33428,26 @@ static bool memory__used_after(prelude__Context *ctx, memory__Traps* t, ast__Nod
 }
 
 static void memory__report_copies(prelude__Context *ctx, memory__Traps* t) {
-  prelude__Any items__4601[2];
   prelude__Any items__4605[2];
+  prelude__Any items__4609[2];
   {
-    grow__memory__Copy seq__4594 = (rt_nonnull(t, "src/memory.sabk:915:20"))->copies;
-    for (isize i__4595 = 0; i__4595 < seq__4594.len; i__4595++) {
-      memory__Copy copy = seq__4594.ptr[i__4595];
+    grow__memory__Copy seq__4598 = (rt_nonnull(t, "src/memory.sabk:915:20"))->copies;
+    for (isize i__4599 = 0; i__4599 < seq__4598.len; i__4599++) {
+      memory__Copy copy = seq__4598.ptr[i__4599];
       {
-        arr2__arr2__ptr_ast__Node seq__4596 = ((arr2__arr2__ptr_ast__Node){{((arr2__ptr_ast__Node){{(copy).a, (copy).b}}), ((arr2__ptr_ast__Node){{(copy).b, (copy).a}})}});
-        for (isize i__4597 = 0; i__4597 < 2; i__4597++) {
-          arr2__ptr_ast__Node pair = seq__4596.data[i__4597];
+        arr2__arr2__ptr_ast__Node seq__4600 = ((arr2__arr2__ptr_ast__Node){{((arr2__ptr_ast__Node){{(copy).a, (copy).b}}), ((arr2__ptr_ast__Node){{(copy).b, (copy).a}})}});
+        for (isize i__4601 = 0; i__4601 < 2; i__4601++) {
+          arr2__ptr_ast__Node pair = seq__4600.data[i__4601];
           ast__Node* grown_one = (pair).data[((isize)0LL)];
           ast__Node* other = (pair).data[((isize)1LL)];
-          tuple__24 values__4598 = memory__grown_after(ctx, t, grown_one, (copy).when);
-          ast__Node* grow = values__4598._0;
-          i32 when = values__4598._1;
+          tuple__24 values__4602 = memory__grown_after(ctx, t, grown_one, (copy).when);
+          ast__Node* grow = values__4602._0;
+          i32 when = values__4602._1;
           if (((grow == ((ast__Node*)0)) || (!memory__used_after(ctx, t, other, when)))) {
             continue;
           }
-          ({ check__Checker* v__4599 = (rt_nonnull(t, "src/memory.sabk:921:23"))->c; token__Token v__4600 = (rt_nonnull((copy).at, "src/memory.sabk:921:34"))->tok; slice__u8 v__4602 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` and `%` now share their elements: growing or freeing one leaves the other pointing at freed memory; copy them (`array_of(...)`), or pass a pointer", 150}), ((slice__prelude__Any){(items__4601[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((copy).a, "src/memory.sabk:922:54"))->tok).text}, .info = (&ti__1)}), items__4601[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((copy).b, "src/memory.sabk:922:71"))->tok).text}, .info = (&ti__1)}), items__4601), 2})); check__warning(ctx, v__4599, v__4600, v__4602); });
-          ({ check__Checker* v__4603 = (rt_nonnull(t, "src/memory.sabk:923:20"))->c; token__Token v__4604 = (rt_nonnull(grow, "src/memory.sabk:923:28"))->tok; slice__u8 v__4606 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` can grow here, and `%` is used after", 40}), ((slice__prelude__Any){(items__4605[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(grown_one, "src/memory.sabk:923:95"))->tok).text}, .info = (&ti__1)}), items__4605[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(other, "src/memory.sabk:923:111"))->tok).text}, .info = (&ti__1)}), items__4605), 2})); check__note(ctx, v__4603, v__4604, v__4606); });
+          ({ check__Checker* v__4603 = (rt_nonnull(t, "src/memory.sabk:921:23"))->c; token__Token v__4604 = (rt_nonnull((copy).at, "src/memory.sabk:921:34"))->tok; slice__u8 v__4606 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` and `%` now share their elements: growing or freeing one leaves the other pointing at freed memory; copy them (`array_of(...)`), or pass a pointer", 150}), ((slice__prelude__Any){(items__4605[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((copy).a, "src/memory.sabk:922:54"))->tok).text}, .info = (&ti__1)}), items__4605[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((copy).b, "src/memory.sabk:922:71"))->tok).text}, .info = (&ti__1)}), items__4605), 2})); check__warning(ctx, v__4603, v__4604, v__4606); });
+          ({ check__Checker* v__4607 = (rt_nonnull(t, "src/memory.sabk:923:20"))->c; token__Token v__4608 = (rt_nonnull(grow, "src/memory.sabk:923:28"))->tok; slice__u8 v__4610 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` can grow here, and `%` is used after", 40}), ((slice__prelude__Any){(items__4609[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(grown_one, "src/memory.sabk:923:95"))->tok).text}, .info = (&ti__1)}), items__4609[1] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(other, "src/memory.sabk:923:111"))->tok).text}, .info = (&ti__1)}), items__4609), 2})); check__note(ctx, v__4607, v__4608, v__4610); });
           break;
         }
       }
@@ -33347,21 +33456,21 @@ static void memory__report_copies(prelude__Context *ctx, memory__Traps* t) {
 }
 
 static void memory__report_literal_writes(prelude__Context *ctx, memory__Traps* t) {
-  prelude__Any items__4613[1];
+  prelude__Any items__4617[1];
   {
-    grow__memory__LiteralWrite seq__4607 = (rt_nonnull(t, "src/memory.sabk:931:17"))->literal_writes;
-    for (isize i__4608 = 0; i__4608 < seq__4607.len; i__4608++) {
-      memory__LiteralWrite w = seq__4607.ptr[i__4608];
+    grow__memory__LiteralWrite seq__4611 = (rt_nonnull(t, "src/memory.sabk:931:17"))->literal_writes;
+    for (isize i__4612 = 0; i__4612 < seq__4611.len; i__4612++) {
+      memory__LiteralWrite w = seq__4611.ptr[i__4612];
       if (({
-        tuple__8 result__4609 = map__map_get__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:932:24"))->literal_only), (w).local);
-        bool value__4610;
-        if (!result__4609._1)
-          value__4610 = false;
+        tuple__8 result__4613 = map__map_get__ptr_ast__Node__bool(ctx, (&(rt_nonnull(t, "src/memory.sabk:932:24"))->literal_only), (w).local);
+        bool value__4614;
+        if (!result__4613._1)
+          value__4614 = false;
         else
-          value__4610 = result__4609._0;
-        value__4610;
+          value__4614 = result__4613._0;
+        value__4614;
       })) {
-        ({ check__Checker* v__4611 = (rt_nonnull(t, "src/memory.sabk:933:23"))->c; token__Token v__4612 = (rt_nonnull((w).write, "src/memory.sabk:933:34"))->tok; slice__u8 v__4614 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` holds a string literal, whose bytes are read-only: this write crashes the program; to change the text, copy it first: `copy_string(...)` (std/str)", 150}), ((slice__prelude__Any){(items__4613[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((w).local, "src/memory.sabk:934:55"))->tok).text}, .info = (&ti__1)}), items__4613), 1})); check__warning(ctx, v__4611, v__4612, v__4614); });
+        ({ check__Checker* v__4615 = (rt_nonnull(t, "src/memory.sabk:933:23"))->c; token__Token v__4616 = (rt_nonnull((w).write, "src/memory.sabk:933:34"))->tok; slice__u8 v__4618 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` holds a string literal, whose bytes are read-only: this write crashes the program; to change the text, copy it first: `copy_string(...)` (std/str)", 150}), ((slice__prelude__Any){(items__4617[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((w).local, "src/memory.sabk:934:55"))->tok).text}, .info = (&ti__1)}), items__4617), 1})); check__warning(ctx, v__4615, v__4616, v__4618); });
       }
     }
   }
@@ -33374,9 +33483,9 @@ static codegen__CodeGen codegen__make_codegen(prelude__Context *ctx, resolve__Re
 static slice__u8 codegen__cat(prelude__Context *ctx, slice__string parts) {
   isize total = ((isize)0LL);
   {
-    slice__string seq__4615 = parts;
-    for (isize i__4616 = 0; i__4616 < seq__4615.len; i__4616++) {
-      slice__u8 p = seq__4615.ptr[i__4616];
+    slice__string seq__4619 = parts;
+    for (isize i__4620 = 0; i__4620 < seq__4619.len; i__4620++) {
+      slice__u8 p = seq__4619.ptr[i__4620];
       total += (p).len;
     }
   }
@@ -33384,9 +33493,9 @@ static slice__u8 codegen__cat(prelude__Context *ctx, slice__string parts) {
   (out).allocator = ((*ctx)).temp_allocator;
   array__array_reserve__u8(ctx, (&out), total);
   {
-    slice__string seq__4617 = parts;
-    for (isize i__4618 = 0; i__4618 < seq__4617.len; i__4618++) {
-      slice__u8 p = seq__4617.ptr[i__4618];
+    slice__string seq__4621 = parts;
+    for (isize i__4622 = 0; i__4622 < seq__4621.len; i__4622++) {
+      slice__u8 p = seq__4621.ptr[i__4622];
       str__append_string(ctx, (&out), p);
     }
   }
@@ -33397,8 +33506,8 @@ static slice__u8 codegen__spaces(prelude__Context *ctx, isize n) {
   grow__u8 out = {0};
   (out).allocator = ((*ctx)).temp_allocator;
   {
-    isize end__4619 = n;
-    for (isize i = ((isize)0LL); i < end__4619; i++) {
+    isize end__4623 = n;
+    for (isize i = ((isize)0LL); i < end__4623; i++) {
       array__array_add__u8(ctx, (&out), ((u8)32LL));
     }
   }
@@ -33406,13 +33515,13 @@ static slice__u8 codegen__spaces(prelude__Context *ctx, isize n) {
 }
 
 static slice__u8 codegen__num(prelude__Context *ctx, i64 n) {
-  prelude__Any items__4620[1];
-  return fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4620[0] = ((prelude__Any){.value = (i64[1]){n}, .info = (&ti__13)}), items__4620), 1}));
+  prelude__Any items__4624[1];
+  return fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4624[0] = ((prelude__Any){.value = (i64[1]){n}, .info = (&ti__13)}), items__4624), 1}));
 }
 
 static slice__u8 codegen__unum(prelude__Context *ctx, u64 n) {
-  prelude__Any items__4621[1];
-  return fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4621[0] = ((prelude__Any){.value = (u64[1]){n}, .info = (&ti__5)}), items__4621), 1}));
+  prelude__Any items__4625[1];
+  return fmt__tformat(ctx, ((slice__u8){(u8*)"%", 1}), ((slice__prelude__Any){(items__4625[0] = ((prelude__Any){.value = (u64[1]){n}, .info = (&ti__5)}), items__4625), 1}));
 }
 
 static types__Types* codegen__ts(prelude__Context *ctx, codegen__CodeGen* g) {
@@ -33424,9 +33533,9 @@ static slice__u8 codegen__c_string(prelude__Context *ctx, slice__u8 bytes) {
   (s).allocator = ((*ctx)).temp_allocator;
   array__array_add__u8(ctx, (&s), ((u8)34LL));
   {
-    slice__u8 seq__4622 = bytes;
-    for (isize i__4623 = 0; i__4623 < seq__4622.len; i__4623++) {
-      u8 c = seq__4622.ptr[i__4623];
+    slice__u8 seq__4626 = bytes;
+    for (isize i__4627 = 0; i__4627 < seq__4626.len; i__4627++) {
+      u8 c = seq__4626.ptr[i__4627];
       if ((((c == ((u8)34LL)) || (c == ((u8)92LL))) || (c == ((u8)63LL)))) {
         array__array_add__u8(ctx, (&s), ((u8)92LL));
         array__array_add__u8(ctx, (&s), c);
@@ -33453,41 +33562,41 @@ static void codegen__gen_error(prelude__Context *ctx, codegen__CodeGen* g, token
 
 static ast__Node* codegen__label_node(prelude__Context *ctx, ast__Node* n) {
   {
-    ast__NodeKind switch__4624 = (rt_nonnull(n, "src/codegen.sabk:214:15"))->kind;
-    switch (switch__4624.tag) {
+    ast__NodeKind switch__4628 = (rt_nonnull(n, "src/codegen.sabk:214:15"))->kind;
+    switch (switch__4628.tag) {
     case ((ast__NodeKind__Tag)14LL):
     {
-      ast__Node* label = switch__4624.payload.Block.label;
+      ast__Node* label = switch__4628.payload.Block.label;
       return label;
     }
     break;
     case ((ast__NodeKind__Tag)25LL):
     {
-      ast__Node* label = switch__4624.payload.While.label;
+      ast__Node* label = switch__4628.payload.While.label;
       return label;
     }
     break;
     case ((ast__NodeKind__Tag)26LL):
     {
-      ast__Node* label = switch__4624.payload.DoWhile.label;
+      ast__Node* label = switch__4628.payload.DoWhile.label;
       return label;
     }
     break;
     case ((ast__NodeKind__Tag)27LL):
     {
-      ast__Node* label = switch__4624.payload.For.label;
+      ast__Node* label = switch__4628.payload.For.label;
       return label;
     }
     break;
     case ((ast__NodeKind__Tag)28LL):
     {
-      ast__Node* label = switch__4624.payload.ForIn.label;
+      ast__Node* label = switch__4628.payload.ForIn.label;
       return label;
     }
     break;
     case ((ast__NodeKind__Tag)30LL):
     {
-      ast__Node* label = switch__4624.payload.Switch.label;
+      ast__Node* label = switch__4628.payload.Switch.label;
       return label;
     }
     break;
@@ -33502,17 +33611,17 @@ static ast__Node* codegen__label_node(prelude__Context *ctx, ast__Node* n) {
 
 static bool codegen__is_extern_decl(prelude__Context *ctx, ast__Node* d) {
   {
-    ast__NodeKind switch__4625 = (rt_nonnull(d, "src/codegen.sabk:226:15"))->kind;
-    switch (switch__4625.tag) {
+    ast__NodeKind switch__4629 = (rt_nonnull(d, "src/codegen.sabk:226:15"))->kind;
+    switch (switch__4629.tag) {
     case ((ast__NodeKind__Tag)2LL):
     {
-      bool is_extern = switch__4625.payload.Fn.is_extern;
+      bool is_extern = switch__4629.payload.Fn.is_extern;
       return is_extern;
     }
     break;
     case ((ast__NodeKind__Tag)9LL):
     {
-      bool is_extern = switch__4625.payload.Let.is_extern;
+      bool is_extern = switch__4629.payload.Let.is_extern;
       return is_extern;
     }
     break;
@@ -33526,7 +33635,7 @@ static bool codegen__is_extern_decl(prelude__Context *ctx, ast__Node* d) {
 }
 
 static bool codegen__is_function(prelude__Context *ctx, ast__Node* d) {
-  return ({ ast__NodeKind is__4626 = (rt_nonnull(d, "src/codegen.sabk:233:45"))->kind; (is__4626.tag == ((ast__NodeKind__Tag)2LL) && (is__4626.payload.Fn.is_macro == false)) ? (1) : 0; });
+  return ({ ast__NodeKind is__4630 = (rt_nonnull(d, "src/codegen.sabk:233:45"))->kind; (is__4630.tag == ((ast__NodeKind__Tag)2LL) && (is__4630.payload.Fn.is_macro == false)) ? (1) : 0; });
 }
 
 static types__Type* codegen__conv_or_ty(prelude__Context *ctx, ast__Node* n) {
@@ -33534,78 +33643,78 @@ static types__Type* codegen__conv_or_ty(prelude__Context *ctx, ast__Node* n) {
 }
 
 static slice__u8 codegen__global_name(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* decl) {
-  slice__u8 items__4629[3];
-  slice__u8 items__4632[3];
+  slice__u8 items__4633[3];
+  slice__u8 items__4636[3];
   if (((((((rt_nonnull(decl, "src/codegen.sabk:240:15"))->kind).tag == ((ast__NodeKind__Tag)2LL)) || (((rt_nonnull(decl, "src/codegen.sabk:240:39"))->kind).tag == ((ast__NodeKind__Tag)9LL)))) && codegen__is_extern_decl(ctx, decl))) {
     return ((rt_nonnull(decl, "src/codegen.sabk:241:21"))->tok).text;
   }
   slice__u8 prefix = ({
-    tuple__1 result__4627 = map__map_get__ptr_module__Module__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:242:29"))->module_prefix), (rt_nonnull(decl, "src/codegen.sabk:242:49"))->owner);
-    slice__u8 value__4628;
-    if (!result__4627._1)
-      value__4628 = ((slice__u8){(u8*)"", 0});
+    tuple__1 result__4631 = map__map_get__ptr_module__Module__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:242:29"))->module_prefix), (rt_nonnull(decl, "src/codegen.sabk:242:49"))->owner);
+    slice__u8 value__4632;
+    if (!result__4631._1)
+      value__4632 = ((slice__u8){(u8*)"", 0});
     else
-      value__4628 = result__4627._0;
-    value__4628;
+      value__4632 = result__4631._0;
+    value__4632;
   });
-  slice__u8 name = (((prefix).len == ((isize)0LL)) ? ((rt_nonnull(decl, "src/codegen.sabk:243:42"))->tok).text : codegen__cat(ctx, ((slice__string){(items__4629[0] = prefix, items__4629[1] = ((slice__u8){(u8*)"__", 2}), items__4629[2] = ((rt_nonnull(decl, "src/codegen.sabk:243:79"))->tok).text, items__4629), 3})));
+  slice__u8 name = (((prefix).len == ((isize)0LL)) ? ((rt_nonnull(decl, "src/codegen.sabk:243:42"))->tok).text : codegen__cat(ctx, ((slice__string){(items__4633[0] = prefix, items__4633[1] = ((slice__u8){(u8*)"__", 2}), items__4633[2] = ((rt_nonnull(decl, "src/codegen.sabk:243:79"))->tok).text, items__4633), 3})));
   {
-    slice__ptr_types__Type seq__4630 = (rt_nonnull(decl, "src/codegen.sabk:245:22"))->instance_args;
-    for (isize i__4631 = 0; i__4631 < seq__4630.len; i__4631++) {
-      types__Type* arg = seq__4630.ptr[i__4631];
-      name = codegen__cat(ctx, ((slice__string){(items__4632[0] = name, items__4632[1] = ((slice__u8){(u8*)"__", 2}), items__4632[2] = codegen__type_ident(ctx, g, arg), items__4632), 3}));
+    slice__ptr_types__Type seq__4634 = (rt_nonnull(decl, "src/codegen.sabk:245:22"))->instance_args;
+    for (isize i__4635 = 0; i__4635 < seq__4634.len; i__4635++) {
+      types__Type* arg = seq__4634.ptr[i__4635];
+      name = codegen__cat(ctx, ((slice__string){(items__4636[0] = name, items__4636[1] = ((slice__u8){(u8*)"__", 2}), items__4636[2] = codegen__type_ident(ctx, g, arg), items__4636), 3}));
     }
   }
   return name;
 }
 
 static slice__u8 codegen__local_name(prelude__Context *ctx, slice__u8 name) {
-  slice__u8 items__4637[2];
-  slice__u8 items__4638[2];
+  slice__u8 items__4641[2];
+  slice__u8 items__4642[2];
   {
-    arr59__string seq__4633 = codegen__RESERVED;
-    for (isize i__4634 = 0; i__4634 < 59; i__4634++) {
-      slice__u8 r = seq__4633.data[i__4634];
-      if (({ slice__u8 a__4635 = r, b__4636 = name; rt_bytes_equal(a__4635.ptr, a__4635.len, b__4636.ptr, b__4636.len); })) {
-        return codegen__cat(ctx, ((slice__string){(items__4637[0] = name, items__4637[1] = ((slice__u8){(u8*)"_", 1}), items__4637), 2}));
+    arr59__string seq__4637 = codegen__RESERVED;
+    for (isize i__4638 = 0; i__4638 < 59; i__4638++) {
+      slice__u8 r = seq__4637.data[i__4638];
+      if (({ slice__u8 a__4639 = r, b__4640 = name; rt_bytes_equal(a__4639.ptr, a__4639.len, b__4640.ptr, b__4640.len); })) {
+        return codegen__cat(ctx, ((slice__string){(items__4641[0] = name, items__4641[1] = ((slice__u8){(u8*)"_", 1}), items__4641), 2}));
       }
     }
   }
   if (str__contains(ctx, name, ((slice__u8){(u8*)"__", 2}))) {
-    return codegen__cat(ctx, ((slice__string){(items__4638[0] = name, items__4638[1] = ((slice__u8){(u8*)"_", 1}), items__4638), 2}));
+    return codegen__cat(ctx, ((slice__string){(items__4642[0] = name, items__4642[1] = ((slice__u8){(u8*)"_", 1}), items__4642), 2}));
   }
   return name;
 }
 
 static slice__u8 codegen__var_name(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* d) {
-  slice__u8 items__4639[3];
+  slice__u8 items__4643[3];
   slice__u8 name = codegen__local_name(ctx, ((rt_nonnull(d, "src/codegen.sabk:264:29"))->tok).text);
   i32 color = ((rt_nonnull(d, "src/codegen.sabk:265:23"))->caller ? ((*slice__resolve__Expansion__at(grow__resolve__Expansion__view((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:265:33"))->res, "src/codegen.sabk:265:37"))->expansions), (rt_nonnull(d, "src/codegen.sabk:265:50"))->color, "src/codegen.sabk:265:47"))).parent : (rt_nonnull(d, "src/codegen.sabk:265:71"))->color);
-  return ((color != ((i32)0LL)) ? codegen__cat(ctx, ((slice__string){(items__4639[0] = name, items__4639[1] = ((slice__u8){(u8*)"__m", 3}), items__4639[2] = codegen__num(ctx, ((i64)(color))), items__4639), 3})) : name);
+  return ((color != ((i32)0LL)) ? codegen__cat(ctx, ((slice__string){(items__4643[0] = name, items__4643[1] = ((slice__u8){(u8*)"__m", 3}), items__4643[2] = codegen__num(ctx, ((i64)(color))), items__4643), 3})) : name);
 }
 
 static slice__u8 codegen__tmp(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 hint) {
-  prelude__Any items__4640[2];
+  prelude__Any items__4644[2];
   (rt_nonnull(g, "src/codegen.sabk:270:7"))->tmp_count++;
-  return fmt__format(ctx, ((slice__u8){(u8*)"%__%", 4}), ((slice__prelude__Any){(items__4640[0] = ((prelude__Any){.value = (slice__u8[1]){hint}, .info = (&ti__1)}), items__4640[1] = ((prelude__Any){.value = (i32[1]){(rt_nonnull(g, "src/codegen.sabk:271:35"))->tmp_count}, .info = (&ti__4)}), items__4640), 2}));
+  return fmt__format(ctx, ((slice__u8){(u8*)"%__%", 4}), ((slice__prelude__Any){(items__4644[0] = ((prelude__Any){.value = (slice__u8[1]){hint}, .info = (&ti__1)}), items__4644[1] = ((prelude__Any){.value = (i32[1]){(rt_nonnull(g, "src/codegen.sabk:271:35"))->tmp_count}, .info = (&ti__4)}), items__4644), 2}));
 }
 
 static slice__u8 codegen__location(prelude__Context *ctx, codegen__CodeGen* g, token__Token t) {
-  prelude__Any items__4641[3];
+  prelude__Any items__4645[3];
   module__Module* m = resolve__module_of(ctx, (rt_nonnull(g, "src/codegen.sabk:275:25"))->res, ((t).text).ptr);
   if ((m == ((module__Module*)0))) {
     return codegen__c_string(ctx, ((slice__u8){(u8*)"<unknown>", 9}));
   }
-  return codegen__c_string(ctx, fmt__tformat(ctx, ((slice__u8){(u8*)"%:%:%", 5}), ((slice__prelude__Any){(items__4641[0] = ((prelude__Any){.value = (slice__u8[1]){(rt_nonnull(m, "src/codegen.sabk:278:40"))->path}, .info = (&ti__1)}), items__4641[1] = ((prelude__Any){.value = (i32[1]){(t).line}, .info = (&ti__4)}), items__4641[2] = ((prelude__Any){.value = (i32[1]){(t).column}, .info = (&ti__4)}), items__4641), 3})));
+  return codegen__c_string(ctx, fmt__tformat(ctx, ((slice__u8){(u8*)"%:%:%", 5}), ((slice__prelude__Any){(items__4645[0] = ((prelude__Any){.value = (slice__u8[1]){(rt_nonnull(m, "src/codegen.sabk:278:40"))->path}, .info = (&ti__1)}), items__4645[1] = ((prelude__Any){.value = (i32[1]){(t).line}, .info = (&ti__4)}), items__4645[2] = ((prelude__Any){.value = (i32[1]){(t).column}, .info = (&ti__4)}), items__4645), 3})));
 }
 
 static slice__u8 codegen__type_ident(prelude__Context *ctx, codegen__CodeGen* g, types__Type* t) {
-  slice__u8 items__4642[2];
+  slice__u8 items__4646[2];
   if ((rt_nonnull(t, "src/codegen.sabk:285:11"))->is_string) {
     return ((slice__u8){(u8*)"string", 6});
   }
   if (((rt_nonnull(t, "src/codegen.sabk:287:11"))->kind == ((types__TypeKind)6LL))) {
-    return codegen__cat(ctx, ((slice__string){(items__4642[0] = ((slice__u8){(u8*)"ptr_", 4}), items__4642[1] = codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:288:44"))->elem), items__4642), 2}));
+    return codegen__cat(ctx, ((slice__string){(items__4646[0] = ((slice__u8){(u8*)"ptr_", 4}), items__4646[1] = codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:288:44"))->elem), items__4646), 2}));
   }
   return codegen__c_type(ctx, g, t);
 }
@@ -33615,30 +33724,30 @@ static slice__u8 codegen__ret_type(prelude__Context *ctx, codegen__CodeGen* g, t
 }
 
 static slice__u8 codegen__c_type(prelude__Context *ctx, codegen__CodeGen* g, types__Type* t) {
-  slice__u8 items__4648[2];
-  prelude__Any items__4656[1];
-  slice__u8 items__4657[2];
-  prelude__Any items__4658[2];
-  prelude__Any items__4659[3];
-  prelude__Any items__4660[2];
-  prelude__Any items__4661[2];
-  prelude__Any items__4662[1];
-  prelude__Any items__4663[2];
-  prelude__Any items__4664[1];
+  slice__u8 items__4652[2];
+  prelude__Any items__4660[1];
+  slice__u8 items__4661[2];
+  prelude__Any items__4662[2];
+  prelude__Any items__4663[3];
+  prelude__Any items__4664[2];
   prelude__Any items__4665[2];
-  slice__u8 items__4666[2];
+  prelude__Any items__4666[1];
   prelude__Any items__4667[2];
+  prelude__Any items__4668[1];
   prelude__Any items__4669[2];
-  prelude__Any items__4671[1];
-  slice__u8 items__4672[2];
-  slice__u8 items__4675[3];
-  prelude__Any items__4677[3];
+  slice__u8 items__4670[2];
+  prelude__Any items__4671[2];
+  prelude__Any items__4673[2];
+  prelude__Any items__4675[1];
+  slice__u8 items__4676[2];
+  slice__u8 items__4679[3];
+  prelude__Any items__4681[3];
   if ((rt_nonnull(t, "src/codegen.sabk:299:11"))->is_string) {
-    return ({ codegen__CodeGen* v__4643 = g; types__Type* v__4646 = ({ types__Types* v__4644 = codegen__ts(ctx, g); types__Type* v__4645 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:300:48"))->u8_; types__slice_of(ctx, v__4644, v__4645); }); codegen__c_type(ctx, v__4643, v__4646); });
+    return ({ codegen__CodeGen* v__4647 = g; types__Type* v__4650 = ({ types__Types* v__4648 = codegen__ts(ctx, g); types__Type* v__4649 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:300:48"))->u8_; types__slice_of(ctx, v__4648, v__4649); }); codegen__c_type(ctx, v__4647, v__4650); });
   }
   {
-    types__TypeKind switch__4647 = (rt_nonnull(t, "src/codegen.sabk:301:15"))->kind;
-    switch (switch__4647) {
+    types__TypeKind switch__4651 = (rt_nonnull(t, "src/codegen.sabk:301:15"))->kind;
+    switch (switch__4651) {
     case ((types__TypeKind)1LL):
     {
       return ((slice__u8){(u8*)"sabk_void", 9});
@@ -33658,7 +33767,7 @@ static slice__u8 codegen__c_type(prelude__Context *ctx, codegen__CodeGen* g, typ
     break;
     case ((types__TypeKind)6LL):
     {
-      return codegen__cat(ctx, ((slice__string){(items__4648[0] = codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:305:39"))->elem), items__4648[1] = ((slice__u8){(u8*)"*", 1}), items__4648), 2}));
+      return codegen__cat(ctx, ((slice__string){(items__4652[0] = codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:305:39"))->elem), items__4652[1] = ((slice__u8){(u8*)"*", 1}), items__4652), 2}));
     }
     break;
     case ((types__TypeKind)14LL):
@@ -33678,7 +33787,7 @@ static slice__u8 codegen__c_type(prelude__Context *ctx, codegen__CodeGen* g, typ
     break;
     case ((types__TypeKind)17LL):
     {
-      return ({ codegen__CodeGen* v__4649 = g; types__Type* v__4652 = ({ types__Types* v__4650 = codegen__ts(ctx, g); types__Type* v__4651 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:309:65"))->u8_; types__slice_of(ctx, v__4650, v__4651); }); codegen__c_type(ctx, v__4649, v__4652); });
+      return ({ codegen__CodeGen* v__4653 = g; types__Type* v__4656 = ({ types__Types* v__4654 = codegen__ts(ctx, g); types__Type* v__4655 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:309:65"))->u8_; types__slice_of(ctx, v__4654, v__4655); }); codegen__c_type(ctx, v__4653, v__4656); });
     }
     break;
     case ((types__TypeKind)0LL):
@@ -33695,75 +33804,75 @@ static slice__u8 codegen__c_type(prelude__Context *ctx, codegen__CodeGen* g, typ
     }
   }
   slice__u8 known = ({
-    tuple__1 result__4653 = map__map_get__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:320:28"))->type_names), t);
-    slice__u8 value__4654;
-    if (!result__4653._1)
-      value__4654 = ((slice__u8){(u8*)"", 0});
+    tuple__1 result__4657 = map__map_get__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:320:28"))->type_names), t);
+    slice__u8 value__4658;
+    if (!result__4657._1)
+      value__4658 = ((slice__u8){(u8*)"", 0});
     else
-      value__4654 = result__4653._0;
-    value__4654;
+      value__4658 = result__4657._0;
+    value__4658;
   });
   if (((known).len > ((isize)0LL))) {
     return known;
   }
   slice__u8 name = ((slice__u8){(u8*)"", 0});
   {
-    types__TypeKind switch__4655 = (rt_nonnull(t, "src/codegen.sabk:325:15"))->kind;
-    switch (switch__4655) {
+    types__TypeKind switch__4659 = (rt_nonnull(t, "src/codegen.sabk:325:15"))->kind;
+    switch (switch__4659) {
     case ((types__TypeKind)11LL):
     case ((types__TypeKind)12LL):
     {
       if ((rt_nonnull(t, "src/codegen.sabk:327:15"))->is_tuple) {
         (rt_nonnull(g, "src/codegen.sabk:328:15"))->tuple_count++;
-        name = fmt__format(ctx, ((slice__u8){(u8*)"tuple__%", 8}), ((slice__prelude__Any){(items__4656[0] = ((prelude__Any){.value = (i32[1]){(rt_nonnull(g, "src/codegen.sabk:329:41"))->tuple_count}, .info = (&ti__4)}), items__4656), 1}));
+        name = fmt__format(ctx, ((slice__u8){(u8*)"tuple__%", 8}), ((slice__prelude__Any){(items__4660[0] = ((prelude__Any){.value = (i32[1]){(rt_nonnull(g, "src/codegen.sabk:329:41"))->tuple_count}, .info = (&ti__4)}), items__4660), 1}));
       } else {
-        name = fmt__format(ctx, ((slice__u8){(u8*)"%{}%", 4}), ((slice__prelude__Any){(items__4658[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, (rt_nonnull(t, "src/codegen.sabk:331:52"))->decl)}, .info = (&ti__1)}), items__4658[1] = ((((rt_nonnull(t, "src/codegen.sabk:331:65"))->part).len == ((isize)0LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){codegen__cat(ctx, ((slice__string){(items__4657[0] = ((slice__u8){(u8*)"__", 2}), items__4657[1] = (rt_nonnull(t, "src/codegen.sabk:331:100"))->part, items__4657), 2}))}, .info = (&ti__1)})), items__4658), 2}));
+        name = fmt__format(ctx, ((slice__u8){(u8*)"%{}%", 4}), ((slice__prelude__Any){(items__4662[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, (rt_nonnull(t, "src/codegen.sabk:331:52"))->decl)}, .info = (&ti__1)}), items__4662[1] = ((((rt_nonnull(t, "src/codegen.sabk:331:65"))->part).len == ((isize)0LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){codegen__cat(ctx, ((slice__string){(items__4661[0] = ((slice__u8){(u8*)"__", 2}), items__4661[1] = (rt_nonnull(t, "src/codegen.sabk:331:100"))->part, items__4661), 2}))}, .info = (&ti__1)})), items__4662), 2}));
       }
-      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:333:21"))->fwd), ((slice__u8){(u8*)"typedef % % %;\012", 15}), ((slice__prelude__Any){(items__4659[0] = (((rt_nonnull(t, "src/codegen.sabk:333:52"))->kind == ((types__TypeKind)11LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"struct", 6})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"union", 5})}, .info = (&ti__1)})), items__4659[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4659[2] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4659), 3}));
+      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:333:21"))->fwd), ((slice__u8){(u8*)"typedef % % %;\012", 15}), ((slice__prelude__Any){(items__4663[0] = (((rt_nonnull(t, "src/codegen.sabk:333:52"))->kind == ((types__TypeKind)11LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"struct", 6})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"union", 5})}, .info = (&ti__1)})), items__4663[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4663[2] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4663), 3}));
       array__array_add__ptr_types__Type(ctx, (&(rt_nonnull(g, "src/codegen.sabk:334:22"))->to_define), t);
     }
     break;
     case ((types__TypeKind)7LL):
     {
-      name = fmt__format(ctx, ((slice__u8){(u8*)"arr%__%", 7}), ((slice__prelude__Any){(items__4660[0] = ((prelude__Any){.value = (u64[1]){(rt_nonnull(t, "src/codegen.sabk:336:36"))->len}, .info = (&ti__5)}), items__4660[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:336:57"))->elem)}, .info = (&ti__1)}), items__4660), 2}));
-      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:337:21"))->fwd), ((slice__u8){(u8*)"typedef struct % %;\012", 20}), ((slice__prelude__Any){(items__4661[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4661[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4661), 2}));
+      name = fmt__format(ctx, ((slice__u8){(u8*)"arr%__%", 7}), ((slice__prelude__Any){(items__4664[0] = ((prelude__Any){.value = (u64[1]){(rt_nonnull(t, "src/codegen.sabk:336:36"))->len}, .info = (&ti__5)}), items__4664[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:336:57"))->elem)}, .info = (&ti__1)}), items__4664), 2}));
+      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:337:21"))->fwd), ((slice__u8){(u8*)"typedef struct % %;\012", 20}), ((slice__prelude__Any){(items__4665[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4665[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4665), 2}));
       array__array_add__ptr_types__Type(ctx, (&(rt_nonnull(g, "src/codegen.sabk:338:22"))->to_define), t);
     }
     break;
     case ((types__TypeKind)8LL):
     {
-      name = fmt__format(ctx, ((slice__u8){(u8*)"slice__%", 8}), ((slice__prelude__Any){(items__4662[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:340:51"))->elem)}, .info = (&ti__1)}), items__4662), 1}));
-      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:341:21"))->fwd), ((slice__u8){(u8*)"typedef struct % %;\012", 20}), ((slice__prelude__Any){(items__4663[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4663[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4663), 2}));
+      name = fmt__format(ctx, ((slice__u8){(u8*)"slice__%", 8}), ((slice__prelude__Any){(items__4666[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:340:51"))->elem)}, .info = (&ti__1)}), items__4666), 1}));
+      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:341:21"))->fwd), ((slice__u8){(u8*)"typedef struct % %;\012", 20}), ((slice__prelude__Any){(items__4667[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4667[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4667), 2}));
       array__array_add__ptr_types__Type(ctx, (&(rt_nonnull(g, "src/codegen.sabk:342:22"))->to_define), t);
     }
     break;
     case ((types__TypeKind)9LL):
     {
-      name = fmt__format(ctx, ((slice__u8){(u8*)"grow__%", 7}), ((slice__prelude__Any){(items__4664[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:344:50"))->elem)}, .info = (&ti__1)}), items__4664), 1}));
-      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:345:21"))->fwd), ((slice__u8){(u8*)"typedef struct % %;\012", 20}), ((slice__prelude__Any){(items__4665[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4665[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4665), 2}));
+      name = fmt__format(ctx, ((slice__u8){(u8*)"grow__%", 7}), ((slice__prelude__Any){(items__4668[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__type_ident(ctx, g, (rt_nonnull(t, "src/codegen.sabk:344:50"))->elem)}, .info = (&ti__1)}), items__4668), 1}));
+      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:345:21"))->fwd), ((slice__u8){(u8*)"typedef struct % %;\012", 20}), ((slice__prelude__Any){(items__4669[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4669[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4669), 2}));
       array__array_add__ptr_types__Type(ctx, (&(rt_nonnull(g, "src/codegen.sabk:346:22"))->to_define), t);
     }
     break;
     case ((types__TypeKind)13LL):
     {
-      name = fmt__format(ctx, ((slice__u8){(u8*)"%{}%", 4}), ((slice__prelude__Any){(items__4667[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, (rt_nonnull(t, "src/codegen.sabk:348:48"))->decl)}, .info = (&ti__1)}), items__4667[1] = ((((rt_nonnull(t, "src/codegen.sabk:348:61"))->part).len == ((isize)0LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){codegen__cat(ctx, ((slice__string){(items__4666[0] = ((slice__u8){(u8*)"__", 2}), items__4666[1] = (rt_nonnull(t, "src/codegen.sabk:348:96"))->part, items__4666), 2}))}, .info = (&ti__1)})), items__4667), 2}));
-      ({ grow__u8* v__4668 = (&(rt_nonnull(g, "src/codegen.sabk:349:21"))->fwd); slice__prelude__Any v__4670 = ((slice__prelude__Any){(items__4669[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:349:56"))->elem)}, .info = (&ti__1)}), items__4669[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4669), 2}); fmt__print_to(ctx, v__4668, ((slice__u8){(u8*)"typedef % %;\012", 13}), v__4670); });
+      name = fmt__format(ctx, ((slice__u8){(u8*)"%{}%", 4}), ((slice__prelude__Any){(items__4671[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, (rt_nonnull(t, "src/codegen.sabk:348:48"))->decl)}, .info = (&ti__1)}), items__4671[1] = ((((rt_nonnull(t, "src/codegen.sabk:348:61"))->part).len == ((isize)0LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){codegen__cat(ctx, ((slice__string){(items__4670[0] = ((slice__u8){(u8*)"__", 2}), items__4670[1] = (rt_nonnull(t, "src/codegen.sabk:348:96"))->part, items__4670), 2}))}, .info = (&ti__1)})), items__4671), 2}));
+      ({ grow__u8* v__4672 = (&(rt_nonnull(g, "src/codegen.sabk:349:21"))->fwd); slice__prelude__Any v__4674 = ((slice__prelude__Any){(items__4673[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:349:56"))->elem)}, .info = (&ti__1)}), items__4673[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4673), 2}); fmt__print_to(ctx, v__4672, ((slice__u8){(u8*)"typedef % %;\012", 13}), v__4674); });
     }
     break;
     case ((types__TypeKind)10LL):
     {
       (rt_nonnull(g, "src/codegen.sabk:351:11"))->fn_type_count++;
-      name = fmt__format(ctx, ((slice__u8){(u8*)"fn__%", 5}), ((slice__prelude__Any){(items__4671[0] = ((prelude__Any){.value = (i32[1]){(rt_nonnull(g, "src/codegen.sabk:352:34"))->fn_type_count}, .info = (&ti__4)}), items__4671), 1}));
+      name = fmt__format(ctx, ((slice__u8){(u8*)"fn__%", 5}), ((slice__prelude__Any){(items__4675[0] = ((prelude__Any){.value = (i32[1]){(rt_nonnull(g, "src/codegen.sabk:352:34"))->fn_type_count}, .info = (&ti__4)}), items__4675), 1}));
       map__map_put__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:353:20"))->type_names), t, name);
-      slice__u8 params = codegen__cat(ctx, ((slice__string){(items__4672[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:354:38"))->c, "src/codegen.sabk:354:40"))->context_type), items__4672[1] = ((slice__u8){(u8*)"*", 1}), items__4672), 2}));
+      slice__u8 params = codegen__cat(ctx, ((slice__string){(items__4676[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:354:38"))->c, "src/codegen.sabk:354:40"))->context_type), items__4676[1] = ((slice__u8){(u8*)"*", 1}), items__4676), 2}));
       {
-        slice__ptr_types__Type seq__4673 = (rt_nonnull(t, "src/codegen.sabk:355:21"))->params;
-        for (isize i__4674 = 0; i__4674 < seq__4673.len; i__4674++) {
-          types__Type* p = seq__4673.ptr[i__4674];
-          params = codegen__cat(ctx, ((slice__string){(items__4675[0] = params, items__4675[1] = ((slice__u8){(u8*)", ", 2}), items__4675[2] = codegen__c_type(ctx, g, p), items__4675), 3}));
+        slice__ptr_types__Type seq__4677 = (rt_nonnull(t, "src/codegen.sabk:355:21"))->params;
+        for (isize i__4678 = 0; i__4678 < seq__4677.len; i__4678++) {
+          types__Type* p = seq__4677.ptr[i__4678];
+          params = codegen__cat(ctx, ((slice__string){(items__4679[0] = params, items__4679[1] = ((slice__u8){(u8*)", ", 2}), items__4679[2] = codegen__c_type(ctx, g, p), items__4679), 3}));
         }
       }
-      ({ grow__u8* v__4676 = (&(rt_nonnull(g, "src/codegen.sabk:357:21"))->fn_typedefs); slice__prelude__Any v__4678 = ((slice__prelude__Any){(items__4677[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__ret_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:357:72"))->ret)}, .info = (&ti__1)}), items__4677[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4677[2] = ((prelude__Any){.value = (slice__u8[1]){params}, .info = (&ti__1)}), items__4677), 3}); fmt__print_to(ctx, v__4676, ((slice__u8){(u8*)"typedef % (*%)(%);\012", 19}), v__4678); });
+      ({ grow__u8* v__4680 = (&(rt_nonnull(g, "src/codegen.sabk:357:21"))->fn_typedefs); slice__prelude__Any v__4682 = ((slice__prelude__Any){(items__4681[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__ret_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:357:72"))->ret)}, .info = (&ti__1)}), items__4681[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4681[2] = ((prelude__Any){.value = (slice__u8[1]){params}, .info = (&ti__1)}), items__4681), 3}); fmt__print_to(ctx, v__4680, ((slice__u8){(u8*)"typedef % (*%)(%);\012", 19}), v__4682); });
     }
     break;
     default:
@@ -33778,8 +33887,8 @@ static slice__u8 codegen__c_type(prelude__Context *ctx, codegen__CodeGen* g, typ
 
 static void codegen__by_value(prelude__Context *ctx, codegen__CodeGen* g, types__Type* member) {
   {
-    types__TypeKind switch__4679 = (rt_nonnull(member, "src/codegen.sabk:365:20"))->kind;
-    switch (switch__4679) {
+    types__TypeKind switch__4683 = (rt_nonnull(member, "src/codegen.sabk:365:20"))->kind;
+    switch (switch__4683) {
     case ((types__TypeKind)11LL):
     case ((types__TypeKind)12LL):
     case ((types__TypeKind)7LL):
@@ -33798,44 +33907,44 @@ static void codegen__by_value(prelude__Context *ctx, codegen__CodeGen* g, types_
 }
 
 static void codegen__define_type(prelude__Context *ctx, codegen__CodeGen* g, types__Type* of_type) {
-  prelude__Any items__4685[2];
   prelude__Any items__4689[2];
-  prelude__Any items__4692[3];
-  slice__u8 items__4694[4];
-  prelude__Any items__4695[2];
-  slice__u8 items__4697[7];
-  slice__u8 items__4700[8];
-  slice__u8 items__4703[7];
-  slice__u8 items__4706[7];
-  slice__u8 items__4709[7];
-  slice__u8 items__4712[18];
-  prelude__Any items__4719[3];
-  slice__u8 items__4722[9];
-  types__Type* t = ((rt_nonnull(of_type, "src/codegen.sabk:374:25"))->is_string ? ({ types__Types* v__4680 = codegen__ts(ctx, g); types__Type* v__4681 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:374:58"))->u8_; types__slice_of(ctx, v__4680, v__4681); }) : of_type);
+  prelude__Any items__4693[2];
+  prelude__Any items__4696[3];
+  slice__u8 items__4698[4];
+  prelude__Any items__4699[2];
+  slice__u8 items__4701[7];
+  slice__u8 items__4704[8];
+  slice__u8 items__4707[7];
+  slice__u8 items__4710[7];
+  slice__u8 items__4713[7];
+  slice__u8 items__4716[18];
+  prelude__Any items__4723[3];
+  slice__u8 items__4726[9];
+  types__Type* t = ((rt_nonnull(of_type, "src/codegen.sabk:374:25"))->is_string ? ({ types__Types* v__4684 = codegen__ts(ctx, g); types__Type* v__4685 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:374:58"))->u8_; types__slice_of(ctx, v__4684, v__4685); }) : of_type);
   if (map__map_has__ptr_types__Type__bool(ctx, (&(rt_nonnull(g, "src/codegen.sabk:375:20"))->defined), t)) {
     return;
   }
   map__map_put__ptr_types__Type__bool(ctx, (&(rt_nonnull(g, "src/codegen.sabk:377:16"))->defined), t, true);
   slice__u8 name = codegen__c_type(ctx, g, t);
   {
-    types__TypeKind switch__4682 = (rt_nonnull(t, "src/codegen.sabk:379:15"))->kind;
-    switch (switch__4682) {
+    types__TypeKind switch__4686 = (rt_nonnull(t, "src/codegen.sabk:379:15"))->kind;
+    switch (switch__4686) {
     case ((types__TypeKind)11LL):
     case ((types__TypeKind)12LL):
     {
       {
-        grow__types__Field seq__4683 = (rt_nonnull(t, "src/codegen.sabk:381:21"))->fields;
-        for (isize i__4684 = 0; i__4684 < seq__4683.len; i__4684++) {
-          types__Field f = seq__4683.ptr[i__4684];
+        grow__types__Field seq__4687 = (rt_nonnull(t, "src/codegen.sabk:381:21"))->fields;
+        for (isize i__4688 = 0; i__4688 < seq__4687.len; i__4688++) {
+          types__Field f = seq__4687.ptr[i__4688];
           codegen__by_value(ctx, g, (f).ty);
         }
       }
-      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:383:21"))->defs), ((slice__u8){(u8*)"% % {\012", 6}), ((slice__prelude__Any){(items__4685[0] = (((rt_nonnull(t, "src/codegen.sabk:383:44"))->kind == ((types__TypeKind)11LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"struct", 6})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"union", 5})}, .info = (&ti__1)})), items__4685[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4685), 2}));
+      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:383:21"))->defs), ((slice__u8){(u8*)"% % {\012", 6}), ((slice__prelude__Any){(items__4689[0] = (((rt_nonnull(t, "src/codegen.sabk:383:44"))->kind == ((types__TypeKind)11LL)) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"struct", 6})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"union", 5})}, .info = (&ti__1)})), items__4689[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4689), 2}));
       {
-        grow__types__Field seq__4686 = (rt_nonnull(t, "src/codegen.sabk:384:21"))->fields;
-        for (isize i__4687 = 0; i__4687 < seq__4686.len; i__4687++) {
-          types__Field f = seq__4686.ptr[i__4687];
-          ({ grow__u8* v__4688 = (&(rt_nonnull(g, "src/codegen.sabk:385:25"))->defs); slice__prelude__Any v__4690 = ((slice__prelude__Any){(items__4689[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (f).ty)}, .info = (&ti__1)}), items__4689[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__local_name(ctx, (f).name)}, .info = (&ti__1)}), items__4689), 2}); fmt__print_to(ctx, v__4688, ((slice__u8){(u8*)"  % %;\012", 7}), v__4690); });
+        grow__types__Field seq__4690 = (rt_nonnull(t, "src/codegen.sabk:384:21"))->fields;
+        for (isize i__4691 = 0; i__4691 < seq__4690.len; i__4691++) {
+          types__Field f = seq__4690.ptr[i__4691];
+          ({ grow__u8* v__4692 = (&(rt_nonnull(g, "src/codegen.sabk:385:25"))->defs); slice__prelude__Any v__4694 = ((slice__prelude__Any){(items__4693[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (f).ty)}, .info = (&ti__1)}), items__4693[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__local_name(ctx, (f).name)}, .info = (&ti__1)}), items__4693), 2}); fmt__print_to(ctx, v__4692, ((slice__u8){(u8*)"  % %;\012", 7}), v__4694); });
         }
       }
       str__append_string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:386:26"))->defs), ((slice__u8){(u8*)"};\012\012", 4}));
@@ -33844,30 +33953,30 @@ static void codegen__define_type(prelude__Context *ctx, codegen__CodeGen* g, typ
     case ((types__TypeKind)7LL):
     {
       codegen__by_value(ctx, g, (rt_nonnull(t, "src/codegen.sabk:388:23"))->elem);
-      ({ grow__u8* v__4691 = (&(rt_nonnull(g, "src/codegen.sabk:390:21"))->defs); slice__prelude__Any v__4693 = ((slice__prelude__Any){(items__4692[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4692[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:390:75"))->elem)}, .info = (&ti__1)}), items__4692[2] = (((rt_nonnull(t, "src/codegen.sabk:390:88"))->len != ((u64)0LL)) ? ((prelude__Any){.value = (u64[1]){(rt_nonnull(t, "src/codegen.sabk:390:100"))->len}, .info = (&ti__5)}) : ((prelude__Any){.value = (isize[1]){((isize)1LL)}, .info = (&ti__3)})), items__4692), 3}); fmt__print_to(ctx, v__4691, ((slice__u8){(u8*)"struct % { % data[%]; };\012", 25}), v__4693); });
+      ({ grow__u8* v__4695 = (&(rt_nonnull(g, "src/codegen.sabk:390:21"))->defs); slice__prelude__Any v__4697 = ((slice__prelude__Any){(items__4696[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4696[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:390:75"))->elem)}, .info = (&ti__1)}), items__4696[2] = (((rt_nonnull(t, "src/codegen.sabk:390:88"))->len != ((u64)0LL)) ? ((prelude__Any){.value = (u64[1]){(rt_nonnull(t, "src/codegen.sabk:390:100"))->len}, .info = (&ti__5)}) : ((prelude__Any){.value = (isize[1]){((isize)1LL)}, .info = (&ti__3)})), items__4696), 3}); fmt__print_to(ctx, v__4695, ((slice__u8){(u8*)"struct % { % data[%]; };\012", 25}), v__4697); });
     }
     break;
     case ((types__TypeKind)8LL):
     {
       slice__u8 elem = codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:392:32"))->elem);
-      slice__u8 fun = codegen__cat(ctx, ((slice__string){(items__4694[0] = ((slice__u8){(u8*)"static inline ", 14}), items__4694[1] = name, items__4694[2] = ((slice__u8){(u8*)" ", 1}), items__4694[3] = name, items__4694), 4}));
-      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:394:21"))->defs), ((slice__u8){(u8*)"struct % { % *ptr; isize len; };\012", 33}), ((slice__prelude__Any){(items__4695[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4695[1] = ((prelude__Any){.value = (slice__u8[1]){elem}, .info = (&ti__1)}), items__4695), 2}));
-      ({ grow__u8* v__4696 = (&(rt_nonnull(g, "src/codegen.sabk:399:26"))->helpers); slice__u8 v__4698 = codegen__cat(ctx, ((slice__string){(items__4697[0] = ((slice__u8){(u8*)"static inline ", 14}), items__4697[1] = elem, items__4697[2] = ((slice__u8){(u8*)" *", 2}), items__4697[3] = name, items__4697[4] = ((slice__u8){(u8*)"__at(", 5}), items__4697[5] = name, items__4697[6] = ((slice__u8){(u8*)" s, isize i, const char *where) {\012  return &s.ptr[rt_index(i, s.len, where)];\012}\012", 80}), items__4697), 7})); str__append_string(ctx, v__4696, v__4698); });
-      ({ grow__u8* v__4699 = (&(rt_nonnull(g, "src/codegen.sabk:402:26"))->helpers); slice__u8 v__4701 = codegen__cat(ctx, ((slice__string){(items__4700[0] = fun, items__4700[1] = ((slice__u8){(u8*)"__sub(", 6}), items__4700[2] = elem, items__4700[3] = ((slice__u8){(u8*)" *ptr, isize len, isize lo, isize hi, ", 38}), items__4700[4] = ((slice__u8){(u8*)"const char *where) {\012  rt_slice_check(lo, hi, len, where);\012", 59}), items__4700[5] = ((slice__u8){(u8*)"  return (", 10}), items__4700[6] = name, items__4700[7] = ((slice__u8){(u8*)"){ptr + lo, hi - lo};\012}\012", 24}), items__4700), 8})); str__append_string(ctx, v__4699, v__4701); });
-      ({ grow__u8* v__4702 = (&(rt_nonnull(g, "src/codegen.sabk:405:26"))->helpers); slice__u8 v__4704 = codegen__cat(ctx, ((slice__string){(items__4703[0] = fun, items__4703[1] = ((slice__u8){(u8*)"__slice(", 8}), items__4703[2] = name, items__4703[3] = ((slice__u8){(u8*)" s, isize lo, isize hi, const char ", 35}), items__4703[4] = ((slice__u8){(u8*)"*where) {\012  return ", 19}), items__4703[5] = name, items__4703[6] = ((slice__u8){(u8*)"__sub(s.ptr, s.len, lo, hi, where);\012}\012", 38}), items__4703), 7})); str__append_string(ctx, v__4702, v__4704); });
-      ({ grow__u8* v__4705 = (&(rt_nonnull(g, "src/codegen.sabk:407:26"))->helpers); slice__u8 v__4707 = codegen__cat(ctx, ((slice__string){(items__4706[0] = fun, items__4706[1] = ((slice__u8){(u8*)"__from(", 7}), items__4706[2] = name, items__4706[3] = ((slice__u8){(u8*)" s, isize lo, const char *where) {\012", 35}), items__4706[4] = ((slice__u8){(u8*)"  return ", 9}), items__4706[5] = name, items__4706[6] = ((slice__u8){(u8*)"__sub(s.ptr, s.len, lo, s.len, where);\012}\012", 41}), items__4706), 7})); str__append_string(ctx, v__4705, v__4707); });
-      ({ grow__u8* v__4708 = (&(rt_nonnull(g, "src/codegen.sabk:410:26"))->helpers); slice__u8 v__4710 = codegen__cat(ctx, ((slice__string){(items__4709[0] = fun, items__4709[1] = ((slice__u8){(u8*)"__part(", 7}), items__4709[2] = elem, items__4709[3] = ((slice__u8){(u8*)" *ptr, isize lo, isize hi) {\012", 29}), items__4709[4] = ((slice__u8){(u8*)"  return (", 10}), items__4709[5] = name, items__4709[6] = ((slice__u8){(u8*)"){ptr + lo, hi - lo};\012}\012", 24}), items__4709), 7})); str__append_string(ctx, v__4708, v__4710); });
+      slice__u8 fun = codegen__cat(ctx, ((slice__string){(items__4698[0] = ((slice__u8){(u8*)"static inline ", 14}), items__4698[1] = name, items__4698[2] = ((slice__u8){(u8*)" ", 1}), items__4698[3] = name, items__4698), 4}));
+      fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:394:21"))->defs), ((slice__u8){(u8*)"struct % { % *ptr; isize len; };\012", 33}), ((slice__prelude__Any){(items__4699[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4699[1] = ((prelude__Any){.value = (slice__u8[1]){elem}, .info = (&ti__1)}), items__4699), 2}));
+      ({ grow__u8* v__4700 = (&(rt_nonnull(g, "src/codegen.sabk:399:26"))->helpers); slice__u8 v__4702 = codegen__cat(ctx, ((slice__string){(items__4701[0] = ((slice__u8){(u8*)"static inline ", 14}), items__4701[1] = elem, items__4701[2] = ((slice__u8){(u8*)" *", 2}), items__4701[3] = name, items__4701[4] = ((slice__u8){(u8*)"__at(", 5}), items__4701[5] = name, items__4701[6] = ((slice__u8){(u8*)" s, isize i, const char *where) {\012  return &s.ptr[rt_index(i, s.len, where)];\012}\012", 80}), items__4701), 7})); str__append_string(ctx, v__4700, v__4702); });
+      ({ grow__u8* v__4703 = (&(rt_nonnull(g, "src/codegen.sabk:402:26"))->helpers); slice__u8 v__4705 = codegen__cat(ctx, ((slice__string){(items__4704[0] = fun, items__4704[1] = ((slice__u8){(u8*)"__sub(", 6}), items__4704[2] = elem, items__4704[3] = ((slice__u8){(u8*)" *ptr, isize len, isize lo, isize hi, ", 38}), items__4704[4] = ((slice__u8){(u8*)"const char *where) {\012  rt_slice_check(lo, hi, len, where);\012", 59}), items__4704[5] = ((slice__u8){(u8*)"  return (", 10}), items__4704[6] = name, items__4704[7] = ((slice__u8){(u8*)"){ptr + lo, hi - lo};\012}\012", 24}), items__4704), 8})); str__append_string(ctx, v__4703, v__4705); });
+      ({ grow__u8* v__4706 = (&(rt_nonnull(g, "src/codegen.sabk:405:26"))->helpers); slice__u8 v__4708 = codegen__cat(ctx, ((slice__string){(items__4707[0] = fun, items__4707[1] = ((slice__u8){(u8*)"__slice(", 8}), items__4707[2] = name, items__4707[3] = ((slice__u8){(u8*)" s, isize lo, isize hi, const char ", 35}), items__4707[4] = ((slice__u8){(u8*)"*where) {\012  return ", 19}), items__4707[5] = name, items__4707[6] = ((slice__u8){(u8*)"__sub(s.ptr, s.len, lo, hi, where);\012}\012", 38}), items__4707), 7})); str__append_string(ctx, v__4706, v__4708); });
+      ({ grow__u8* v__4709 = (&(rt_nonnull(g, "src/codegen.sabk:407:26"))->helpers); slice__u8 v__4711 = codegen__cat(ctx, ((slice__string){(items__4710[0] = fun, items__4710[1] = ((slice__u8){(u8*)"__from(", 7}), items__4710[2] = name, items__4710[3] = ((slice__u8){(u8*)" s, isize lo, const char *where) {\012", 35}), items__4710[4] = ((slice__u8){(u8*)"  return ", 9}), items__4710[5] = name, items__4710[6] = ((slice__u8){(u8*)"__sub(s.ptr, s.len, lo, s.len, where);\012}\012", 41}), items__4710), 7})); str__append_string(ctx, v__4709, v__4711); });
+      ({ grow__u8* v__4712 = (&(rt_nonnull(g, "src/codegen.sabk:410:26"))->helpers); slice__u8 v__4714 = codegen__cat(ctx, ((slice__string){(items__4713[0] = fun, items__4713[1] = ((slice__u8){(u8*)"__part(", 7}), items__4713[2] = elem, items__4713[3] = ((slice__u8){(u8*)" *ptr, isize lo, isize hi) {\012", 29}), items__4713[4] = ((slice__u8){(u8*)"  return (", 10}), items__4713[5] = name, items__4713[6] = ((slice__u8){(u8*)"){ptr + lo, hi - lo};\012}\012", 24}), items__4713), 7})); str__append_string(ctx, v__4712, v__4714); });
       slice__u8 ctx_type = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:413:36"))->c, "src/codegen.sabk:413:38"))->context_type);
       slice__u8 allocator = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:414:37"))->c, "src/codegen.sabk:414:39"))->allocator_type);
-      ({ grow__u8* v__4711 = (&(rt_nonnull(g, "src/codegen.sabk:415:26"))->helpers); slice__u8 v__4713 = codegen__cat(ctx, ((slice__string){(items__4712[0] = fun, items__4712[1] = ((slice__u8){(u8*)"__make(", 7}), items__4712[2] = ctx_type, items__4712[3] = ((slice__u8){(u8*)" *ctx, ", 7}), items__4712[4] = allocator, items__4712[5] = ((slice__u8){(u8*)" a, isize ", 10}), items__4712[6] = ((slice__u8){(u8*)"n, const char *where) {\012  if (n == 0)\012    return (", 50}), items__4712[7] = name, items__4712[8] = ((slice__u8){(u8*)"){0};\012  return (", 16}), items__4712[9] = name, items__4712[10] = ((slice__u8){(u8*)"){(", 3}), items__4712[11] = elem, items__4712[12] = ((slice__u8){(u8*)" *)rt_new(ctx, ", 15}), items__4712[13] = ((slice__u8){(u8*)"a, sizeof(", 10}), items__4712[14] = elem, items__4712[15] = ((slice__u8){(u8*)") * n, _Alignof(", 16}), items__4712[16] = elem, items__4712[17] = ((slice__u8){(u8*)"), where), n};\012}\012", 17}), items__4712), 18})); str__append_string(ctx, v__4711, v__4713); });
+      ({ grow__u8* v__4715 = (&(rt_nonnull(g, "src/codegen.sabk:415:26"))->helpers); slice__u8 v__4717 = codegen__cat(ctx, ((slice__string){(items__4716[0] = fun, items__4716[1] = ((slice__u8){(u8*)"__make(", 7}), items__4716[2] = ctx_type, items__4716[3] = ((slice__u8){(u8*)" *ctx, ", 7}), items__4716[4] = allocator, items__4716[5] = ((slice__u8){(u8*)" a, isize ", 10}), items__4716[6] = ((slice__u8){(u8*)"n, const char *where) {\012  if (n == 0)\012    return (", 50}), items__4716[7] = name, items__4716[8] = ((slice__u8){(u8*)"){0};\012  return (", 16}), items__4716[9] = name, items__4716[10] = ((slice__u8){(u8*)"){(", 3}), items__4716[11] = elem, items__4716[12] = ((slice__u8){(u8*)" *)rt_new(ctx, ", 15}), items__4716[13] = ((slice__u8){(u8*)"a, sizeof(", 10}), items__4716[14] = elem, items__4716[15] = ((slice__u8){(u8*)") * n, _Alignof(", 16}), items__4716[16] = elem, items__4716[17] = ((slice__u8){(u8*)"), where), n};\012}\012", 17}), items__4716), 18})); str__append_string(ctx, v__4715, v__4717); });
     }
     break;
     case ((types__TypeKind)9LL):
     {
       codegen__by_value(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:421:23"))->c, "src/codegen.sabk:421:25"))->allocator_type);
-      slice__u8 s = ({ codegen__CodeGen* v__4714 = g; types__Type* v__4717 = ({ types__Types* v__4715 = codegen__ts(ctx, g); types__Type* v__4716 = (rt_nonnull(t, "src/codegen.sabk:422:45"))->elem; types__slice_of(ctx, v__4715, v__4716); }); codegen__c_type(ctx, v__4714, v__4717); });
-      ({ grow__u8* v__4718 = (&(rt_nonnull(g, "src/codegen.sabk:423:21"))->defs); slice__prelude__Any v__4720 = ((slice__prelude__Any){(items__4719[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4719[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:424:30"))->elem)}, .info = (&ti__1)}), items__4719[2] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:424:49"))->c, "src/codegen.sabk:424:51"))->allocator_type)}, .info = (&ti__1)}), items__4719), 3}); fmt__print_to(ctx, v__4718, ((slice__u8){(u8*)"struct % { % *ptr; isize len; isize cap; % allocator; };\012", 57}), v__4720); });
-      ({ grow__u8* v__4721 = (&(rt_nonnull(g, "src/codegen.sabk:425:26"))->helpers); slice__u8 v__4723 = codegen__cat(ctx, ((slice__string){(items__4722[0] = ((slice__u8){(u8*)"static inline ", 14}), items__4722[1] = s, items__4722[2] = ((slice__u8){(u8*)" ", 1}), items__4722[3] = name, items__4722[4] = ((slice__u8){(u8*)"__view(", 7}), items__4722[5] = name, items__4722[6] = ((slice__u8){(u8*)" g) {\012  return (", 16}), items__4722[7] = s, items__4722[8] = ((slice__u8){(u8*)"){g.ptr, g.len};\012}\012", 19}), items__4722), 9})); str__append_string(ctx, v__4721, v__4723); });
+      slice__u8 s = ({ codegen__CodeGen* v__4718 = g; types__Type* v__4721 = ({ types__Types* v__4719 = codegen__ts(ctx, g); types__Type* v__4720 = (rt_nonnull(t, "src/codegen.sabk:422:45"))->elem; types__slice_of(ctx, v__4719, v__4720); }); codegen__c_type(ctx, v__4718, v__4721); });
+      ({ grow__u8* v__4722 = (&(rt_nonnull(g, "src/codegen.sabk:423:21"))->defs); slice__prelude__Any v__4724 = ((slice__prelude__Any){(items__4723[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4723[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:424:30"))->elem)}, .info = (&ti__1)}), items__4723[2] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:424:49"))->c, "src/codegen.sabk:424:51"))->allocator_type)}, .info = (&ti__1)}), items__4723), 3}); fmt__print_to(ctx, v__4722, ((slice__u8){(u8*)"struct % { % *ptr; isize len; isize cap; % allocator; };\012", 57}), v__4724); });
+      ({ grow__u8* v__4725 = (&(rt_nonnull(g, "src/codegen.sabk:425:26"))->helpers); slice__u8 v__4727 = codegen__cat(ctx, ((slice__string){(items__4726[0] = ((slice__u8){(u8*)"static inline ", 14}), items__4726[1] = s, items__4726[2] = ((slice__u8){(u8*)" ", 1}), items__4726[3] = name, items__4726[4] = ((slice__u8){(u8*)"__view(", 7}), items__4726[5] = name, items__4726[6] = ((slice__u8){(u8*)" g) {\012  return (", 16}), items__4726[7] = s, items__4726[8] = ((slice__u8){(u8*)"){g.ptr, g.len};\012}\012", 19}), items__4726), 9})); str__append_string(ctx, v__4725, v__4727); });
     }
     break;
     default:
@@ -33887,48 +33996,48 @@ static void codegen__define_pending_types(prelude__Context *ctx, codegen__CodeGe
 }
 
 static slice__u8 codegen__fn_signature(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* fun) {
-  prelude__Any items__4725[1];
-  prelude__Any items__4730[2];
-  prelude__Any items__4733[3];
+  prelude__Any items__4729[1];
+  prelude__Any items__4734[2];
+  prelude__Any items__4737[3];
   types__Type* t = (rt_nonnull(fun, "src/codegen.sabk:443:17"))->ty;
   grow__u8 params = {0};
   (params).allocator = ((*ctx)).temp_allocator;
   if ((!codegen__is_extern_decl(ctx, fun))) {
-    ({ grow__u8* v__4724 = (&params); slice__prelude__Any v__4726 = ((slice__prelude__Any){(items__4725[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:447:49"))->c, "src/codegen.sabk:447:51"))->context_type)}, .info = (&ti__1)}), items__4725), 1}); fmt__print_to(ctx, v__4724, ((slice__u8){(u8*)"% *ctx", 6}), v__4726); });
+    ({ grow__u8* v__4728 = (&params); slice__prelude__Any v__4730 = ((slice__prelude__Any){(items__4729[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:447:49"))->c, "src/codegen.sabk:447:51"))->context_type)}, .info = (&ti__1)}), items__4729), 1}); fmt__print_to(ctx, v__4728, ((slice__u8){(u8*)"% *ctx", 6}), v__4730); });
   }
   isize k = ((isize)0LL);
   {
-    slice__ptr_ast__Node seq__4727 = check__fn_params(ctx, fun);
-    for (isize i__4728 = 0; i__4728 < seq__4727.len; i__4728++) {
-      ast__Node* param = seq__4727.ptr[i__4728];
+    slice__ptr_ast__Node seq__4731 = check__fn_params(ctx, fun);
+    for (isize i__4732 = 0; i__4732 < seq__4731.len; i__4732++) {
+      ast__Node* param = seq__4731.ptr[i__4732];
       if (check__is_type_param(ctx, param)) {
         continue;
       }
       if (((params).len > ((isize)0LL))) {
         str__append_string(ctx, (&params), ((slice__u8){(u8*)", ", 2}));
       }
-      ({ grow__u8* v__4729 = (&params); slice__prelude__Any v__4731 = ((slice__prelude__Any){(items__4730[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (*slice__ptr_types__Type__at((rt_nonnull(t, "src/codegen.sabk:454:46"))->params, k, "src/codegen.sabk:454:52")))}, .info = (&ti__1)}), items__4730[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__var_name(ctx, g, param)}, .info = (&ti__1)}), items__4730), 2}); fmt__print_to(ctx, v__4729, ((slice__u8){(u8*)"% %", 3}), v__4731); });
+      ({ grow__u8* v__4733 = (&params); slice__prelude__Any v__4735 = ((slice__prelude__Any){(items__4734[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (*slice__ptr_types__Type__at((rt_nonnull(t, "src/codegen.sabk:454:46"))->params, k, "src/codegen.sabk:454:52")))}, .info = (&ti__1)}), items__4734[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__var_name(ctx, g, param)}, .info = (&ti__1)}), items__4734), 2}); fmt__print_to(ctx, v__4733, ((slice__u8){(u8*)"% %", 3}), v__4735); });
       k++;
     }
   }
-  if (({ ast__NodeKind is__4732 = (rt_nonnull(fun, "src/codegen.sabk:457:13"))->kind; (is__4732.tag == ((ast__NodeKind__Tag)2LL) && (is__4732.payload.Fn.variadic == true)) ? (1) : 0; })) {
+  if (({ ast__NodeKind is__4736 = (rt_nonnull(fun, "src/codegen.sabk:457:13"))->kind; (is__4736.tag == ((ast__NodeKind__Tag)2LL) && (is__4736.payload.Fn.variadic == true)) ? (1) : 0; })) {
     str__append_string(ctx, (&params), (((params).len == ((isize)0LL)) ? ((slice__u8){(u8*)"...", 3}) : ((slice__u8){(u8*)", ...", 5})));
   }
   if (((params).len == ((isize)0LL))) {
     str__append_string(ctx, (&params), ((slice__u8){(u8*)"void", 4}));
   }
-  return fmt__tformat(ctx, ((slice__u8){(u8*)"% %(%)", 6}), ((slice__prelude__Any){(items__4733[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__ret_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:461:44"))->ret)}, .info = (&ti__1)}), items__4733[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, fun)}, .info = (&ti__1)}), items__4733[2] = ((prelude__Any){.value = (slice__u8[1]){grow__u8__view(params)}, .info = (&ti__1)}), items__4733), 3}));
+  return fmt__tformat(ctx, ((slice__u8){(u8*)"% %(%)", 6}), ((slice__prelude__Any){(items__4737[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__ret_type(ctx, g, (rt_nonnull(t, "src/codegen.sabk:461:44"))->ret)}, .info = (&ti__1)}), items__4737[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, fun)}, .info = (&ti__1)}), items__4737[2] = ((prelude__Any){.value = (slice__u8[1]){grow__u8__view(params)}, .info = (&ti__1)}), items__4737), 3}));
 }
 
 static void codegen__emit_fn_prototype(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* fun) {
-  prelude__Any items__4735[2];
-  ({ grow__u8* v__4734 = (&(rt_nonnull(g, "src/codegen.sabk:466:17"))->protos); slice__prelude__Any v__4736 = ((slice__prelude__Any){(items__4735[0] = (codegen__is_extern_decl(ctx, fun) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"static ", 7})}, .info = (&ti__1)})), items__4735[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__fn_signature(ctx, g, fun)}, .info = (&ti__1)}), items__4735), 2}); fmt__print_to(ctx, v__4734, ((slice__u8){(u8*)"%{}%;\012", 6}), v__4736); });
+  prelude__Any items__4739[2];
+  ({ grow__u8* v__4738 = (&(rt_nonnull(g, "src/codegen.sabk:466:17"))->protos); slice__prelude__Any v__4740 = ((slice__prelude__Any){(items__4739[0] = (codegen__is_extern_decl(ctx, fun) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"static ", 7})}, .info = (&ti__1)})), items__4739[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__fn_signature(ctx, g, fun)}, .info = (&ti__1)}), items__4739), 2}); fmt__print_to(ctx, v__4738, ((slice__u8){(u8*)"%{}%;\012", 6}), v__4740); });
 }
 
 static void codegen__emit_fn_body(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* fun) {
-  slice__u8 items__4738[4];
-  slice__u8 items__4741[2];
-  prelude__Any items__4748[2];
+  slice__u8 items__4742[4];
+  slice__u8 items__4745[2];
+  prelude__Any items__4752[2];
   ast__Node* b = check__fn_body(ctx, fun);
   if ((b == ((ast__Node*)0))) {
     return;
@@ -33942,10 +34051,10 @@ static void codegen__emit_fn_body(prelude__Context *ctx, codegen__CodeGen* g, as
   ((rt_nonnull(g, "src/codegen.sabk:480:7"))->scopes).len = ((isize)0LL);
   array__array_add__codegen__Scope(ctx, (&(rt_nonnull(g, "src/codegen.sabk:481:18"))->scopes), ((codegen__Scope){.kind = ((codegen__ScopeKind)0LL), .ctx_ = ((slice__u8){(u8*)"ctx", 3})}));
   if (codegen__is_extern_decl(ctx, fun)) {
-    ({ codegen__CodeGen* v__4737 = g; slice__u8 v__4739 = codegen__cat(ctx, ((slice__string){(items__4738[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:485:33"))->c, "src/codegen.sabk:485:35"))->context_type), items__4738[1] = ((slice__u8){(u8*)" ctx__default = ", 16}), items__4738[2] = codegen__default_context(ctx, g), items__4738[3] = ((slice__u8){(u8*)"(&rt_boot_context);", 19}), items__4738), 4})); codegen__line(ctx, v__4737, v__4739); });
-    ({ codegen__CodeGen* v__4740 = g; slice__u8 v__4742 = codegen__cat(ctx, ((slice__string){(items__4741[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:486:33"))->c, "src/codegen.sabk:486:35"))->context_type), items__4741[1] = ((slice__u8){(u8*)" *ctx = &ctx__default;", 22}), items__4741), 2})); codegen__line(ctx, v__4740, v__4742); });
+    ({ codegen__CodeGen* v__4741 = g; slice__u8 v__4743 = codegen__cat(ctx, ((slice__string){(items__4742[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:485:33"))->c, "src/codegen.sabk:485:35"))->context_type), items__4742[1] = ((slice__u8){(u8*)" ctx__default = ", 16}), items__4742[2] = codegen__default_context(ctx, g), items__4742[3] = ((slice__u8){(u8*)"(&rt_boot_context);", 19}), items__4742), 4})); codegen__line(ctx, v__4741, v__4743); });
+    ({ codegen__CodeGen* v__4744 = g; slice__u8 v__4746 = codegen__cat(ctx, ((slice__string){(items__4745[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:486:33"))->c, "src/codegen.sabk:486:35"))->context_type), items__4745[1] = ((slice__u8){(u8*)" *ctx = &ctx__default;", 22}), items__4745), 2})); codegen__line(ctx, v__4744, v__4746); });
   }
-  ({ codegen__CodeGen* v__4743 = g; slice__ptr_ast__Node v__4744 = check__block_list(ctx, b); codegen__emit_scope(ctx, v__4743, v__4744, ((codegen__ScopeKind)1LL)); });
+  ({ codegen__CodeGen* v__4747 = g; slice__ptr_ast__Node v__4748 = check__block_list(ctx, b); codegen__emit_scope(ctx, v__4747, v__4748, ((codegen__ScopeKind)1LL)); });
   if ((rt_nonnull((rt_nonnull((rt_nonnull(fun, "src/codegen.sabk:489:13"))->ty, "src/codegen.sabk:489:16"))->ret, "src/codegen.sabk:489:20"))->is_failure) {
     codegen__line(ctx, g, ((slice__u8){(u8*)"return 0;", 9}));
   }
@@ -33953,9 +34062,9 @@ static void codegen__emit_fn_body(prelude__Context *ctx, codegen__CodeGen* g, as
   (rt_nonnull(g, "src/codegen.sabk:493:7"))->indent = ((isize)0LL);
   (rt_nonnull(g, "src/codegen.sabk:494:7"))->here = (rt_nonnull(fun, "src/codegen.sabk:494:18"))->tok;
   if ((rt_nonnull(g, "src/codegen.sabk:495:11"))->line_directives) {
-    ({ grow__u8* v__4745 = (&(rt_nonnull(g, "src/codegen.sabk:496:26"))->bodies); slice__u8 v__4746 = codegen__line_directive(ctx, g); str__append_string(ctx, v__4745, v__4746); });
+    ({ grow__u8* v__4749 = (&(rt_nonnull(g, "src/codegen.sabk:496:26"))->bodies); slice__u8 v__4750 = codegen__line_directive(ctx, g); str__append_string(ctx, v__4749, v__4750); });
   }
-  ({ grow__u8* v__4747 = (&(rt_nonnull(g, "src/codegen.sabk:497:17"))->bodies); slice__prelude__Any v__4749 = ((slice__prelude__Any){(items__4748[0] = (codegen__is_extern_decl(ctx, fun) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"static ", 7})}, .info = (&ti__1)})), items__4748[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__fn_signature(ctx, g, fun)}, .info = (&ti__1)}), items__4748), 2}); fmt__print_to(ctx, v__4747, ((slice__u8){(u8*)"%{}% {\012", 7}), v__4749); });
+  ({ grow__u8* v__4751 = (&(rt_nonnull(g, "src/codegen.sabk:497:17"))->bodies); slice__prelude__Any v__4753 = ((slice__prelude__Any){(items__4752[0] = (codegen__is_extern_decl(ctx, fun) ? ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"", 0})}, .info = (&ti__1)}) : ((prelude__Any){.value = (slice__u8[1]){((slice__u8){(u8*)"static ", 7})}, .info = (&ti__1)})), items__4752[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__fn_signature(ctx, g, fun)}, .info = (&ti__1)}), items__4752), 2}); fmt__print_to(ctx, v__4751, ((slice__u8){(u8*)"%{}% {\012", 7}), v__4753); });
   str__append_string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:498:22"))->bodies), grow__u8__view((rt_nonnull(g, "src/codegen.sabk:498:32"))->fn_storage));
   str__append_string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:499:22"))->bodies), grow__u8__view((*rt_nonnull(body, "src/codegen.sabk:499:35"))));
   str__append_string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:500:22"))->bodies), ((slice__u8){(u8*)"}\012\012", 3}));
@@ -33964,38 +34073,38 @@ static void codegen__emit_fn_body(prelude__Context *ctx, codegen__CodeGen* g, as
 }
 
 static void codegen__emit_global(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* d) {
-  prelude__Any items__4751[2];
-  slice__u8 items__4753[4];
-  slice__u8 items__4754[3];
-  prelude__Any items__4755[1];
+  prelude__Any items__4755[2];
+  slice__u8 items__4757[4];
+  slice__u8 items__4758[3];
+  prelude__Any items__4759[1];
   if (((((rt_nonnull(d, "src/codegen.sabk:506:11"))->kind).tag == ((ast__NodeKind__Tag)11LL)) && (((rt_nonnull(d, "src/codegen.sabk:506:35"))->cval).kind != ((const__ConstKind)0LL)))) {
     return;
   }
   if (codegen__is_extern_decl(ctx, d)) {
-    ({ grow__u8* v__4750 = (&(rt_nonnull(g, "src/codegen.sabk:509:21"))->globals); slice__prelude__Any v__4752 = ((slice__prelude__Any){(items__4751[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(d, "src/codegen.sabk:509:59"))->ty)}, .info = (&ti__1)}), items__4751[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, d)}, .info = (&ti__1)}), items__4751), 2}); fmt__print_to(ctx, v__4750, ((slice__u8){(u8*)"extern % %;\012", 12}), v__4752); });
+    ({ grow__u8* v__4754 = (&(rt_nonnull(g, "src/codegen.sabk:509:21"))->globals); slice__prelude__Any v__4756 = ((slice__prelude__Any){(items__4755[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(d, "src/codegen.sabk:509:59"))->ty)}, .info = (&ti__1)}), items__4755[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__global_name(ctx, g, d)}, .info = (&ti__1)}), items__4755), 2}); fmt__print_to(ctx, v__4754, ((slice__u8){(u8*)"extern % %;\012", 12}), v__4756); });
     return;
   }
-  slice__u8 decl = codegen__cat(ctx, ((slice__string){(items__4753[0] = ((slice__u8){(u8*)"static ", 7}), items__4753[1] = codegen__c_type(ctx, g, (rt_nonnull(d, "src/codegen.sabk:514:43"))->ty), items__4753[2] = ((slice__u8){(u8*)" ", 1}), items__4753[3] = codegen__global_name(ctx, g, d), items__4753), 4}));
+  slice__u8 decl = codegen__cat(ctx, ((slice__string){(items__4757[0] = ((slice__u8){(u8*)"static ", 7}), items__4757[1] = codegen__c_type(ctx, g, (rt_nonnull(d, "src/codegen.sabk:514:43"))->ty), items__4757[2] = ((slice__u8){(u8*)" ", 1}), items__4757[3] = codegen__global_name(ctx, g, d), items__4757), 4}));
   ast__Node* value = check__value_of(ctx, d);
   if (((value != ((ast__Node*)0)) || comptime__has_defaults(ctx, (rt_nonnull(g, "src/codegen.sabk:516:41"))->c, (rt_nonnull(d, "src/codegen.sabk:516:46"))->ty))) {
     (rt_nonnull(g, "src/codegen.sabk:517:11"))->static_init = true;
-    decl = codegen__cat(ctx, ((slice__string){(items__4754[0] = decl, items__4754[1] = ((slice__u8){(u8*)" = ", 3}), items__4754[2] = ((value != ((ast__Node*)0)) ? codegen__expr(ctx, g, value) : codegen__default_value(ctx, g, (rt_nonnull(d, "src/codegen.sabk:518:91"))->ty)), items__4754), 3}));
+    decl = codegen__cat(ctx, ((slice__string){(items__4758[0] = decl, items__4758[1] = ((slice__u8){(u8*)" = ", 3}), items__4758[2] = ((value != ((ast__Node*)0)) ? codegen__expr(ctx, g, value) : codegen__default_value(ctx, g, (rt_nonnull(d, "src/codegen.sabk:518:91"))->ty)), items__4758), 3}));
     (rt_nonnull(g, "src/codegen.sabk:519:11"))->static_init = false;
   }
-  fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:521:17"))->globals), ((slice__u8){(u8*)"%;\012", 3}), ((slice__prelude__Any){(items__4755[0] = ((prelude__Any){.value = (slice__u8[1]){decl}, .info = (&ti__1)}), items__4755), 1}));
+  fmt__print_to(ctx, (&(rt_nonnull(g, "src/codegen.sabk:521:17"))->globals), ((slice__u8){(u8*)"%;\012", 3}), ((slice__prelude__Any){(items__4759[0] = ((prelude__Any){.value = (slice__u8[1]){decl}, .info = (&ti__1)}), items__4759), 1}));
 }
 
 static void codegen__line(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 text) {
   if (((rt_nonnull(g, "src/codegen.sabk:527:11"))->line_directives && ((rt_nonnull(g, "src/codegen.sabk:527:32"))->current_fn != ((ast__Node*)0)))) {
-    ({ grow__u8* v__4756 = (rt_nonnull(g, "src/codegen.sabk:528:25"))->out; slice__u8 v__4757 = codegen__line_directive(ctx, g); str__append_string(ctx, v__4756, v__4757); });
+    ({ grow__u8* v__4760 = (rt_nonnull(g, "src/codegen.sabk:528:25"))->out; slice__u8 v__4761 = codegen__line_directive(ctx, g); str__append_string(ctx, v__4760, v__4761); });
   }
-  ({ grow__u8* v__4758 = (rt_nonnull(g, "src/codegen.sabk:529:21"))->out; slice__u8 v__4759 = codegen__spaces(ctx, ((isize)((rt_nonnull(g, "src/codegen.sabk:529:35"))->indent * ((isize)2LL)))); str__append_string(ctx, v__4758, v__4759); });
+  ({ grow__u8* v__4762 = (rt_nonnull(g, "src/codegen.sabk:529:21"))->out; slice__u8 v__4763 = codegen__spaces(ctx, ((isize)((rt_nonnull(g, "src/codegen.sabk:529:35"))->indent * ((isize)2LL)))); str__append_string(ctx, v__4762, v__4763); });
   str__append_string(ctx, (rt_nonnull(g, "src/codegen.sabk:530:21"))->out, text);
   array__array_add__u8(ctx, (rt_nonnull(g, "src/codegen.sabk:531:17"))->out, ((u8)10LL));
 }
 
 static slice__u8 codegen__line_directive(prelude__Context *ctx, codegen__CodeGen* g) {
-  prelude__Any items__4763[2];
+  prelude__Any items__4767[2];
   token__Token t = (rt_nonnull(g, "src/codegen.sabk:537:15"))->here;
   module__Module* m = resolve__module_of(ctx, (rt_nonnull(g, "src/codegen.sabk:538:25"))->res, ((t).text).ptr);
   while (((m != ((module__Module*)0)) && ((rt_nonnull(m, "src/codegen.sabk:539:27"))->inserted_by != ((ast__Node*)0)))) {
@@ -34006,25 +34115,25 @@ static slice__u8 codegen__line_directive(prelude__Context *ctx, codegen__CodeGen
     return ((slice__u8){(u8*)"", 0});
   }
   slice__u8 path = ({
-    tuple__1 result__4760 = map__map_get__ptr_module__Module__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:545:27"))->line_paths), m);
-    slice__u8 value__4761;
-    if (!result__4760._1)
-      value__4761 = ((slice__u8){(u8*)"", 0});
+    tuple__1 result__4764 = map__map_get__ptr_module__Module__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:545:27"))->line_paths), m);
+    slice__u8 value__4765;
+    if (!result__4764._1)
+      value__4765 = ((slice__u8){(u8*)"", 0});
     else
-      value__4761 = result__4760._0;
-    value__4761;
+      value__4765 = result__4764._0;
+    value__4765;
   });
   if (((path).len == ((isize)0LL))) {
     if ((m == (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:547:20"))->res, "src/codegen.sabk:547:24"))->prelude)) {
       path = (rt_nonnull(m, "src/codegen.sabk:548:22"))->path;
     } else {
-      tuple__2 values__4762 = path__path_absolute(ctx, (rt_nonnull(m, "src/codegen.sabk:550:47"))->path, ((*ctx)).allocator);
-      slice__u8 absolute = values__4762._0;
+      tuple__2 values__4766 = path__path_absolute(ctx, (rt_nonnull(m, "src/codegen.sabk:550:47"))->path, ((*ctx)).allocator);
+      slice__u8 absolute = values__4766._0;
       path = absolute;
     }
     map__map_put__ptr_module__Module__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:553:20"))->line_paths), m, path);
   }
-  return fmt__tformat(ctx, ((slice__u8){(u8*)"#line % %\012", 10}), ((slice__prelude__Any){(items__4763[0] = ((prelude__Any){.value = (i32[1]){(t).line}, .info = (&ti__4)}), items__4763[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_string(ctx, path)}, .info = (&ti__1)}), items__4763), 2}));
+  return fmt__tformat(ctx, ((slice__u8){(u8*)"#line % %\012", 10}), ((slice__prelude__Any){(items__4767[0] = ((prelude__Any){.value = (i32[1]){(t).line}, .info = (&ti__4)}), items__4767[1] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_string(ctx, path)}, .info = (&ti__1)}), items__4767), 2}));
 }
 
 static slice__u8 codegen__current_ctx(prelude__Context *ctx, codegen__CodeGen* g) {
@@ -34041,11 +34150,11 @@ static slice__u8 codegen__current_ctx(prelude__Context *ctx, codegen__CodeGen* g
 static bool codegen__changes_context(prelude__Context *ctx, ast__Node* target) {
   {
     slice__ptr_ast__Node items;
-    if (({ ast__NodeKind is__4764 = (rt_nonnull(target, "src/codegen.sabk:569:16"))->kind; is__4764.tag == ((ast__NodeKind__Tag)54LL) ? (items = is__4764.payload.Values.items, 1) : 0; })) {
+    if (({ ast__NodeKind is__4768 = (rt_nonnull(target, "src/codegen.sabk:569:16"))->kind; is__4768.tag == ((ast__NodeKind__Tag)54LL) ? (items = is__4768.payload.Values.items, 1) : 0; })) {
       {
-        slice__ptr_ast__Node seq__4765 = items;
-        for (isize i__4766 = 0; i__4766 < seq__4765.len; i__4766++) {
-          ast__Node* t = seq__4765.ptr[i__4766];
+        slice__ptr_ast__Node seq__4769 = items;
+        for (isize i__4770 = 0; i__4770 < seq__4769.len; i__4770++) {
+          ast__Node* t = seq__4769.ptr[i__4770];
           if (codegen__changes_context(ctx, t)) {
             return true;
           }
@@ -34057,25 +34166,25 @@ static bool codegen__changes_context(prelude__Context *ctx, ast__Node* target) {
   ast__Node* e = target;
   while (true) {
     {
-      ast__NodeKind switch__4767 = (rt_nonnull(e, "src/codegen.sabk:577:19"))->kind;
-      switch (switch__4767.tag) {
+      ast__NodeKind switch__4771 = (rt_nonnull(e, "src/codegen.sabk:577:19"))->kind;
+      switch (switch__4771.tag) {
       case ((ast__NodeKind__Tag)47LL):
       {
-        ast__Node* object = switch__4767.payload.Member.object;
+        ast__Node* object = switch__4771.payload.Member.object;
         e = object;
         continue;
       }
       break;
       case ((ast__NodeKind__Tag)45LL):
       {
-        ast__Node* inner = switch__4767.payload.Grouped.inner;
+        ast__Node* inner = switch__4771.payload.Grouped.inner;
         e = inner;
         continue;
       }
       break;
       case ((ast__NodeKind__Tag)48LL):
       {
-        ast__Node* object = switch__4767.payload.Index.object;
+        ast__Node* object = switch__4771.payload.Index.object;
         e = object;
         continue;
       }
@@ -34094,7 +34203,7 @@ static bool codegen__changes_context(prelude__Context *ctx, ast__Node* target) {
 static bool codegen__assigns_context(prelude__Context *ctx, ast__Node* s) {
   {
     ast__Node* target;
-    if (({ ast__NodeKind is__4768 = (rt_nonnull(s, "src/codegen.sabk:589:11"))->kind; is__4768.tag == ((ast__NodeKind__Tag)16LL) ? (target = is__4768.payload.Assign.target, 1) : 0; })) {
+    if (({ ast__NodeKind is__4772 = (rt_nonnull(s, "src/codegen.sabk:589:11"))->kind; is__4772.tag == ((ast__NodeKind__Tag)16LL) ? (target = is__4772.payload.Assign.target, 1) : 0; })) {
       return codegen__changes_context(ctx, target);
     }
   }
@@ -34106,27 +34215,27 @@ static void codegen__emit_scope(prelude__Context *ctx, codegen__CodeGen* g, slic
 }
 
 static void codegen__emit_scope_with(prelude__Context *ctx, codegen__CodeGen* g, slice__ptr_ast__Node stmts, codegen__Scope scope) {
-  slice__u8 items__4772[6];
-  slice__u8 items__4775[6];
+  slice__u8 items__4776[6];
+  slice__u8 items__4779[6];
   array__array_add__codegen__Scope(ctx, (&(rt_nonnull(g, "src/codegen.sabk:599:18"))->scopes), scope);
   {
-    slice__ptr_ast__Node seq__4769 = stmts;
-    for (isize i__4770 = 0; i__4770 < seq__4769.len; i__4770++) {
-      ast__Node* s = seq__4769.ptr[i__4770];
+    slice__ptr_ast__Node seq__4773 = stmts;
+    for (isize i__4774 = 0; i__4774 < seq__4773.len; i__4774++) {
+      ast__Node* s = seq__4773.ptr[i__4774];
       if (codegen__assigns_context(ctx, s)) {
         slice__u8 name = codegen__tmp(ctx, g, ((slice__u8){(u8*)"ctx", 3}));
         slice__u8 c_name = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:606:38"))->c, "src/codegen.sabk:606:40"))->context_type);
-        ({ codegen__CodeGen* v__4771 = g; slice__u8 v__4773 = codegen__cat(ctx, ((slice__string){(items__4772[0] = c_name, items__4772[1] = ((slice__u8){(u8*)" ", 1}), items__4772[2] = name, items__4772[3] = ((slice__u8){(u8*)"__value = *", 11}), items__4772[4] = codegen__current_ctx(ctx, g), items__4772[5] = ((slice__u8){(u8*)";", 1}), items__4772), 6})); codegen__line(ctx, v__4771, v__4773); });
-        ({ codegen__CodeGen* v__4774 = g; slice__u8 v__4776 = codegen__cat(ctx, ((slice__string){(items__4775[0] = c_name, items__4775[1] = ((slice__u8){(u8*)" *", 2}), items__4775[2] = name, items__4775[3] = ((slice__u8){(u8*)" = &", 4}), items__4775[4] = name, items__4775[5] = ((slice__u8){(u8*)"__value;", 8}), items__4775), 6})); codegen__line(ctx, v__4774, v__4776); });
+        ({ codegen__CodeGen* v__4775 = g; slice__u8 v__4777 = codegen__cat(ctx, ((slice__string){(items__4776[0] = c_name, items__4776[1] = ((slice__u8){(u8*)" ", 1}), items__4776[2] = name, items__4776[3] = ((slice__u8){(u8*)"__value = *", 11}), items__4776[4] = codegen__current_ctx(ctx, g), items__4776[5] = ((slice__u8){(u8*)";", 1}), items__4776), 6})); codegen__line(ctx, v__4775, v__4777); });
+        ({ codegen__CodeGen* v__4778 = g; slice__u8 v__4780 = codegen__cat(ctx, ((slice__string){(items__4779[0] = c_name, items__4779[1] = ((slice__u8){(u8*)" *", 2}), items__4779[2] = name, items__4779[3] = ((slice__u8){(u8*)" = &", 4}), items__4779[4] = name, items__4779[5] = ((slice__u8){(u8*)"__value;", 8}), items__4779), 6})); codegen__line(ctx, v__4778, v__4780); });
         ((*slice__codegen__Scope__at(grow__codegen__Scope__view((rt_nonnull(g, "src/codegen.sabk:609:15"))->scopes), ((isize)(((rt_nonnull(g, "src/codegen.sabk:609:24"))->scopes).len - ((isize)1LL))), "src/codegen.sabk:609:21"))).ctx_ = name;
         break;
       }
     }
   }
   {
-    slice__ptr_ast__Node seq__4777 = stmts;
-    for (isize i__4778 = 0; i__4778 < seq__4777.len; i__4778++) {
-      ast__Node* s = seq__4777.ptr[i__4778];
+    slice__ptr_ast__Node seq__4781 = stmts;
+    for (isize i__4782 = 0; i__4782 < seq__4781.len; i__4782++) {
+      ast__Node* s = seq__4781.ptr[i__4782];
       codegen__emit_stmt(ctx, g, s);
     }
   }
@@ -34135,46 +34244,46 @@ static void codegen__emit_scope_with(prelude__Context *ctx, codegen__CodeGen* g,
 }
 
 static void codegen__emit_body(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* s, codegen__ScopeKind kind, ast__Node* owner) {
-  ast__Node* items__4780[1];
+  ast__Node* items__4784[1];
   codegen__Scope scope = ((codegen__Scope){.kind = kind, .owner = owner});
   {
     slice__ptr_ast__Node stmts;
-    if (({ ast__NodeKind is__4779 = (rt_nonnull(s, "src/codegen.sabk:622:11"))->kind; (is__4779.tag == ((ast__NodeKind__Tag)14LL) && (is__4779.payload.Block.gives_value == false)) ? (stmts = is__4779.payload.Block.stmts, 1) : 0; })) {
+    if (({ ast__NodeKind is__4783 = (rt_nonnull(s, "src/codegen.sabk:622:11"))->kind; (is__4783.tag == ((ast__NodeKind__Tag)14LL) && (is__4783.payload.Block.gives_value == false)) ? (stmts = is__4783.payload.Block.stmts, 1) : 0; })) {
       codegen__emit_scope_with(ctx, g, stmts, scope);
     } else {
-      codegen__emit_scope_with(ctx, g, ((slice__ptr_ast__Node){(items__4780[0] = s, items__4780), 1}), scope);
+      codegen__emit_scope_with(ctx, g, ((slice__ptr_ast__Node){(items__4784[0] = s, items__4784), 1}), scope);
     }
   }
 }
 
 static void codegen__break_label(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__4781[2];
-  slice__u8 items__4783[2];
-  slice__u8 name = codegen__cat(ctx, ((slice__string){(items__4781[0] = codegen__label_of(ctx, g, n), items__4781[1] = ((slice__u8){(u8*)"_break", 6}), items__4781), 2}));
+  slice__u8 items__4785[2];
+  slice__u8 items__4787[2];
+  slice__u8 name = codegen__cat(ctx, ((slice__string){(items__4785[0] = codegen__label_of(ctx, g, n), items__4785[1] = ((slice__u8){(u8*)"_break", 6}), items__4785), 2}));
   if (map__map_has__string__bool(ctx, (&(rt_nonnull(g, "src/codegen.sabk:632:20"))->used_labels), name)) {
-    ({ codegen__CodeGen* v__4782 = g; slice__u8 v__4784 = codegen__cat(ctx, ((slice__string){(items__4783[0] = name, items__4783[1] = ((slice__u8){(u8*)":;", 2}), items__4783), 2})); codegen__line(ctx, v__4782, v__4784); });
+    ({ codegen__CodeGen* v__4786 = g; slice__u8 v__4788 = codegen__cat(ctx, ((slice__string){(items__4787[0] = name, items__4787[1] = ((slice__u8){(u8*)":;", 2}), items__4787), 2})); codegen__line(ctx, v__4786, v__4788); });
   }
 }
 
 static slice__u8 codegen__label_of(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
   slice__u8 name = ({
-    tuple__1 result__4785 = map__map_get__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:639:27"))->labels), n);
-    slice__u8 value__4786;
-    if (!result__4785._1)
-      value__4786 = ((slice__u8){(u8*)"", 0});
+    tuple__1 result__4789 = map__map_get__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:639:27"))->labels), n);
+    slice__u8 value__4790;
+    if (!result__4789._1)
+      value__4790 = ((slice__u8){(u8*)"", 0});
     else
-      value__4786 = result__4785._0;
-    value__4786;
+      value__4790 = result__4789._0;
+    value__4790;
   });
   if (((name).len == ((isize)0LL))) {
-    name = ({ codegen__CodeGen* v__4787 = g; slice__u8 v__4788 = ((rt_nonnull(codegen__label_node(ctx, n), "src/codegen.sabk:641:37"))->tok).text; codegen__tmp(ctx, v__4787, v__4788); });
+    name = ({ codegen__CodeGen* v__4791 = g; slice__u8 v__4792 = ((rt_nonnull(codegen__label_node(ctx, n), "src/codegen.sabk:641:37"))->tok).text; codegen__tmp(ctx, v__4791, v__4792); });
     map__map_put__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:642:20"))->labels), n, name);
   }
   return name;
 }
 
 static void codegen__use_label(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 name) {
-  ({ map__Map__string__bool* v__4789 = (&(rt_nonnull(g, "src/codegen.sabk:647:54"))->used_labels); slice__u8 v__4790 = str__copy_string(ctx, name, ((*ctx)).allocator); map__map_put__string__bool(ctx, v__4789, v__4790, true); });
+  ({ map__Map__string__bool* v__4793 = (&(rt_nonnull(g, "src/codegen.sabk:647:54"))->used_labels); slice__u8 v__4794 = str__copy_string(ctx, name, ((*ctx)).allocator); map__map_put__string__bool(ctx, v__4793, v__4794, true); });
 }
 
 static void codegen__emit_defers_until(prelude__Context *ctx, codegen__CodeGen* g, isize from) {
@@ -34202,91 +34311,91 @@ static void codegen__emit_defers_until(prelude__Context *ctx, codegen__CodeGen* 
 }
 
 static slice__u8 codegen__simple_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__4793[7];
-  slice__u8 items__4799[3];
-  slice__u8 items__4800[5];
-  slice__u8 items__4801[2];
-  slice__u8 items__4806[13];
-  slice__u8 items__4817[2];
-  slice__u8 items__4821[11];
-  slice__u8 items__4822[5];
-  slice__u8 items__4823[2];
-  slice__u8 items__4824[2];
-  slice__u8 items__4825[2];
+  slice__u8 items__4797[7];
+  slice__u8 items__4803[3];
+  slice__u8 items__4804[5];
+  slice__u8 items__4805[2];
+  slice__u8 items__4810[13];
+  slice__u8 items__4821[2];
+  slice__u8 items__4825[11];
+  slice__u8 items__4826[5];
+  slice__u8 items__4827[2];
+  slice__u8 items__4828[2];
+  slice__u8 items__4829[2];
   {
-    ast__NodeKind switch__4791 = (rt_nonnull(n, "src/codegen.sabk:677:15"))->kind;
-    switch (switch__4791.tag) {
+    ast__NodeKind switch__4795 = (rt_nonnull(n, "src/codegen.sabk:677:15"))->kind;
+    switch (switch__4795.tag) {
     case ((ast__NodeKind__Tag)16LL):
     {
-      ast__Node* target = switch__4791.payload.Assign.target;
-      ast__Node* value = switch__4791.payload.Assign.value;
+      ast__Node* target = switch__4795.payload.Assign.target;
+      ast__Node* value = switch__4795.payload.Assign.value;
       {
         slice__ptr_ast__Node targets;
-        if (({ ast__NodeKind is__4792 = (rt_nonnull(target, "src/codegen.sabk:679:20"))->kind; is__4792.tag == ((ast__NodeKind__Tag)54LL) ? (targets = is__4792.payload.Values.items, 1) : 0; })) {
+        if (({ ast__NodeKind is__4796 = (rt_nonnull(target, "src/codegen.sabk:679:20"))->kind; is__4796.tag == ((ast__NodeKind__Tag)54LL) ? (targets = is__4796.payload.Values.items, 1) : 0; })) {
           slice__u8 v = codegen__tmp(ctx, g, ((slice__u8){(u8*)"values", 6}));
           types__Type* t = (rt_nonnull(value, "src/codegen.sabk:682:27"))->ty;
-          slice__u8 s = codegen__cat(ctx, ((slice__string){(items__4793[0] = ((slice__u8){(u8*)"({ ", 3}), items__4793[1] = codegen__c_type(ctx, g, t), items__4793[2] = ((slice__u8){(u8*)" ", 1}), items__4793[3] = v, items__4793[4] = ((slice__u8){(u8*)" = ", 3}), items__4793[5] = codegen__expr(ctx, g, value), items__4793[6] = ((slice__u8){(u8*)"; ", 2}), items__4793), 7}));
+          slice__u8 s = codegen__cat(ctx, ((slice__string){(items__4797[0] = ((slice__u8){(u8*)"({ ", 3}), items__4797[1] = codegen__c_type(ctx, g, t), items__4797[2] = ((slice__u8){(u8*)" ", 1}), items__4797[3] = v, items__4797[4] = ((slice__u8){(u8*)" = ", 3}), items__4797[5] = codegen__expr(ctx, g, value), items__4797[6] = ((slice__u8){(u8*)"; ", 2}), items__4797), 7}));
           grow__ptr_types__Type wanted = {0};
           {
-            slice__ptr_ast__Node seq__4794 = targets;
-            for (isize i__4795 = 0; i__4795 < seq__4794.len; i__4795++) {
-              ast__Node* x = seq__4794.ptr[i__4795];
-              ({ grow__ptr_types__Type* v__4796 = (&wanted); types__Type* v__4797 = (resolve__is_discard(ctx, x) ? ((types__Type*)0) : (rt_nonnull(x, "src/codegen.sabk:686:67"))->ty); array__array_add__ptr_types__Type(ctx, v__4796, v__4797); });
+            slice__ptr_ast__Node seq__4798 = targets;
+            for (isize i__4799 = 0; i__4799 < seq__4798.len; i__4799++) {
+              ast__Node* x = seq__4798.ptr[i__4799];
+              ({ grow__ptr_types__Type* v__4800 = (&wanted); types__Type* v__4801 = (resolve__is_discard(ctx, x) ? ((types__Type*)0) : (rt_nonnull(x, "src/codegen.sabk:686:67"))->ty); array__array_add__ptr_types__Type(ctx, v__4800, v__4801); });
             }
           }
           grow__i32 slots = check__result_slots(ctx, grow__ptr_types__Type__view(wanted), ((rt_nonnull(t, "src/codegen.sabk:687:52"))->is_tuple ? ((rt_nonnull(t, "src/codegen.sabk:687:64"))->fields).len : ((isize)1LL)));
           {
-            isize end__4798 = (targets).len;
-            for (isize i = ((isize)0LL); i < end__4798; i++) {
+            isize end__4802 = (targets).len;
+            for (isize i = ((isize)0LL); i < end__4802; i++) {
               ast__Node* x = (*slice__ptr_ast__Node__at(targets, i, "src/codegen.sabk:689:32"));
               if ((resolve__is_discard(ctx, x) || ((*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:690:43")) < ((i32)0LL)))) {
                 continue;
               }
-              slice__u8 v_i = ((rt_nonnull(t, "src/codegen.sabk:692:33"))->is_tuple ? codegen__cat(ctx, ((slice__string){(items__4799[0] = v, items__4799[1] = ((slice__u8){(u8*)"._", 2}), items__4799[2] = codegen__num(ctx, ((i64)((*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:692:65"))))), items__4799), 3})) : v);
+              slice__u8 v_i = ((rt_nonnull(t, "src/codegen.sabk:692:33"))->is_tuple ? codegen__cat(ctx, ((slice__string){(items__4803[0] = v, items__4803[1] = ((slice__u8){(u8*)"._", 2}), items__4803[2] = codegen__num(ctx, ((i64)((*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:692:65"))))), items__4803), 3})) : v);
               types__Type* from = ((rt_nonnull(t, "src/codegen.sabk:693:34"))->is_tuple ? ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:693:46"))->fields), (*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:693:58")), "src/codegen.sabk:693:52"))).ty : t);
               if (((i < ((rt_nonnull(n, "src/codegen.sabk:694:27"))->convs).len) && ((*slice__ptr_types__Type__at((rt_nonnull(n, "src/codegen.sabk:694:42"))->convs, i, "src/codegen.sabk:694:47")) != ((types__Type*)0)))) {
                 v_i = codegen__convert(ctx, g, v_i, from, (*slice__ptr_types__Type__at((rt_nonnull(n, "src/codegen.sabk:695:51"))->convs, i, "src/codegen.sabk:695:56")));
               }
-              s = codegen__cat(ctx, ((slice__string){(items__4800[0] = s, items__4800[1] = codegen__expr(ctx, g, x), items__4800[2] = ((slice__u8){(u8*)" = ", 3}), items__4800[3] = v_i, items__4800[4] = ((slice__u8){(u8*)"; ", 2}), items__4800), 5}));
+              s = codegen__cat(ctx, ((slice__string){(items__4804[0] = s, items__4804[1] = codegen__expr(ctx, g, x), items__4804[2] = ((slice__u8){(u8*)" = ", 3}), items__4804[3] = v_i, items__4804[4] = ((slice__u8){(u8*)"; ", 2}), items__4804), 5}));
             }
           }
-          return codegen__cat(ctx, ((slice__string){(items__4801[0] = s, items__4801[1] = ((slice__u8){(u8*)"})", 2}), items__4801), 2}));
+          return codegen__cat(ctx, ((slice__string){(items__4805[0] = s, items__4805[1] = ((slice__u8){(u8*)"})", 2}), items__4805), 2}));
         }
       }
       slice__u8 op = ((rt_nonnull(n, "src/codegen.sabk:700:20"))->tok).text;
       types__Type* t = (rt_nonnull(target, "src/codegen.sabk:701:24"))->ty;
-      if (((!((({ slice__u8 a__4802 = op, b__4803 = ((slice__u8){(u8*)"/=", 2}); rt_bytes_equal(a__4802.ptr, a__4802.len, b__4803.ptr, b__4803.len); }) || ({ slice__u8 a__4804 = op, b__4805 = ((slice__u8){(u8*)"%=", 2}); rt_bytes_equal(a__4804.ptr, a__4804.len, b__4805.ptr, b__4805.len); })))) && codegen__targets_in_order(ctx, g, target, value))) {
+      if (((!((({ slice__u8 a__4806 = op, b__4807 = ((slice__u8){(u8*)"/=", 2}); rt_bytes_equal(a__4806.ptr, a__4806.len, b__4807.ptr, b__4807.len); }) || ({ slice__u8 a__4808 = op, b__4809 = ((slice__u8){(u8*)"%=", 2}); rt_bytes_equal(a__4808.ptr, a__4808.len, b__4809.ptr, b__4809.len); })))) && codegen__targets_in_order(ctx, g, target, value))) {
         slice__u8 p = codegen__tmp(ctx, g, ((slice__u8){(u8*)"target", 6}));
-        return codegen__cat(ctx, ((slice__string){(items__4806[0] = ((slice__u8){(u8*)"({ ", 3}), items__4806[1] = codegen__c_type(ctx, g, t), items__4806[2] = ((slice__u8){(u8*)" *", 2}), items__4806[3] = p, items__4806[4] = ((slice__u8){(u8*)" = &", 4}), items__4806[5] = codegen__expr(ctx, g, target), items__4806[6] = ((slice__u8){(u8*)"; *", 3}), items__4806[7] = p, items__4806[8] = ((slice__u8){(u8*)" ", 1}), items__4806[9] = op, items__4806[10] = ((slice__u8){(u8*)" ", 1}), items__4806[11] = codegen__expr(ctx, g, value), items__4806[12] = ((slice__u8){(u8*)"; })", 4}), items__4806), 13}));
+        return codegen__cat(ctx, ((slice__string){(items__4810[0] = ((slice__u8){(u8*)"({ ", 3}), items__4810[1] = codegen__c_type(ctx, g, t), items__4810[2] = ((slice__u8){(u8*)" *", 2}), items__4810[3] = p, items__4810[4] = ((slice__u8){(u8*)" = &", 4}), items__4810[5] = codegen__expr(ctx, g, target), items__4810[6] = ((slice__u8){(u8*)"; *", 3}), items__4810[7] = p, items__4810[8] = ((slice__u8){(u8*)" ", 1}), items__4810[9] = op, items__4810[10] = ((slice__u8){(u8*)" ", 1}), items__4810[11] = codegen__expr(ctx, g, value), items__4810[12] = ((slice__u8){(u8*)"; })", 4}), items__4810), 13}));
       }
-      if ((((({ slice__u8 a__4807 = op, b__4808 = ((slice__u8){(u8*)"/=", 2}); rt_bytes_equal(a__4807.ptr, a__4807.len, b__4808.ptr, b__4808.len); }) || ({ slice__u8 a__4809 = op, b__4810 = ((slice__u8){(u8*)"%=", 2}); rt_bytes_equal(a__4809.ptr, a__4809.len, b__4810.ptr, b__4810.len); }))) && ((rt_nonnull(t, "src/codegen.sabk:708:45"))->kind == ((types__TypeKind)3LL)))) {
+      if ((((({ slice__u8 a__4811 = op, b__4812 = ((slice__u8){(u8*)"/=", 2}); rt_bytes_equal(a__4811.ptr, a__4811.len, b__4812.ptr, b__4812.len); }) || ({ slice__u8 a__4813 = op, b__4814 = ((slice__u8){(u8*)"%=", 2}); rt_bytes_equal(a__4813.ptr, a__4813.len, b__4814.ptr, b__4814.len); }))) && ((rt_nonnull(t, "src/codegen.sabk:708:45"))->kind == ((types__TypeKind)3LL)))) {
         slice__u8 p = codegen__tmp(ctx, g, ((slice__u8){(u8*)"target", 6}));
-        return codegen__cat(ctx, ((slice__string){(items__4821[0] = ((slice__u8){(u8*)"({ ", 3}), items__4821[1] = codegen__c_type(ctx, g, t), items__4821[2] = ((slice__u8){(u8*)" *", 2}), items__4821[3] = p, items__4821[4] = ((slice__u8){(u8*)" = &", 4}), items__4821[5] = codegen__expr(ctx, g, target), items__4821[6] = ((slice__u8){(u8*)"; *", 3}), items__4821[7] = p, items__4821[8] = ((slice__u8){(u8*)" = ", 3}), items__4821[9] = ({ codegen__CodeGen* v__4811 = g; ast__Node* v__4812 = n; types__Type* v__4813 = t; bool v__4816 = ({ slice__u8 a__4814 = op, b__4815 = ((slice__u8){(u8*)"%=", 2}); rt_bytes_equal(a__4814.ptr, a__4814.len, b__4815.ptr, b__4815.len); }); slice__u8 v__4818 = codegen__cat(ctx, ((slice__string){(items__4817[0] = ((slice__u8){(u8*)"*", 1}), items__4817[1] = p, items__4817), 2})); slice__u8 v__4819 = codegen__expr(ctx, g, value); ast__Node* v__4820 = value; codegen__divide(ctx, v__4811, v__4812, v__4813, v__4816, v__4818, v__4819, v__4820); }), items__4821[10] = ((slice__u8){(u8*)"; })", 4}), items__4821), 11}));
+        return codegen__cat(ctx, ((slice__string){(items__4825[0] = ((slice__u8){(u8*)"({ ", 3}), items__4825[1] = codegen__c_type(ctx, g, t), items__4825[2] = ((slice__u8){(u8*)" *", 2}), items__4825[3] = p, items__4825[4] = ((slice__u8){(u8*)" = &", 4}), items__4825[5] = codegen__expr(ctx, g, target), items__4825[6] = ((slice__u8){(u8*)"; *", 3}), items__4825[7] = p, items__4825[8] = ((slice__u8){(u8*)" = ", 3}), items__4825[9] = ({ codegen__CodeGen* v__4815 = g; ast__Node* v__4816 = n; types__Type* v__4817 = t; bool v__4820 = ({ slice__u8 a__4818 = op, b__4819 = ((slice__u8){(u8*)"%=", 2}); rt_bytes_equal(a__4818.ptr, a__4818.len, b__4819.ptr, b__4819.len); }); slice__u8 v__4822 = codegen__cat(ctx, ((slice__string){(items__4821[0] = ((slice__u8){(u8*)"*", 1}), items__4821[1] = p, items__4821), 2})); slice__u8 v__4823 = codegen__expr(ctx, g, value); ast__Node* v__4824 = value; codegen__divide(ctx, v__4815, v__4816, v__4817, v__4820, v__4822, v__4823, v__4824); }), items__4825[10] = ((slice__u8){(u8*)"; })", 4}), items__4825), 11}));
       }
-      return codegen__cat(ctx, ((slice__string){(items__4822[0] = codegen__expr(ctx, g, target), items__4822[1] = ((slice__u8){(u8*)" ", 1}), items__4822[2] = op, items__4822[3] = ((slice__u8){(u8*)" ", 1}), items__4822[4] = codegen__expr(ctx, g, value), items__4822), 5}));
+      return codegen__cat(ctx, ((slice__string){(items__4826[0] = codegen__expr(ctx, g, target), items__4826[1] = ((slice__u8){(u8*)" ", 1}), items__4826[2] = op, items__4826[3] = ((slice__u8){(u8*)" ", 1}), items__4826[4] = codegen__expr(ctx, g, value), items__4826), 5}));
     }
     break;
     case ((ast__NodeKind__Tag)17LL):
     {
-      ast__Node* target = switch__4791.payload.Inc.target;
-      return codegen__cat(ctx, ((slice__string){(items__4823[0] = codegen__expr(ctx, g, target), items__4823[1] = ((slice__u8){(u8*)"++", 2}), items__4823), 2}));
+      ast__Node* target = switch__4795.payload.Inc.target;
+      return codegen__cat(ctx, ((slice__string){(items__4827[0] = codegen__expr(ctx, g, target), items__4827[1] = ((slice__u8){(u8*)"++", 2}), items__4827), 2}));
     }
     break;
     case ((ast__NodeKind__Tag)18LL):
     {
-      ast__Node* target = switch__4791.payload.Dec.target;
-      return codegen__cat(ctx, ((slice__string){(items__4824[0] = codegen__expr(ctx, g, target), items__4824[1] = ((slice__u8){(u8*)"--", 2}), items__4824), 2}));
+      ast__Node* target = switch__4795.payload.Dec.target;
+      return codegen__cat(ctx, ((slice__string){(items__4828[0] = codegen__expr(ctx, g, target), items__4828[1] = ((slice__u8){(u8*)"--", 2}), items__4828), 2}));
     }
     break;
     case ((ast__NodeKind__Tag)15LL):
     {
-      ast__Node* value = switch__4791.payload.ExprStmt.value;
-      bool dropped = switch__4791.payload.ExprStmt.dropped;
+      ast__Node* value = switch__4795.payload.ExprStmt.value;
+      bool dropped = switch__4795.payload.ExprStmt.dropped;
       if ((((rt_nonnull(value, "src/codegen.sabk:720:19"))->kind).tag == ((ast__NodeKind__Tag)46LL))) {
         return codegen__expr_inner(ctx, g, value);
       }
       if (dropped) {
-        return codegen__cat(ctx, ((slice__string){(items__4825[0] = ((slice__u8){(u8*)"(void)", 6}), items__4825[1] = codegen__expr(ctx, g, value), items__4825), 2}));
+        return codegen__cat(ctx, ((slice__string){(items__4829[0] = ((slice__u8){(u8*)"(void)", 6}), items__4829[1] = codegen__expr(ctx, g, value), items__4829), 2}));
       }
       return codegen__expr(ctx, g, value);
     }
@@ -34302,8 +34411,8 @@ static slice__u8 codegen__simple_stmt(prelude__Context *ctx, codegen__CodeGen* g
 
 static slice__u8 codegen__zero_value(prelude__Context *ctx, types__Type* t) {
   {
-    types__TypeKind switch__4826 = (rt_nonnull(t, "src/codegen.sabk:731:15"))->kind;
-    switch (switch__4826) {
+    types__TypeKind switch__4830 = (rt_nonnull(t, "src/codegen.sabk:731:15"))->kind;
+    switch (switch__4830) {
     case ((types__TypeKind)11LL):
     case ((types__TypeKind)12LL):
     case ((types__TypeKind)7LL):
@@ -34334,31 +34443,31 @@ static grow__u8* codegen__into_string(prelude__Context *ctx, codegen__CodeGen* g
 }
 
 static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__4829[6];
-  slice__u8 items__4832[4];
-  slice__u8 items__4835[6];
-  slice__u8 items__4844[3];
-  slice__u8 items__4847[6];
-  slice__u8 items__4854[3];
-  slice__u8 items__4856[6];
-  slice__u8 items__4859[2];
-  slice__u8 items__4862[2];
-  slice__u8 items__4865[3];
-  slice__u8 items__4868[3];
-  slice__u8 items__4871[2];
-  slice__u8 items__4874[2];
-  slice__u8 items__4877[3];
-  slice__u8 items__4880[5];
-  slice__u8 items__4883[2];
+  slice__u8 items__4833[6];
+  slice__u8 items__4836[4];
+  slice__u8 items__4839[6];
+  slice__u8 items__4848[3];
+  slice__u8 items__4851[6];
+  slice__u8 items__4858[3];
+  slice__u8 items__4860[6];
+  slice__u8 items__4863[2];
+  slice__u8 items__4866[2];
+  slice__u8 items__4869[3];
+  slice__u8 items__4872[3];
+  slice__u8 items__4875[2];
+  slice__u8 items__4878[2];
+  slice__u8 items__4881[3];
+  slice__u8 items__4884[5];
+  slice__u8 items__4887[2];
   if (((((rt_nonnull(n, "src/codegen.sabk:746:11"))->tok).text).ptr != ((u8*)0))) {
     (rt_nonnull(g, "src/codegen.sabk:747:11"))->here = (rt_nonnull(n, "src/codegen.sabk:747:20"))->tok;
   }
   {
-    ast__NodeKind switch__4827 = (rt_nonnull(n, "src/codegen.sabk:748:15"))->kind;
+    ast__NodeKind switch__4831 = (rt_nonnull(n, "src/codegen.sabk:748:15"))->kind;
     switch (0) { default:
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)14LL) && (switch__4827.payload.Block.gives_value == false))) {
-      slice__ptr_ast__Node stmts = switch__4827.payload.Block.stmts;
-      ast__Node* label = switch__4827.payload.Block.label;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)14LL) && (switch__4831.payload.Block.gives_value == false))) {
+      slice__ptr_ast__Node stmts = switch__4831.payload.Block.stmts;
+      ast__Node* label = switch__4831.payload.Block.label;
       codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
       (rt_nonnull(g, "src/codegen.sabk:751:11"))->indent++;
       codegen__emit_scope_with(ctx, g, stmts, ((codegen__Scope){.kind = ((codegen__ScopeKind)1LL), .owner = n}));
@@ -34369,34 +34478,34 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       }
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)11LL))) {
-      ast__Node* value = switch__4827.payload.Const.value;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)11LL))) {
+      ast__Node* value = switch__4831.payload.Const.value;
       if ((((rt_nonnull(n, "src/codegen.sabk:759:15"))->cval).kind != ((const__ConstKind)0LL))) {
         return;
       }
-      ({ codegen__CodeGen* v__4828 = g; slice__u8 v__4830 = codegen__cat(ctx, ((slice__string){(items__4829[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:761:33"))->ty), items__4829[1] = ((slice__u8){(u8*)" ", 1}), items__4829[2] = codegen__var_name(ctx, g, n), items__4829[3] = ((slice__u8){(u8*)" = ", 3}), items__4829[4] = codegen__expr(ctx, g, value), items__4829[5] = ((slice__u8){(u8*)";", 1}), items__4829), 6})); codegen__line(ctx, v__4828, v__4830); });
+      ({ codegen__CodeGen* v__4832 = g; slice__u8 v__4834 = codegen__cat(ctx, ((slice__string){(items__4833[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:761:33"))->ty), items__4833[1] = ((slice__u8){(u8*)" ", 1}), items__4833[2] = codegen__var_name(ctx, g, n), items__4833[3] = ((slice__u8){(u8*)" = ", 3}), items__4833[4] = codegen__expr(ctx, g, value), items__4833[5] = ((slice__u8){(u8*)";", 1}), items__4833), 6})); codegen__line(ctx, v__4832, v__4834); });
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)9LL))) {
-      ast__Node* value = switch__4827.payload.Let.value;
-      bool uninit = switch__4827.payload.Let.uninit;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)9LL))) {
+      ast__Node* value = switch__4831.payload.Let.value;
+      bool uninit = switch__4831.payload.Let.uninit;
       if (uninit) {
-        ({ codegen__CodeGen* v__4831 = g; slice__u8 v__4833 = codegen__cat(ctx, ((slice__string){(items__4832[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:765:37"))->ty), items__4832[1] = ((slice__u8){(u8*)" ", 1}), items__4832[2] = codegen__var_name(ctx, g, n), items__4832[3] = ((slice__u8){(u8*)";", 1}), items__4832), 4})); codegen__line(ctx, v__4831, v__4833); });
+        ({ codegen__CodeGen* v__4835 = g; slice__u8 v__4837 = codegen__cat(ctx, ((slice__string){(items__4836[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:765:37"))->ty), items__4836[1] = ((slice__u8){(u8*)" ", 1}), items__4836[2] = codegen__var_name(ctx, g, n), items__4836[3] = ((slice__u8){(u8*)";", 1}), items__4836), 4})); codegen__line(ctx, v__4835, v__4837); });
         return;
       }
-      ({ codegen__CodeGen* v__4834 = g; slice__u8 v__4836 = codegen__cat(ctx, ((slice__string){(items__4835[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:768:33"))->ty), items__4835[1] = ((slice__u8){(u8*)" ", 1}), items__4835[2] = codegen__var_name(ctx, g, n), items__4835[3] = ((slice__u8){(u8*)" = ", 3}), items__4835[4] = ((value != ((ast__Node*)0)) ? codegen__expr(ctx, g, value) : codegen__default_value(ctx, g, (rt_nonnull(n, "src/codegen.sabk:769:79"))->ty)), items__4835[5] = ((slice__u8){(u8*)";", 1}), items__4835), 6})); codegen__line(ctx, v__4834, v__4836); });
+      ({ codegen__CodeGen* v__4838 = g; slice__u8 v__4840 = codegen__cat(ctx, ((slice__string){(items__4839[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:768:33"))->ty), items__4839[1] = ((slice__u8){(u8*)" ", 1}), items__4839[2] = codegen__var_name(ctx, g, n), items__4839[3] = ((slice__u8){(u8*)" = ", 3}), items__4839[4] = ((value != ((ast__Node*)0)) ? codegen__expr(ctx, g, value) : codegen__default_value(ctx, g, (rt_nonnull(n, "src/codegen.sabk:769:79"))->ty)), items__4839[5] = ((slice__u8){(u8*)";", 1}), items__4839), 6})); codegen__line(ctx, v__4838, v__4840); });
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)10LL))) {
-      slice__ptr_ast__Node names = switch__4827.payload.LetValues.names;
-      ast__Node* values = switch__4827.payload.LetValues.values;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)10LL))) {
+      slice__ptr_ast__Node names = switch__4831.payload.LetValues.names;
+      ast__Node* values = switch__4831.payload.LetValues.values;
       if ((values == ((ast__Node*)0))) {
         {
-          slice__ptr_ast__Node seq__4837 = names;
-          for (isize i__4838 = 0; i__4838 < seq__4837.len; i__4838++) {
-            ast__Node* d = seq__4837.ptr[i__4838];
-            if (({ slice__u8 a__4839 = ((rt_nonnull(d, "src/codegen.sabk:774:23"))->tok).text, b__4840 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4839.ptr, a__4839.len, b__4840.ptr, b__4840.len); })) {
-              ({ codegen__CodeGen* v__4841 = g; slice__u8 v__4845 = codegen__cat(ctx, ((slice__string){(items__4844[0] = ((slice__u8){(u8*)"(void)(", 7}), items__4844[1] = ({ codegen__CodeGen* v__4842 = g; ast__Node* v__4843 = check__value_of(ctx, d); codegen__expr(ctx, v__4842, v__4843); }), items__4844[2] = ((slice__u8){(u8*)");", 2}), items__4844), 3})); codegen__line(ctx, v__4841, v__4845); });
+          slice__ptr_ast__Node seq__4841 = names;
+          for (isize i__4842 = 0; i__4842 < seq__4841.len; i__4842++) {
+            ast__Node* d = seq__4841.ptr[i__4842];
+            if (({ slice__u8 a__4843 = ((rt_nonnull(d, "src/codegen.sabk:774:23"))->tok).text, b__4844 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4843.ptr, a__4843.len, b__4844.ptr, b__4844.len); })) {
+              ({ codegen__CodeGen* v__4845 = g; slice__u8 v__4849 = codegen__cat(ctx, ((slice__string){(items__4848[0] = ((slice__u8){(u8*)"(void)(", 7}), items__4848[1] = ({ codegen__CodeGen* v__4846 = g; ast__Node* v__4847 = check__value_of(ctx, d); codegen__expr(ctx, v__4846, v__4847); }), items__4848[2] = ((slice__u8){(u8*)");", 2}), items__4848), 3})); codegen__line(ctx, v__4845, v__4849); });
             } else {
               codegen__emit_stmt(ctx, g, d);
             }
@@ -34406,31 +34515,31 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       }
       slice__u8 v = codegen__tmp(ctx, g, ((slice__u8){(u8*)"values", 6}));
       types__Type* t = (rt_nonnull(values, "src/codegen.sabk:784:24"))->ty;
-      ({ codegen__CodeGen* v__4846 = g; slice__u8 v__4848 = codegen__cat(ctx, ((slice__string){(items__4847[0] = codegen__c_type(ctx, g, t), items__4847[1] = ((slice__u8){(u8*)" ", 1}), items__4847[2] = v, items__4847[3] = ((slice__u8){(u8*)" = ", 3}), items__4847[4] = codegen__expr(ctx, g, values), items__4847[5] = ((slice__u8){(u8*)";", 1}), items__4847), 6})); codegen__line(ctx, v__4846, v__4848); });
+      ({ codegen__CodeGen* v__4850 = g; slice__u8 v__4852 = codegen__cat(ctx, ((slice__string){(items__4851[0] = codegen__c_type(ctx, g, t), items__4851[1] = ((slice__u8){(u8*)" ", 1}), items__4851[2] = v, items__4851[3] = ((slice__u8){(u8*)" = ", 3}), items__4851[4] = codegen__expr(ctx, g, values), items__4851[5] = ((slice__u8){(u8*)";", 1}), items__4851), 6})); codegen__line(ctx, v__4850, v__4852); });
       grow__ptr_types__Type name_types = {0};
       {
-        slice__ptr_ast__Node seq__4849 = names;
-        for (isize i__4850 = 0; i__4850 < seq__4849.len; i__4850++) {
-          ast__Node* d = seq__4849.ptr[i__4850];
+        slice__ptr_ast__Node seq__4853 = names;
+        for (isize i__4854 = 0; i__4854 < seq__4853.len; i__4854++) {
+          ast__Node* d = seq__4853.ptr[i__4854];
           array__array_add__ptr_types__Type(ctx, (&name_types), (rt_nonnull(d, "src/codegen.sabk:788:38"))->ty);
         }
       }
       grow__i32 slots = check__result_slots(ctx, grow__ptr_types__Type__view(name_types), ((rt_nonnull(t, "src/codegen.sabk:789:52"))->is_tuple ? ((rt_nonnull(t, "src/codegen.sabk:789:64"))->fields).len : ((isize)1LL)));
       {
-        isize end__4851 = (names).len;
-        for (isize i = ((isize)0LL); i < end__4851; i++) {
+        isize end__4855 = (names).len;
+        for (isize i = ((isize)0LL); i < end__4855; i++) {
           ast__Node* d = (*slice__ptr_ast__Node__at(names, i, "src/codegen.sabk:791:26"));
-          if (({ slice__u8 a__4852 = ((rt_nonnull(d, "src/codegen.sabk:792:19"))->tok).text, b__4853 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4852.ptr, a__4852.len, b__4853.ptr, b__4853.len); })) {
+          if (({ slice__u8 a__4856 = ((rt_nonnull(d, "src/codegen.sabk:792:19"))->tok).text, b__4857 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__4856.ptr, a__4856.len, b__4857.ptr, b__4857.len); })) {
             continue;
           }
-          slice__u8 value = (((*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:794:34")) < ((i32)0LL)) ? ((slice__u8){(u8*)"(sabk_void){}", 13}) : ((rt_nonnull(t, "src/codegen.sabk:794:70"))->is_tuple ? codegen__cat(ctx, ((slice__string){(items__4854[0] = v, items__4854[1] = ((slice__u8){(u8*)"._", 2}), items__4854[2] = codegen__num(ctx, ((i64)((*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:794:102"))))), items__4854), 3})) : v));
-          ({ codegen__CodeGen* v__4855 = g; slice__u8 v__4857 = codegen__cat(ctx, ((slice__string){(items__4856[0] = codegen__c_type(ctx, g, (rt_nonnull(d, "src/codegen.sabk:795:37"))->ty), items__4856[1] = ((slice__u8){(u8*)" ", 1}), items__4856[2] = codegen__var_name(ctx, g, d), items__4856[3] = ((slice__u8){(u8*)" = ", 3}), items__4856[4] = value, items__4856[5] = ((slice__u8){(u8*)";", 1}), items__4856), 6})); codegen__line(ctx, v__4855, v__4857); });
+          slice__u8 value = (((*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:794:34")) < ((i32)0LL)) ? ((slice__u8){(u8*)"(sabk_void){}", 13}) : ((rt_nonnull(t, "src/codegen.sabk:794:70"))->is_tuple ? codegen__cat(ctx, ((slice__string){(items__4858[0] = v, items__4858[1] = ((slice__u8){(u8*)"._", 2}), items__4858[2] = codegen__num(ctx, ((i64)((*slice__i32__at(grow__i32__view(slots), i, "src/codegen.sabk:794:102"))))), items__4858), 3})) : v));
+          ({ codegen__CodeGen* v__4859 = g; slice__u8 v__4861 = codegen__cat(ctx, ((slice__string){(items__4860[0] = codegen__c_type(ctx, g, (rt_nonnull(d, "src/codegen.sabk:795:37"))->ty), items__4860[1] = ((slice__u8){(u8*)" ", 1}), items__4860[2] = codegen__var_name(ctx, g, d), items__4860[3] = ((slice__u8){(u8*)" = ", 3}), items__4860[4] = value, items__4860[5] = ((slice__u8){(u8*)";", 1}), items__4860), 6})); codegen__line(ctx, v__4859, v__4861); });
         }
       }
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)15LL))) {
-      ast__Node* value = switch__4827.payload.ExprStmt.value;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)15LL))) {
+      ast__Node* value = switch__4831.payload.ExprStmt.value;
       if ((((rt_nonnull(value, "src/codegen.sabk:801:19"))->kind).tag == ((ast__NodeKind__Tag)65LL))) {
         codegen__emit_expansion(ctx, g, value);
         return;
@@ -34438,30 +34547,30 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       if ((((rt_nonnull(value, "src/codegen.sabk:805:19"))->kind).tag == ((ast__NodeKind__Tag)12LL))) {
         return;
       }
-      ({ codegen__CodeGen* v__4858 = g; slice__u8 v__4860 = codegen__cat(ctx, ((slice__string){(items__4859[0] = codegen__simple_stmt(ctx, g, n), items__4859[1] = ((slice__u8){(u8*)";", 1}), items__4859), 2})); codegen__line(ctx, v__4858, v__4860); });
+      ({ codegen__CodeGen* v__4862 = g; slice__u8 v__4864 = codegen__cat(ctx, ((slice__string){(items__4863[0] = codegen__simple_stmt(ctx, g, n), items__4863[1] = ((slice__u8){(u8*)";", 1}), items__4863), 2})); codegen__line(ctx, v__4862, v__4864); });
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)16LL)) || (switch__4827.tag == ((ast__NodeKind__Tag)17LL)) || (switch__4827.tag == ((ast__NodeKind__Tag)18LL))) {
-      ({ codegen__CodeGen* v__4861 = g; slice__u8 v__4863 = codegen__cat(ctx, ((slice__string){(items__4862[0] = codegen__simple_stmt(ctx, g, n), items__4862[1] = ((slice__u8){(u8*)";", 1}), items__4862), 2})); codegen__line(ctx, v__4861, v__4863); });
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)16LL)) || (switch__4831.tag == ((ast__NodeKind__Tag)17LL)) || (switch__4831.tag == ((ast__NodeKind__Tag)18LL))) {
+      ({ codegen__CodeGen* v__4865 = g; slice__u8 v__4867 = codegen__cat(ctx, ((slice__string){(items__4866[0] = codegen__simple_stmt(ctx, g, n), items__4866[1] = ((slice__u8){(u8*)";", 1}), items__4866), 2})); codegen__line(ctx, v__4865, v__4867); });
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)19LL))) {
-      ast__Node* value = switch__4827.payload.Return.value;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)19LL))) {
+      ast__Node* value = switch__4831.payload.Return.value;
       codegen__emit_return(ctx, g, n, value);
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)20LL))) {
-      ast__Node* value = switch__4827.payload.Break.value;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)20LL))) {
+      ast__Node* value = switch__4831.payload.Break.value;
       codegen__emit_leave(ctx, g, n, true, value);
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)21LL))) {
-      ast__Node* value = switch__4827.payload.Continue.value;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)21LL))) {
+      ast__Node* value = switch__4831.payload.Continue.value;
       codegen__emit_leave(ctx, g, n, false, value);
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)22LL))) {
-      ast__Node* stmt = switch__4827.payload.Defer.stmt;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)22LL))) {
+      ast__Node* stmt = switch__4831.payload.Defer.stmt;
       if ((rt_nonnull(n, "src/codegen.sabk:821:15"))->caller) {
         isize i = ((isize)(((rt_nonnull(g, "src/codegen.sabk:823:23"))->scopes).len - ((isize)1LL)));
         while ((i >= ((isize)1LL))) {
@@ -34475,17 +34584,17 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       array__array_add__ptr_ast__Node(ctx, (&((*slice__codegen__Scope__at(grow__codegen__Scope__view((rt_nonnull(g, "src/codegen.sabk:832:22"))->scopes), ((isize)(((rt_nonnull(g, "src/codegen.sabk:832:31"))->scopes).len - ((isize)1LL))), "src/codegen.sabk:832:28"))).defers), stmt);
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)23LL) && (switch__4827.payload.If.gives_value == false))) {
-      ast__Node* cond = switch__4827.payload.If.cond;
-      ast__Node* then = switch__4827.payload.If.then;
-      ast__Node* else_ = switch__4827.payload.If.else_;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)23LL) && (switch__4831.payload.If.gives_value == false))) {
+      ast__Node* cond = switch__4831.payload.If.cond;
+      ast__Node* then = switch__4831.payload.If.then;
+      ast__Node* else_ = switch__4831.payload.If.else_;
       slice__u8 bindings = codegen__bindings_of(ctx, g, cond, ((isize)1LL));
       if (((bindings).len > ((isize)0LL))) {
         codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
         str__append_string(ctx, (rt_nonnull(g, "src/codegen.sabk:839:29"))->out, bindings);
         (rt_nonnull(g, "src/codegen.sabk:840:15"))->indent++;
       }
-      ({ codegen__CodeGen* v__4864 = g; slice__u8 v__4866 = codegen__cat(ctx, ((slice__string){(items__4865[0] = ((slice__u8){(u8*)"if (", 4}), items__4865[1] = codegen__expr(ctx, g, cond), items__4865[2] = ((slice__u8){(u8*)") {", 3}), items__4865), 3})); codegen__line(ctx, v__4864, v__4866); });
+      ({ codegen__CodeGen* v__4868 = g; slice__u8 v__4870 = codegen__cat(ctx, ((slice__string){(items__4869[0] = ((slice__u8){(u8*)"if (", 4}), items__4869[1] = codegen__expr(ctx, g, cond), items__4869[2] = ((slice__u8){(u8*)") {", 3}), items__4869), 3})); codegen__line(ctx, v__4868, v__4870); });
       (rt_nonnull(g, "src/codegen.sabk:843:11"))->indent++;
       codegen__emit_body(ctx, g, then, ((codegen__ScopeKind)1LL), ((ast__Node*)0));
       (rt_nonnull(g, "src/codegen.sabk:845:11"))->indent--;
@@ -34502,7 +34611,7 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       }
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)24LL))) {
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)24LL))) {
       ast__Node* taken = check__static_if_branch(ctx, n);
       if ((taken != ((ast__Node*)0))) {
         codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
@@ -34513,10 +34622,10 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       }
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)25LL))) {
-      ast__Node* cond = switch__4827.payload.While.cond;
-      ast__Node* body = switch__4827.payload.While.body;
-      ast__Node* label = switch__4827.payload.While.label;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)25LL))) {
+      ast__Node* cond = switch__4831.payload.While.cond;
+      ast__Node* body = switch__4831.payload.While.body;
+      ast__Node* label = switch__4831.payload.While.label;
       slice__u8 bindings = codegen__bindings_of(ctx, g, cond, ((isize)1LL));
       bool binds = ((bindings).len > ((isize)0LL));
       if (binds) {
@@ -34524,11 +34633,11 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
         str__append_string(ctx, (rt_nonnull(g, "src/codegen.sabk:875:29"))->out, bindings);
         (rt_nonnull(g, "src/codegen.sabk:876:15"))->indent++;
       }
-      ({ codegen__CodeGen* v__4867 = g; slice__u8 v__4869 = codegen__cat(ctx, ((slice__string){(items__4868[0] = ((slice__u8){(u8*)"while (", 7}), items__4868[1] = codegen__expr(ctx, g, cond), items__4868[2] = ((slice__u8){(u8*)") {", 3}), items__4868), 3})); codegen__line(ctx, v__4867, v__4869); });
+      ({ codegen__CodeGen* v__4871 = g; slice__u8 v__4873 = codegen__cat(ctx, ((slice__string){(items__4872[0] = ((slice__u8){(u8*)"while (", 7}), items__4872[1] = codegen__expr(ctx, g, cond), items__4872[2] = ((slice__u8){(u8*)") {", 3}), items__4872), 3})); codegen__line(ctx, v__4871, v__4873); });
       (rt_nonnull(g, "src/codegen.sabk:879:11"))->indent++;
       codegen__emit_body(ctx, g, body, ((codegen__ScopeKind)2LL), n);
       if ((label != ((ast__Node*)0))) {
-        ({ codegen__CodeGen* v__4870 = g; slice__u8 v__4872 = codegen__cat(ctx, ((slice__string){(items__4871[0] = codegen__label_of(ctx, g, n), items__4871[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4871), 2})); codegen__line(ctx, v__4870, v__4872); });
+        ({ codegen__CodeGen* v__4874 = g; slice__u8 v__4876 = codegen__cat(ctx, ((slice__string){(items__4875[0] = codegen__label_of(ctx, g, n), items__4875[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4875), 2})); codegen__line(ctx, v__4874, v__4876); });
       }
       (rt_nonnull(g, "src/codegen.sabk:883:11"))->indent--;
       codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
@@ -34541,35 +34650,35 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       }
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)26LL))) {
-      ast__Node* body = switch__4827.payload.DoWhile.body;
-      ast__Node* cond = switch__4827.payload.DoWhile.cond;
-      ast__Node* label = switch__4827.payload.DoWhile.label;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)26LL))) {
+      ast__Node* body = switch__4831.payload.DoWhile.body;
+      ast__Node* cond = switch__4831.payload.DoWhile.cond;
+      ast__Node* label = switch__4831.payload.DoWhile.label;
       codegen__line(ctx, g, ((slice__u8){(u8*)"do {", 4}));
       (rt_nonnull(g, "src/codegen.sabk:894:11"))->indent++;
       codegen__emit_body(ctx, g, body, ((codegen__ScopeKind)2LL), n);
       if ((label != ((ast__Node*)0))) {
-        ({ codegen__CodeGen* v__4873 = g; slice__u8 v__4875 = codegen__cat(ctx, ((slice__string){(items__4874[0] = codegen__label_of(ctx, g, n), items__4874[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4874), 2})); codegen__line(ctx, v__4873, v__4875); });
+        ({ codegen__CodeGen* v__4877 = g; slice__u8 v__4879 = codegen__cat(ctx, ((slice__string){(items__4878[0] = codegen__label_of(ctx, g, n), items__4878[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4878), 2})); codegen__line(ctx, v__4877, v__4879); });
       }
       (rt_nonnull(g, "src/codegen.sabk:898:11"))->indent--;
-      ({ codegen__CodeGen* v__4876 = g; slice__u8 v__4878 = codegen__cat(ctx, ((slice__string){(items__4877[0] = ((slice__u8){(u8*)"} while (", 9}), items__4877[1] = codegen__expr(ctx, g, cond), items__4877[2] = ((slice__u8){(u8*)");", 2}), items__4877), 3})); codegen__line(ctx, v__4876, v__4878); });
+      ({ codegen__CodeGen* v__4880 = g; slice__u8 v__4882 = codegen__cat(ctx, ((slice__string){(items__4881[0] = ((slice__u8){(u8*)"} while (", 9}), items__4881[1] = codegen__expr(ctx, g, cond), items__4881[2] = ((slice__u8){(u8*)");", 2}), items__4881), 3})); codegen__line(ctx, v__4880, v__4882); });
       if ((label != ((ast__Node*)0))) {
         codegen__break_label(ctx, g, n);
       }
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)27LL))) {
-      ast__NodeKind__variant_For f = switch__4827.payload.For;
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)27LL))) {
+      ast__NodeKind__variant_For f = switch__4831.payload.For;
       codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
       (rt_nonnull(g, "src/codegen.sabk:906:11"))->indent++;
       if (((f).init != ((ast__Node*)0))) {
         codegen__emit_stmt(ctx, g, (f).init);
       }
-      ({ codegen__CodeGen* v__4879 = g; slice__u8 v__4881 = codegen__cat(ctx, ((slice__string){(items__4880[0] = ((slice__u8){(u8*)"for (; ", 7}), items__4880[1] = (((f).cond != ((ast__Node*)0)) ? codegen__expr(ctx, g, (f).cond) : ((slice__u8){(u8*)"", 0})), items__4880[2] = ((slice__u8){(u8*)"; ", 2}), items__4880[3] = (((f).step != ((ast__Node*)0)) ? codegen__simple_stmt(ctx, g, (f).step) : ((slice__u8){(u8*)"", 0})), items__4880[4] = ((slice__u8){(u8*)") {", 3}), items__4880), 5})); codegen__line(ctx, v__4879, v__4881); });
+      ({ codegen__CodeGen* v__4883 = g; slice__u8 v__4885 = codegen__cat(ctx, ((slice__string){(items__4884[0] = ((slice__u8){(u8*)"for (; ", 7}), items__4884[1] = (((f).cond != ((ast__Node*)0)) ? codegen__expr(ctx, g, (f).cond) : ((slice__u8){(u8*)"", 0})), items__4884[2] = ((slice__u8){(u8*)"; ", 2}), items__4884[3] = (((f).step != ((ast__Node*)0)) ? codegen__simple_stmt(ctx, g, (f).step) : ((slice__u8){(u8*)"", 0})), items__4884[4] = ((slice__u8){(u8*)") {", 3}), items__4884), 5})); codegen__line(ctx, v__4883, v__4885); });
       (rt_nonnull(g, "src/codegen.sabk:911:11"))->indent++;
       codegen__emit_body(ctx, g, (f).body, ((codegen__ScopeKind)2LL), n);
       if (((f).label != ((ast__Node*)0))) {
-        ({ codegen__CodeGen* v__4882 = g; slice__u8 v__4884 = codegen__cat(ctx, ((slice__string){(items__4883[0] = codegen__label_of(ctx, g, n), items__4883[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4883), 2})); codegen__line(ctx, v__4882, v__4884); });
+        ({ codegen__CodeGen* v__4886 = g; slice__u8 v__4888 = codegen__cat(ctx, ((slice__string){(items__4887[0] = codegen__label_of(ctx, g, n), items__4887[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4887), 2})); codegen__line(ctx, v__4886, v__4888); });
       }
       (rt_nonnull(g, "src/codegen.sabk:915:11"))->indent--;
       codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
@@ -34580,11 +34689,11 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
       codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)28LL))) {
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)28LL))) {
       codegen__emit_for_in(ctx, g, n);
       break;
     }
-    if ((switch__4827.tag == ((ast__NodeKind__Tag)30LL) && (switch__4827.payload.Switch.gives_value == false))) {
+    if ((switch__4831.tag == ((ast__NodeKind__Tag)30LL) && (switch__4831.payload.Switch.gives_value == false))) {
       codegen__emit_switch(ctx, g, n, ((slice__u8){(u8*)"", 0}));
       break;
     }
@@ -34596,9 +34705,9 @@ static void codegen__emit_stmt(prelude__Context *ctx, codegen__CodeGen* g, ast__
 
 static bool codegen__has_defers(prelude__Context *ctx, codegen__CodeGen* g) {
   {
-    grow__codegen__Scope seq__4885 = (rt_nonnull(g, "src/codegen.sabk:933:17"))->scopes;
-    for (isize i__4886 = 0; i__4886 < seq__4885.len; i__4886++) {
-      codegen__Scope s = seq__4885.ptr[i__4886];
+    grow__codegen__Scope seq__4889 = (rt_nonnull(g, "src/codegen.sabk:933:17"))->scopes;
+    for (isize i__4890 = 0; i__4890 < seq__4889.len; i__4890++) {
+      codegen__Scope s = seq__4889.ptr[i__4890];
       if ((((s).defers).len > ((isize)0LL))) {
         return true;
       }
@@ -34608,18 +34717,18 @@ static bool codegen__has_defers(prelude__Context *ctx, codegen__CodeGen* g) {
 }
 
 static void codegen__emit_return(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n, ast__Node* value) {
-  slice__u8 items__4889[4];
-  slice__u8 items__4892[3];
-  slice__u8 items__4895[2];
-  slice__u8 items__4896[2];
-  slice__u8 items__4899[3];
-  slice__u8 items__4902[6];
-  slice__u8 items__4905[3];
+  slice__u8 items__4893[4];
+  slice__u8 items__4896[3];
+  slice__u8 items__4899[2];
+  slice__u8 items__4900[2];
+  slice__u8 items__4903[3];
+  slice__u8 items__4906[6];
+  slice__u8 items__4909[3];
   if (((rt_nonnull(n, "src/codegen.sabk:940:11"))->decl != ((ast__Node*)0))) {
     i32 color = ((i32)0LL);
     {
       i32 expansion;
-      if (({ ast__NodeKind is__4887 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:944:15"))->decl, "src/codegen.sabk:944:20"))->kind; is__4887.tag == ((ast__NodeKind__Tag)65LL) ? (expansion = is__4887.payload.MacroExpansion.expansion, 1) : 0; })) {
+      if (({ ast__NodeKind is__4891 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:944:15"))->decl, "src/codegen.sabk:944:20"))->kind; is__4891.tag == ((ast__NodeKind__Tag)65LL) ? (expansion = is__4891.payload.MacroExpansion.expansion, 1) : 0; })) {
         color = expansion;
       }
     }
@@ -34633,42 +34742,42 @@ static void codegen__emit_return(prelude__Context *ctx, codegen__CodeGen* g, ast
     slice__u8 result = ((*slice__codegen__Scope__at(grow__codegen__Scope__view((rt_nonnull(g, "src/codegen.sabk:952:35"))->scopes), target, "src/codegen.sabk:952:41"))).result;
     slice__u8 end_label = ((*slice__codegen__Scope__at(grow__codegen__Scope__view((rt_nonnull(g, "src/codegen.sabk:952:60"))->scopes), target, "src/codegen.sabk:952:66"))).end_label;
     if ((value != ((ast__Node*)0))) {
-      ({ codegen__CodeGen* v__4888 = g; slice__u8 v__4890 = codegen__cat(ctx, ((slice__string){(items__4889[0] = result, items__4889[1] = ((slice__u8){(u8*)" = ", 3}), items__4889[2] = codegen__expr(ctx, g, value), items__4889[3] = ((slice__u8){(u8*)";", 1}), items__4889), 4})); codegen__line(ctx, v__4888, v__4890); });
+      ({ codegen__CodeGen* v__4892 = g; slice__u8 v__4894 = codegen__cat(ctx, ((slice__string){(items__4893[0] = result, items__4893[1] = ((slice__u8){(u8*)" = ", 3}), items__4893[2] = codegen__expr(ctx, g, value), items__4893[3] = ((slice__u8){(u8*)";", 1}), items__4893), 4})); codegen__line(ctx, v__4892, v__4894); });
     }
     codegen__emit_defers_until(ctx, g, target);
-    ({ codegen__CodeGen* v__4891 = g; slice__u8 v__4893 = codegen__cat(ctx, ((slice__string){(items__4892[0] = ((slice__u8){(u8*)"goto ", 5}), items__4892[1] = end_label, items__4892[2] = ((slice__u8){(u8*)";", 1}), items__4892), 3})); codegen__line(ctx, v__4891, v__4893); });
+    ({ codegen__CodeGen* v__4895 = g; slice__u8 v__4897 = codegen__cat(ctx, ((slice__string){(items__4896[0] = ((slice__u8){(u8*)"goto ", 5}), items__4896[1] = end_label, items__4896[2] = ((slice__u8){(u8*)";", 1}), items__4896), 3})); codegen__line(ctx, v__4895, v__4897); });
     codegen__use_label(ctx, g, end_label);
     return;
   }
   if (((value != ((ast__Node*)0)) && ((rt_nonnull((rt_nonnull((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:960:28"))->current_fn, "src/codegen.sabk:960:39"))->ty, "src/codegen.sabk:960:42"))->ret, "src/codegen.sabk:960:46"))->kind == ((types__TypeKind)1LL)))) {
-    ({ codegen__CodeGen* v__4894 = g; slice__u8 v__4897 = codegen__cat(ctx, ((slice__string){(items__4896[0] = ((((rt_nonnull(value, "src/codegen.sabk:963:31"))->kind).tag == ((ast__NodeKind__Tag)46LL)) ? codegen__expr_inner(ctx, g, value) : codegen__cat(ctx, ((slice__string){(items__4895[0] = ((slice__u8){(u8*)"(void)", 6}), items__4895[1] = codegen__expr(ctx, g, value), items__4895), 2}))), items__4896[1] = ((slice__u8){(u8*)";", 1}), items__4896), 2})); codegen__line(ctx, v__4894, v__4897); });
+    ({ codegen__CodeGen* v__4898 = g; slice__u8 v__4901 = codegen__cat(ctx, ((slice__string){(items__4900[0] = ((((rt_nonnull(value, "src/codegen.sabk:963:31"))->kind).tag == ((ast__NodeKind__Tag)46LL)) ? codegen__expr_inner(ctx, g, value) : codegen__cat(ctx, ((slice__string){(items__4899[0] = ((slice__u8){(u8*)"(void)", 6}), items__4899[1] = codegen__expr(ctx, g, value), items__4899), 2}))), items__4900[1] = ((slice__u8){(u8*)";", 1}), items__4900), 2})); codegen__line(ctx, v__4898, v__4901); });
     codegen__emit_defers_until(ctx, g, ((isize)0LL));
     codegen__line(ctx, g, ((slice__u8){(u8*)"return;", 7}));
     return;
   }
   if ((!codegen__has_defers(ctx, g))) {
-    ({ codegen__CodeGen* v__4898 = g; slice__u8 v__4900 = ((value != ((ast__Node*)0)) ? codegen__cat(ctx, ((slice__string){(items__4899[0] = ((slice__u8){(u8*)"return ", 7}), items__4899[1] = codegen__expr(ctx, g, value), items__4899[2] = ((slice__u8){(u8*)";", 1}), items__4899), 3})) : ((slice__u8){(u8*)"return;", 7})); codegen__line(ctx, v__4898, v__4900); });
+    ({ codegen__CodeGen* v__4902 = g; slice__u8 v__4904 = ((value != ((ast__Node*)0)) ? codegen__cat(ctx, ((slice__string){(items__4903[0] = ((slice__u8){(u8*)"return ", 7}), items__4903[1] = codegen__expr(ctx, g, value), items__4903[2] = ((slice__u8){(u8*)";", 1}), items__4903), 3})) : ((slice__u8){(u8*)"return;", 7})); codegen__line(ctx, v__4902, v__4904); });
     return;
   }
   slice__u8 v = ((slice__u8){(u8*)"", 0});
   if ((value != ((ast__Node*)0))) {
     v = codegen__tmp(ctx, g, ((slice__u8){(u8*)"ret", 3}));
-    ({ codegen__CodeGen* v__4901 = g; slice__u8 v__4903 = codegen__cat(ctx, ((slice__string){(items__4902[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:976:33"))->current_fn, "src/codegen.sabk:976:44"))->ty, "src/codegen.sabk:976:47"))->ret), items__4902[1] = ((slice__u8){(u8*)" ", 1}), items__4902[2] = v, items__4902[3] = ((slice__u8){(u8*)" = ", 3}), items__4902[4] = codegen__expr(ctx, g, value), items__4902[5] = ((slice__u8){(u8*)";", 1}), items__4902), 6})); codegen__line(ctx, v__4901, v__4903); });
+    ({ codegen__CodeGen* v__4905 = g; slice__u8 v__4907 = codegen__cat(ctx, ((slice__string){(items__4906[0] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:976:33"))->current_fn, "src/codegen.sabk:976:44"))->ty, "src/codegen.sabk:976:47"))->ret), items__4906[1] = ((slice__u8){(u8*)" ", 1}), items__4906[2] = v, items__4906[3] = ((slice__u8){(u8*)" = ", 3}), items__4906[4] = codegen__expr(ctx, g, value), items__4906[5] = ((slice__u8){(u8*)";", 1}), items__4906), 6})); codegen__line(ctx, v__4905, v__4907); });
   }
   codegen__emit_defers_until(ctx, g, ((isize)0LL));
-  ({ codegen__CodeGen* v__4904 = g; slice__u8 v__4906 = ((value != ((ast__Node*)0)) ? codegen__cat(ctx, ((slice__string){(items__4905[0] = ((slice__u8){(u8*)"return ", 7}), items__4905[1] = v, items__4905[2] = ((slice__u8){(u8*)";", 1}), items__4905), 3})) : ((slice__u8){(u8*)"return;", 7})); codegen__line(ctx, v__4904, v__4906); });
+  ({ codegen__CodeGen* v__4908 = g; slice__u8 v__4910 = ((value != ((ast__Node*)0)) ? codegen__cat(ctx, ((slice__string){(items__4909[0] = ((slice__u8){(u8*)"return ", 7}), items__4909[1] = v, items__4909[2] = ((slice__u8){(u8*)";", 1}), items__4909), 3})) : ((slice__u8){(u8*)"return;", 7})); codegen__line(ctx, v__4908, v__4910); });
 }
 
 static void codegen__emit_leave(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n, bool is_break, ast__Node* value) {
-  slice__u8 items__4909[6];
-  slice__u8 items__4914[4];
-  slice__u8 items__4917[3];
-  slice__u8 items__4920[6];
-  slice__u8 items__4925[4];
-  slice__u8 items__4928[3];
-  slice__u8 items__4931[2];
-  slice__u8 items__4934[4];
-  slice__u8 items__4937[2];
+  slice__u8 items__4913[6];
+  slice__u8 items__4918[4];
+  slice__u8 items__4921[3];
+  slice__u8 items__4924[6];
+  slice__u8 items__4929[4];
+  slice__u8 items__4932[3];
+  slice__u8 items__4935[2];
+  slice__u8 items__4938[4];
+  slice__u8 items__4941[2];
   if (((rt_nonnull(n, "src/codegen.sabk:983:11"))->decl != ((ast__Node*)0))) {
     isize target = ((rt_nonnull(g, "src/codegen.sabk:985:24"))->scopes).len;
     while ((target > ((isize)0LL))) {
@@ -34682,7 +34791,7 @@ static void codegen__emit_leave(prelude__Context *ctx, codegen__CodeGen* g, ast_
       ast__Node* subject = ((ast__Node*)0);
       {
         ast__Node* s;
-        if (({ ast__NodeKind is__4907 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:996:19"))->decl, "src/codegen.sabk:996:24"))->kind; is__4907.tag == ((ast__NodeKind__Tag)30LL) ? (s = is__4907.payload.Switch.value, 1) : 0; })) {
+        if (({ ast__NodeKind is__4911 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:996:19"))->decl, "src/codegen.sabk:996:24"))->kind; is__4911.tag == ((ast__NodeKind__Tag)30LL) ? (s = is__4911.payload.Switch.value, 1) : 0; })) {
           subject = s;
         }
       }
@@ -34690,18 +34799,18 @@ static void codegen__emit_leave(prelude__Context *ctx, codegen__CodeGen* g, ast_
       slice__u8 next = codegen__tmp(ctx, g, ((slice__u8){(u8*)"next", 4}));
       codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
       (rt_nonnull(g, "src/codegen.sabk:1001:15"))->indent++;
-      ({ codegen__CodeGen* v__4908 = g; slice__u8 v__4910 = codegen__cat(ctx, ((slice__string){(items__4909[0] = codegen__c_type(ctx, g, t), items__4909[1] = ((slice__u8){(u8*)" ", 1}), items__4909[2] = next, items__4909[3] = ((slice__u8){(u8*)" = ", 3}), items__4909[4] = codegen__expr(ctx, g, value), items__4909[5] = ((slice__u8){(u8*)";", 1}), items__4909), 6})); codegen__line(ctx, v__4908, v__4910); });
+      ({ codegen__CodeGen* v__4912 = g; slice__u8 v__4914 = codegen__cat(ctx, ((slice__string){(items__4913[0] = codegen__c_type(ctx, g, t), items__4913[1] = ((slice__u8){(u8*)" ", 1}), items__4913[2] = next, items__4913[3] = ((slice__u8){(u8*)" = ", 3}), items__4913[4] = codegen__expr(ctx, g, value), items__4913[5] = ((slice__u8){(u8*)";", 1}), items__4913), 6})); codegen__line(ctx, v__4912, v__4914); });
       codegen__emit_defers_until(ctx, g, target);
-      ({ codegen__CodeGen* v__4911 = g; slice__u8 v__4915 = codegen__cat(ctx, ((slice__string){(items__4914[0] = ({
-        tuple__1 result__4912 = map__map_get__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1004:36"))->switch_values), (rt_nonnull(n, "src/codegen.sabk:1004:53"))->decl);
-        slice__u8 value__4913;
-        if (!result__4912._1)
-          value__4913 = ((slice__u8){(u8*)"", 0});
+      ({ codegen__CodeGen* v__4915 = g; slice__u8 v__4919 = codegen__cat(ctx, ((slice__string){(items__4918[0] = ({
+        tuple__1 result__4916 = map__map_get__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1004:36"))->switch_values), (rt_nonnull(n, "src/codegen.sabk:1004:53"))->decl);
+        slice__u8 value__4917;
+        if (!result__4916._1)
+          value__4917 = ((slice__u8){(u8*)"", 0});
         else
-          value__4913 = result__4912._0;
-        value__4913;
-      }), items__4914[1] = ((slice__u8){(u8*)" = ", 3}), items__4914[2] = next, items__4914[3] = ((slice__u8){(u8*)";", 1}), items__4914), 4})); codegen__line(ctx, v__4911, v__4915); });
-      ({ codegen__CodeGen* v__4916 = g; slice__u8 v__4918 = codegen__cat(ctx, ((slice__string){(items__4917[0] = ((slice__u8){(u8*)"goto ", 5}), items__4917[1] = name, items__4917[2] = ((slice__u8){(u8*)"_top;", 5}), items__4917), 3})); codegen__line(ctx, v__4916, v__4918); });
+          value__4917 = result__4916._0;
+        value__4917;
+      }), items__4918[1] = ((slice__u8){(u8*)" = ", 3}), items__4918[2] = next, items__4918[3] = ((slice__u8){(u8*)";", 1}), items__4918), 4})); codegen__line(ctx, v__4915, v__4919); });
+      ({ codegen__CodeGen* v__4920 = g; slice__u8 v__4922 = codegen__cat(ctx, ((slice__string){(items__4921[0] = ((slice__u8){(u8*)"goto ", 5}), items__4921[1] = name, items__4921[2] = ((slice__u8){(u8*)"_top;", 5}), items__4921), 3})); codegen__line(ctx, v__4920, v__4922); });
       (rt_nonnull(g, "src/codegen.sabk:1006:15"))->indent--;
       codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
       return;
@@ -34711,27 +34820,27 @@ static void codegen__emit_leave(prelude__Context *ctx, codegen__CodeGen* g, ast_
       slice__u8 v = codegen__tmp(ctx, g, ((slice__u8){(u8*)"given", 5}));
       codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
       (rt_nonnull(g, "src/codegen.sabk:1015:15"))->indent++;
-      ({ codegen__CodeGen* v__4919 = g; slice__u8 v__4921 = codegen__cat(ctx, ((slice__string){(items__4920[0] = codegen__c_type(ctx, g, t), items__4920[1] = ((slice__u8){(u8*)" ", 1}), items__4920[2] = v, items__4920[3] = ((slice__u8){(u8*)" = ", 3}), items__4920[4] = codegen__expr(ctx, g, value), items__4920[5] = ((slice__u8){(u8*)";", 1}), items__4920), 6})); codegen__line(ctx, v__4919, v__4921); });
+      ({ codegen__CodeGen* v__4923 = g; slice__u8 v__4925 = codegen__cat(ctx, ((slice__string){(items__4924[0] = codegen__c_type(ctx, g, t), items__4924[1] = ((slice__u8){(u8*)" ", 1}), items__4924[2] = v, items__4924[3] = ((slice__u8){(u8*)" = ", 3}), items__4924[4] = codegen__expr(ctx, g, value), items__4924[5] = ((slice__u8){(u8*)";", 1}), items__4924), 6})); codegen__line(ctx, v__4923, v__4925); });
       codegen__emit_defers_until(ctx, g, target);
-      ({ codegen__CodeGen* v__4922 = g; slice__u8 v__4926 = codegen__cat(ctx, ((slice__string){(items__4925[0] = ({
-        tuple__1 result__4923 = map__map_get__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1018:36"))->value_vars), (rt_nonnull(n, "src/codegen.sabk:1018:50"))->decl);
-        slice__u8 value__4924;
-        if (!result__4923._1)
-          value__4924 = ((slice__u8){(u8*)"", 0});
+      ({ codegen__CodeGen* v__4926 = g; slice__u8 v__4930 = codegen__cat(ctx, ((slice__string){(items__4929[0] = ({
+        tuple__1 result__4927 = map__map_get__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1018:36"))->value_vars), (rt_nonnull(n, "src/codegen.sabk:1018:50"))->decl);
+        slice__u8 value__4928;
+        if (!result__4927._1)
+          value__4928 = ((slice__u8){(u8*)"", 0});
         else
-          value__4924 = result__4923._0;
-        value__4924;
-      }), items__4925[1] = ((slice__u8){(u8*)" = ", 3}), items__4925[2] = v, items__4925[3] = ((slice__u8){(u8*)";", 1}), items__4925), 4})); codegen__line(ctx, v__4922, v__4926); });
-      ({ codegen__CodeGen* v__4927 = g; slice__u8 v__4929 = codegen__cat(ctx, ((slice__string){(items__4928[0] = ((slice__u8){(u8*)"goto ", 5}), items__4928[1] = name, items__4928[2] = ((slice__u8){(u8*)"_break;", 7}), items__4928), 3})); codegen__line(ctx, v__4927, v__4929); });
-      ({ codegen__CodeGen* v__4930 = g; slice__u8 v__4932 = codegen__cat(ctx, ((slice__string){(items__4931[0] = name, items__4931[1] = ((slice__u8){(u8*)"_break", 6}), items__4931), 2})); codegen__use_label(ctx, v__4930, v__4932); });
+          value__4928 = result__4927._0;
+        value__4928;
+      }), items__4929[1] = ((slice__u8){(u8*)" = ", 3}), items__4929[2] = v, items__4929[3] = ((slice__u8){(u8*)";", 1}), items__4929), 4})); codegen__line(ctx, v__4926, v__4930); });
+      ({ codegen__CodeGen* v__4931 = g; slice__u8 v__4933 = codegen__cat(ctx, ((slice__string){(items__4932[0] = ((slice__u8){(u8*)"goto ", 5}), items__4932[1] = name, items__4932[2] = ((slice__u8){(u8*)"_break;", 7}), items__4932), 3})); codegen__line(ctx, v__4931, v__4933); });
+      ({ codegen__CodeGen* v__4934 = g; slice__u8 v__4936 = codegen__cat(ctx, ((slice__string){(items__4935[0] = name, items__4935[1] = ((slice__u8){(u8*)"_break", 6}), items__4935), 2})); codegen__use_label(ctx, v__4934, v__4936); });
       (rt_nonnull(g, "src/codegen.sabk:1021:15"))->indent--;
       codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
       return;
     }
     codegen__emit_defers_until(ctx, g, target);
     slice__u8 suffix = (is_break ? ((slice__u8){(u8*)"_break", 6}) : ((slice__u8){(u8*)"_continue", 9}));
-    ({ codegen__CodeGen* v__4933 = g; slice__u8 v__4935 = codegen__cat(ctx, ((slice__string){(items__4934[0] = ((slice__u8){(u8*)"goto ", 5}), items__4934[1] = name, items__4934[2] = suffix, items__4934[3] = ((slice__u8){(u8*)";", 1}), items__4934), 4})); codegen__line(ctx, v__4933, v__4935); });
-    ({ codegen__CodeGen* v__4936 = g; slice__u8 v__4938 = codegen__cat(ctx, ((slice__string){(items__4937[0] = name, items__4937[1] = suffix, items__4937), 2})); codegen__use_label(ctx, v__4936, v__4938); });
+    ({ codegen__CodeGen* v__4937 = g; slice__u8 v__4939 = codegen__cat(ctx, ((slice__string){(items__4938[0] = ((slice__u8){(u8*)"goto ", 5}), items__4938[1] = name, items__4938[2] = suffix, items__4938[3] = ((slice__u8){(u8*)";", 1}), items__4938), 4})); codegen__line(ctx, v__4937, v__4939); });
+    ({ codegen__CodeGen* v__4940 = g; slice__u8 v__4942 = codegen__cat(ctx, ((slice__string){(items__4941[0] = name, items__4941[1] = suffix, items__4941), 2})); codegen__use_label(ctx, v__4940, v__4942); });
     return;
   }
   isize target = ((rt_nonnull(g, "src/codegen.sabk:1032:20"))->scopes).len;
@@ -34747,16 +34856,16 @@ static void codegen__emit_leave(prelude__Context *ctx, codegen__CodeGen* g, ast_
 }
 
 static void codegen__emit_for_in(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__4942[6];
-  slice__u8 items__4945[13];
-  slice__u8 items__4948[2];
-  slice__u8 items__4951[6];
-  slice__u8 items__4953[4];
-  slice__u8 items__4954[4];
-  slice__u8 items__4955[2];
-  slice__u8 items__4957[9];
-  slice__u8 items__4960[6];
-  slice__u8 items__4963[2];
+  slice__u8 items__4946[6];
+  slice__u8 items__4949[13];
+  slice__u8 items__4952[2];
+  slice__u8 items__4955[6];
+  slice__u8 items__4957[4];
+  slice__u8 items__4958[4];
+  slice__u8 items__4959[2];
+  slice__u8 items__4961[9];
+  slice__u8 items__4964[6];
+  slice__u8 items__4967[2];
   ast__Node* iterable = ((ast__Node*)0);
   ast__Node* range_end = ((ast__Node*)0);
   ast__Node* body = ((ast__Node*)0);
@@ -34764,8 +34873,8 @@ static void codegen__emit_for_in(prelude__Context *ctx, codegen__CodeGen* g, ast
   ast__Node* index = ((ast__Node*)0);
   {
     ast__NodeKind__variant_ForIn f;
-    if (({ ast__NodeKind is__4939 = (rt_nonnull(n, "src/codegen.sabk:1049:11"))->kind; is__4939.tag == ((ast__NodeKind__Tag)28LL) ? (f = is__4939.payload.ForIn, 1) : 0; })) {
-      ({ tuple__54 values__4940 = ((tuple__54){._0 = (f).iterable, ._1 = (f).range_end, ._2 = (f).body, ._3 = (f).label, ._4 = (f).index}); iterable = values__4940._0; range_end = values__4940._1; body = values__4940._2; label = values__4940._3; index = values__4940._4; });
+    if (({ ast__NodeKind is__4943 = (rt_nonnull(n, "src/codegen.sabk:1049:11"))->kind; is__4943.tag == ((ast__NodeKind__Tag)28LL) ? (f = is__4943.payload.ForIn, 1) : 0; })) {
+      ({ tuple__54 values__4944 = ((tuple__54){._0 = (f).iterable, ._1 = (f).range_end, ._2 = (f).body, ._3 = (f).label, ._4 = (f).index}); iterable = values__4944._0; range_end = values__4944._1; body = values__4944._2; label = values__4944._3; index = values__4944._4; });
     }
   }
   slice__u8 var = codegen__var_name(ctx, g, n);
@@ -34774,12 +34883,12 @@ static void codegen__emit_for_in(prelude__Context *ctx, codegen__CodeGen* g, ast
   (rt_nonnull(g, "src/codegen.sabk:1054:7"))->indent++;
   if ((range_end != ((ast__Node*)0))) {
     slice__u8 end = codegen__tmp(ctx, g, ((slice__u8){(u8*)"end", 3}));
-    ({ codegen__CodeGen* v__4941 = g; slice__u8 v__4943 = codegen__cat(ctx, ((slice__string){(items__4942[0] = var_type, items__4942[1] = ((slice__u8){(u8*)" ", 1}), items__4942[2] = end, items__4942[3] = ((slice__u8){(u8*)" = ", 3}), items__4942[4] = codegen__expr(ctx, g, range_end), items__4942[5] = ((slice__u8){(u8*)";", 1}), items__4942), 6})); codegen__line(ctx, v__4941, v__4943); });
-    ({ codegen__CodeGen* v__4944 = g; slice__u8 v__4946 = codegen__cat(ctx, ((slice__string){(items__4945[0] = ((slice__u8){(u8*)"for (", 5}), items__4945[1] = var_type, items__4945[2] = ((slice__u8){(u8*)" ", 1}), items__4945[3] = var, items__4945[4] = ((slice__u8){(u8*)" = ", 3}), items__4945[5] = codegen__expr(ctx, g, iterable), items__4945[6] = ((slice__u8){(u8*)"; ", 2}), items__4945[7] = var, items__4945[8] = ((slice__u8){(u8*)" < ", 3}), items__4945[9] = end, items__4945[10] = ((slice__u8){(u8*)"; ", 2}), items__4945[11] = var, items__4945[12] = ((slice__u8){(u8*)"++) {", 5}), items__4945), 13})); codegen__line(ctx, v__4944, v__4946); });
+    ({ codegen__CodeGen* v__4945 = g; slice__u8 v__4947 = codegen__cat(ctx, ((slice__string){(items__4946[0] = var_type, items__4946[1] = ((slice__u8){(u8*)" ", 1}), items__4946[2] = end, items__4946[3] = ((slice__u8){(u8*)" = ", 3}), items__4946[4] = codegen__expr(ctx, g, range_end), items__4946[5] = ((slice__u8){(u8*)";", 1}), items__4946), 6})); codegen__line(ctx, v__4945, v__4947); });
+    ({ codegen__CodeGen* v__4948 = g; slice__u8 v__4950 = codegen__cat(ctx, ((slice__string){(items__4949[0] = ((slice__u8){(u8*)"for (", 5}), items__4949[1] = var_type, items__4949[2] = ((slice__u8){(u8*)" ", 1}), items__4949[3] = var, items__4949[4] = ((slice__u8){(u8*)" = ", 3}), items__4949[5] = codegen__expr(ctx, g, iterable), items__4949[6] = ((slice__u8){(u8*)"; ", 2}), items__4949[7] = var, items__4949[8] = ((slice__u8){(u8*)" < ", 3}), items__4949[9] = end, items__4949[10] = ((slice__u8){(u8*)"; ", 2}), items__4949[11] = var, items__4949[12] = ((slice__u8){(u8*)"++) {", 5}), items__4949), 13})); codegen__line(ctx, v__4948, v__4950); });
     (rt_nonnull(g, "src/codegen.sabk:1060:11"))->indent++;
     codegen__emit_body(ctx, g, body, ((codegen__ScopeKind)2LL), n);
     if ((label != ((ast__Node*)0))) {
-      ({ codegen__CodeGen* v__4947 = g; slice__u8 v__4949 = codegen__cat(ctx, ((slice__string){(items__4948[0] = codegen__label_of(ctx, g, n), items__4948[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4948), 2})); codegen__line(ctx, v__4947, v__4949); });
+      ({ codegen__CodeGen* v__4951 = g; slice__u8 v__4953 = codegen__cat(ctx, ((slice__string){(items__4952[0] = codegen__label_of(ctx, g, n), items__4952[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4952), 2})); codegen__line(ctx, v__4951, v__4953); });
     }
     (rt_nonnull(g, "src/codegen.sabk:1064:11"))->indent--;
     codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
@@ -34789,20 +34898,20 @@ static void codegen__emit_for_in(prelude__Context *ctx, codegen__CodeGen* g, ast
     slice__u8 i = ((index != ((ast__Node*)0)) ? codegen__var_name(ctx, g, index) : codegen__tmp(ctx, g, ((slice__u8){(u8*)"i", 1})));
     slice__u8 elem = ((slice__u8){(u8*)"", 0});
     slice__u8 len = ((slice__u8){(u8*)"", 0});
-    ({ codegen__CodeGen* v__4950 = g; slice__u8 v__4952 = codegen__cat(ctx, ((slice__string){(items__4951[0] = codegen__c_type(ctx, g, t), items__4951[1] = ((slice__u8){(u8*)" ", 1}), items__4951[2] = s, items__4951[3] = ((slice__u8){(u8*)" = ", 3}), items__4951[4] = codegen__expr(ctx, g, iterable), items__4951[5] = ((slice__u8){(u8*)";", 1}), items__4951), 6})); codegen__line(ctx, v__4950, v__4952); });
+    ({ codegen__CodeGen* v__4954 = g; slice__u8 v__4956 = codegen__cat(ctx, ((slice__string){(items__4955[0] = codegen__c_type(ctx, g, t), items__4955[1] = ((slice__u8){(u8*)" ", 1}), items__4955[2] = s, items__4955[3] = ((slice__u8){(u8*)" = ", 3}), items__4955[4] = codegen__expr(ctx, g, iterable), items__4955[5] = ((slice__u8){(u8*)";", 1}), items__4955), 6})); codegen__line(ctx, v__4954, v__4956); });
     if (((rt_nonnull(t, "src/codegen.sabk:1074:15"))->kind == ((types__TypeKind)7LL))) {
-      elem = codegen__cat(ctx, ((slice__string){(items__4953[0] = s, items__4953[1] = ((slice__u8){(u8*)".data[", 6}), items__4953[2] = i, items__4953[3] = ((slice__u8){(u8*)"]", 1}), items__4953), 4}));
+      elem = codegen__cat(ctx, ((slice__string){(items__4957[0] = s, items__4957[1] = ((slice__u8){(u8*)".data[", 6}), items__4957[2] = i, items__4957[3] = ((slice__u8){(u8*)"]", 1}), items__4957), 4}));
       len = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:1076:26"))->len);
     } else {
-      elem = codegen__cat(ctx, ((slice__string){(items__4954[0] = s, items__4954[1] = ((slice__u8){(u8*)".ptr[", 5}), items__4954[2] = i, items__4954[3] = ((slice__u8){(u8*)"]", 1}), items__4954), 4}));
-      len = codegen__cat(ctx, ((slice__string){(items__4955[0] = s, items__4955[1] = ((slice__u8){(u8*)".len", 4}), items__4955), 2}));
+      elem = codegen__cat(ctx, ((slice__string){(items__4958[0] = s, items__4958[1] = ((slice__u8){(u8*)".ptr[", 5}), items__4958[2] = i, items__4958[3] = ((slice__u8){(u8*)"]", 1}), items__4958), 4}));
+      len = codegen__cat(ctx, ((slice__string){(items__4959[0] = s, items__4959[1] = ((slice__u8){(u8*)".len", 4}), items__4959), 2}));
     }
-    ({ codegen__CodeGen* v__4956 = g; slice__u8 v__4958 = codegen__cat(ctx, ((slice__string){(items__4957[0] = ((slice__u8){(u8*)"for (isize ", 11}), items__4957[1] = i, items__4957[2] = ((slice__u8){(u8*)" = 0; ", 6}), items__4957[3] = i, items__4957[4] = ((slice__u8){(u8*)" < ", 3}), items__4957[5] = len, items__4957[6] = ((slice__u8){(u8*)"; ", 2}), items__4957[7] = i, items__4957[8] = ((slice__u8){(u8*)"++) {", 5}), items__4957), 9})); codegen__line(ctx, v__4956, v__4958); });
+    ({ codegen__CodeGen* v__4960 = g; slice__u8 v__4962 = codegen__cat(ctx, ((slice__string){(items__4961[0] = ((slice__u8){(u8*)"for (isize ", 11}), items__4961[1] = i, items__4961[2] = ((slice__u8){(u8*)" = 0; ", 6}), items__4961[3] = i, items__4961[4] = ((slice__u8){(u8*)" < ", 3}), items__4961[5] = len, items__4961[6] = ((slice__u8){(u8*)"; ", 2}), items__4961[7] = i, items__4961[8] = ((slice__u8){(u8*)"++) {", 5}), items__4961), 9})); codegen__line(ctx, v__4960, v__4962); });
     (rt_nonnull(g, "src/codegen.sabk:1082:11"))->indent++;
-    ({ codegen__CodeGen* v__4959 = g; slice__u8 v__4961 = codegen__cat(ctx, ((slice__string){(items__4960[0] = var_type, items__4960[1] = ((slice__u8){(u8*)" ", 1}), items__4960[2] = var, items__4960[3] = ((slice__u8){(u8*)" = ", 3}), items__4960[4] = elem, items__4960[5] = ((slice__u8){(u8*)";", 1}), items__4960), 6})); codegen__line(ctx, v__4959, v__4961); });
+    ({ codegen__CodeGen* v__4963 = g; slice__u8 v__4965 = codegen__cat(ctx, ((slice__string){(items__4964[0] = var_type, items__4964[1] = ((slice__u8){(u8*)" ", 1}), items__4964[2] = var, items__4964[3] = ((slice__u8){(u8*)" = ", 3}), items__4964[4] = elem, items__4964[5] = ((slice__u8){(u8*)";", 1}), items__4964), 6})); codegen__line(ctx, v__4963, v__4965); });
     codegen__emit_body(ctx, g, body, ((codegen__ScopeKind)2LL), n);
     if ((label != ((ast__Node*)0))) {
-      ({ codegen__CodeGen* v__4962 = g; slice__u8 v__4964 = codegen__cat(ctx, ((slice__string){(items__4963[0] = codegen__label_of(ctx, g, n), items__4963[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4963), 2})); codegen__line(ctx, v__4962, v__4964); });
+      ({ codegen__CodeGen* v__4966 = g; slice__u8 v__4968 = codegen__cat(ctx, ((slice__string){(items__4967[0] = codegen__label_of(ctx, g, n), items__4967[1] = ((slice__u8){(u8*)"_continue:;", 11}), items__4967), 2})); codegen__line(ctx, v__4966, v__4968); });
     }
     (rt_nonnull(g, "src/codegen.sabk:1087:11"))->indent--;
     codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
@@ -34825,39 +34934,39 @@ static slice__u8 codegen__bindings_of(prelude__Context *ctx, codegen__CodeGen* g
 }
 
 static slice__u8 codegen__emit_expansion(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* x) {
-  slice__u8 items__4970[4];
-  slice__u8 items__4973[2];
+  slice__u8 items__4974[4];
+  slice__u8 items__4977[2];
   slice__ptr_ast__Node stmts = {0};
   i32 color = ((i32)0LL);
   {
     slice__ptr_ast__Node s;
     i32 e;
-    if (({ ast__NodeKind is__4965 = (rt_nonnull(x, "src/codegen.sabk:1112:11"))->kind; is__4965.tag == ((ast__NodeKind__Tag)65LL) ? (s = is__4965.payload.MacroExpansion.stmts, e = is__4965.payload.MacroExpansion.expansion, 1) : 0; })) {
-      ({ tuple__51 values__4966 = ((tuple__51){._0 = s, ._1 = e}); stmts = values__4966._0; color = values__4966._1; });
+    if (({ ast__NodeKind is__4969 = (rt_nonnull(x, "src/codegen.sabk:1112:11"))->kind; is__4969.tag == ((ast__NodeKind__Tag)65LL) ? (s = is__4969.payload.MacroExpansion.stmts, e = is__4969.payload.MacroExpansion.expansion, 1) : 0; })) {
+      ({ tuple__51 values__4970 = ((tuple__51){._0 = s, ._1 = e}); stmts = values__4970._0; color = values__4970._1; });
     }
   }
-  codegen__Scope scope = ({ i32 v__4967 = color; slice__u8 v__4968 = codegen__tmp(ctx, g, ((slice__u8){(u8*)"macro_end", 9})); ((codegen__Scope){.kind = ((codegen__ScopeKind)4LL), .expansion = v__4967, .end_label = v__4968}); });
+  codegen__Scope scope = ({ i32 v__4971 = color; slice__u8 v__4972 = codegen__tmp(ctx, g, ((slice__u8){(u8*)"macro_end", 9})); ((codegen__Scope){.kind = ((codegen__ScopeKind)4LL), .expansion = v__4971, .end_label = v__4972}); });
   if (((rt_nonnull((rt_nonnull(x, "src/codegen.sabk:1115:11"))->ty, "src/codegen.sabk:1115:14"))->kind != ((types__TypeKind)1LL))) {
     (scope).result = codegen__tmp(ctx, g, ((slice__u8){(u8*)"result", 6}));
-    ({ codegen__CodeGen* v__4969 = g; slice__u8 v__4971 = codegen__cat(ctx, ((slice__string){(items__4970[0] = codegen__c_type(ctx, g, (rt_nonnull(x, "src/codegen.sabk:1117:33"))->ty), items__4970[1] = ((slice__u8){(u8*)" ", 1}), items__4970[2] = (scope).result, items__4970[3] = ((slice__u8){(u8*)";", 1}), items__4970), 4})); codegen__line(ctx, v__4969, v__4971); });
+    ({ codegen__CodeGen* v__4973 = g; slice__u8 v__4975 = codegen__cat(ctx, ((slice__string){(items__4974[0] = codegen__c_type(ctx, g, (rt_nonnull(x, "src/codegen.sabk:1117:33"))->ty), items__4974[1] = ((slice__u8){(u8*)" ", 1}), items__4974[2] = (scope).result, items__4974[3] = ((slice__u8){(u8*)";", 1}), items__4974), 4})); codegen__line(ctx, v__4973, v__4975); });
   }
   slice__u8 result = (scope).result;
   slice__u8 end_label = (scope).end_label;
   codegen__emit_scope_with(ctx, g, stmts, scope);
   if (map__map_has__string__bool(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1121:20"))->used_labels), end_label)) {
-    ({ codegen__CodeGen* v__4972 = g; slice__u8 v__4974 = codegen__cat(ctx, ((slice__string){(items__4973[0] = end_label, items__4973[1] = ((slice__u8){(u8*)":;", 2}), items__4973), 2})); codegen__line(ctx, v__4972, v__4974); });
+    ({ codegen__CodeGen* v__4976 = g; slice__u8 v__4978 = codegen__cat(ctx, ((slice__string){(items__4977[0] = end_label, items__4977[1] = ((slice__u8){(u8*)":;", 2}), items__4977), 2})); codegen__line(ctx, v__4976, v__4978); });
   }
   return result;
 }
 
 static slice__u8 codegen__expr(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__4975[3];
+  slice__u8 items__4979[3];
   if (((((rt_nonnull(n, "src/codegen.sabk:1129:11"))->conv != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1129:29"))->conv, "src/codegen.sabk:1129:34"))->kind == ((types__TypeKind)8LL))) && ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1129:54"))->ty, "src/codegen.sabk:1129:57"))->kind == ((types__TypeKind)7LL)))) {
     return codegen__array_view(ctx, g, n);
   }
   slice__u8 value = codegen__expr_inner(ctx, g, n);
   if ((((((rt_nonnull(n, "src/codegen.sabk:1134:11"))->kind).tag == ((ast__NodeKind__Tag)46LL)) && ((rt_nonnull(n, "src/codegen.sabk:1134:34"))->ty != ((types__Type*)0))) && ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1134:50"))->ty, "src/codegen.sabk:1134:53"))->kind == ((types__TypeKind)1LL)))) {
-    value = codegen__cat(ctx, ((slice__string){(items__4975[0] = ((slice__u8){(u8*)"({ ", 3}), items__4975[1] = value, items__4975[2] = ((slice__u8){(u8*)"; (sabk_void){}; })", 19}), items__4975), 3}));
+    value = codegen__cat(ctx, ((slice__string){(items__4979[0] = ((slice__u8){(u8*)"({ ", 3}), items__4979[1] = value, items__4979[2] = ((slice__u8){(u8*)"; (sabk_void){}; })", 19}), items__4979), 3}));
   }
   if (((rt_nonnull(n, "src/codegen.sabk:1136:11"))->conv != ((types__Type*)0))) {
     return codegen__convert(ctx, g, value, (rt_nonnull(n, "src/codegen.sabk:1137:36"))->ty, (rt_nonnull(n, "src/codegen.sabk:1137:42"))->conv);
@@ -34866,72 +34975,72 @@ static slice__u8 codegen__expr(prelude__Context *ctx, codegen__CodeGen* g, ast__
 }
 
 static slice__u8 codegen__array_view(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__4978[4];
-  prelude__Any items__4981[2];
-  slice__u8 items__4985[3];
-  slice__u8 items__4987[7];
+  slice__u8 items__4982[4];
+  prelude__Any items__4985[2];
+  slice__u8 items__4989[3];
+  slice__u8 items__4991[7];
   slice__u8 len = codegen__unum(ctx, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1145:22"))->ty, "src/codegen.sabk:1145:25"))->len);
   if (((generics__is_place(ctx, n) || (rt_nonnull(g, "src/codegen.sabk:1148:26"))->static_init) || ((rt_nonnull(g, "src/codegen.sabk:1148:43"))->current_fn == ((ast__Node*)0)))) {
-    return ({ codegen__CodeGen* v__4976 = g; types__Type* v__4977 = (rt_nonnull(n, "src/codegen.sabk:1149:30"))->conv; slice__u8 v__4979 = codegen__cat(ctx, ((slice__string){(items__4978[0] = ((slice__u8){(u8*)"(", 1}), items__4978[1] = codegen__expr_inner(ctx, g, n), items__4978[2] = ((slice__u8){(u8*)").data, ", 8}), items__4978[3] = len, items__4978), 4})); codegen__compound(ctx, v__4976, v__4977, v__4979); });
+    return ({ codegen__CodeGen* v__4980 = g; types__Type* v__4981 = (rt_nonnull(n, "src/codegen.sabk:1149:30"))->conv; slice__u8 v__4983 = codegen__cat(ctx, ((slice__string){(items__4982[0] = ((slice__u8){(u8*)"(", 1}), items__4982[1] = codegen__expr_inner(ctx, g, n), items__4982[2] = ((slice__u8){(u8*)").data, ", 8}), items__4982[3] = len, items__4982), 4})); codegen__compound(ctx, v__4980, v__4981, v__4983); });
   }
   slice__u8 name = codegen__tmp(ctx, g, ((slice__u8){(u8*)"array", 5}));
-  ({ grow__u8* v__4980 = (&(rt_nonnull(g, "src/codegen.sabk:1151:17"))->fn_storage); slice__prelude__Any v__4982 = ((slice__prelude__Any){(items__4981[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1151:53"))->ty)}, .info = (&ti__1)}), items__4981[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4981), 2}); fmt__print_to(ctx, v__4980, ((slice__u8){(u8*)"  % %;\012", 7}), v__4982); });
-  return codegen__cat(ctx, ((slice__string){(items__4987[0] = ((slice__u8){(u8*)"(", 1}), items__4987[1] = name, items__4987[2] = ((slice__u8){(u8*)" = ", 3}), items__4987[3] = codegen__expr_inner(ctx, g, n), items__4987[4] = ((slice__u8){(u8*)", ", 2}), items__4987[5] = ({ codegen__CodeGen* v__4983 = g; types__Type* v__4984 = (rt_nonnull(n, "src/codegen.sabk:1152:72"))->conv; slice__u8 v__4986 = codegen__cat(ctx, ((slice__string){(items__4985[0] = name, items__4985[1] = ((slice__u8){(u8*)".data, ", 7}), items__4985[2] = len, items__4985), 3})); codegen__compound(ctx, v__4983, v__4984, v__4986); }), items__4987[6] = ((slice__u8){(u8*)")", 1}), items__4987), 7}));
+  ({ grow__u8* v__4984 = (&(rt_nonnull(g, "src/codegen.sabk:1151:17"))->fn_storage); slice__prelude__Any v__4986 = ((slice__prelude__Any){(items__4985[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1151:53"))->ty)}, .info = (&ti__1)}), items__4985[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__4985), 2}); fmt__print_to(ctx, v__4984, ((slice__u8){(u8*)"  % %;\012", 7}), v__4986); });
+  return codegen__cat(ctx, ((slice__string){(items__4991[0] = ((slice__u8){(u8*)"(", 1}), items__4991[1] = name, items__4991[2] = ((slice__u8){(u8*)" = ", 3}), items__4991[3] = codegen__expr_inner(ctx, g, n), items__4991[4] = ((slice__u8){(u8*)", ", 2}), items__4991[5] = ({ codegen__CodeGen* v__4987 = g; types__Type* v__4988 = (rt_nonnull(n, "src/codegen.sabk:1152:72"))->conv; slice__u8 v__4990 = codegen__cat(ctx, ((slice__string){(items__4989[0] = name, items__4989[1] = ((slice__u8){(u8*)".data, ", 7}), items__4989[2] = len, items__4989), 3})); codegen__compound(ctx, v__4987, v__4988, v__4990); }), items__4991[6] = ((slice__u8){(u8*)")", 1}), items__4991), 7}));
 }
 
 static slice__u8 codegen__convert(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 value, types__Type* from, types__Type* to) {
-  slice__u8 items__4990[6];
-  slice__u8 items__4992[4];
-  slice__u8 items__4995[4];
-  slice__u8 items__4999[3];
-  slice__u8 items__5000[7];
-  slice__u8 items__5001[5];
+  slice__u8 items__4994[6];
+  slice__u8 items__4996[4];
+  slice__u8 items__4999[4];
+  slice__u8 items__5003[3];
+  slice__u8 items__5004[7];
+  slice__u8 items__5005[5];
   if ((to == (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1157:17"))->c, "src/codegen.sabk:1157:19"))->any_type)) {
-    return ({ codegen__CodeGen* v__4988 = g; types__Type* v__4989 = to; slice__u8 v__4991 = codegen__cat(ctx, ((slice__string){(items__4990[0] = ((slice__u8){(u8*)".value = (", 10}), items__4990[1] = codegen__c_type(ctx, g, from), items__4990[2] = ((slice__u8){(u8*)"[1]){", 5}), items__4990[3] = value, items__4990[4] = ((slice__u8){(u8*)"}, .info = ", 11}), items__4990[5] = codegen__type_info_ref(ctx, g, from), items__4990), 6})); codegen__compound(ctx, v__4988, v__4989, v__4991); });
+    return ({ codegen__CodeGen* v__4992 = g; types__Type* v__4993 = to; slice__u8 v__4995 = codegen__cat(ctx, ((slice__string){(items__4994[0] = ((slice__u8){(u8*)".value = (", 10}), items__4994[1] = codegen__c_type(ctx, g, from), items__4994[2] = ((slice__u8){(u8*)"[1]){", 5}), items__4994[3] = value, items__4994[4] = ((slice__u8){(u8*)"}, .info = ", 11}), items__4994[5] = codegen__type_info_ref(ctx, g, from), items__4994), 6})); codegen__compound(ctx, v__4992, v__4993, v__4995); });
   }
   if (((rt_nonnull(from, "src/codegen.sabk:1159:14"))->kind == ((types__TypeKind)9LL))) {
-    return codegen__cat(ctx, ((slice__string){(items__4992[0] = codegen__c_type(ctx, g, from), items__4992[1] = ((slice__u8){(u8*)"__view(", 7}), items__4992[2] = value, items__4992[3] = ((slice__u8){(u8*)")", 1}), items__4992), 4}));
+    return codegen__cat(ctx, ((slice__string){(items__4996[0] = codegen__c_type(ctx, g, from), items__4996[1] = ((slice__u8){(u8*)"__view(", 7}), items__4996[2] = value, items__4996[3] = ((slice__u8){(u8*)")", 1}), items__4996), 4}));
   }
   if ((rt_nonnull(to, "src/codegen.sabk:1161:12"))->is_string) {
     return value;
   }
   if (((rt_nonnull(to, "src/codegen.sabk:1163:12"))->kind == ((types__TypeKind)8LL))) {
-    return ({ codegen__CodeGen* v__4993 = g; types__Type* v__4994 = to; slice__u8 v__4996 = codegen__cat(ctx, ((slice__string){(items__4995[0] = ((slice__u8){(u8*)"(", 1}), items__4995[1] = value, items__4995[2] = ((slice__u8){(u8*)")->data, ", 9}), items__4995[3] = codegen__unum(ctx, (rt_nonnull((rt_nonnull(from, "src/codegen.sabk:1164:71"))->elem, "src/codegen.sabk:1164:76"))->len), items__4995), 4})); codegen__compound(ctx, v__4993, v__4994, v__4996); });
+    return ({ codegen__CodeGen* v__4997 = g; types__Type* v__4998 = to; slice__u8 v__5000 = codegen__cat(ctx, ((slice__string){(items__4999[0] = ((slice__u8){(u8*)"(", 1}), items__4999[1] = value, items__4999[2] = ((slice__u8){(u8*)")->data, ", 9}), items__4999[3] = codegen__unum(ctx, (rt_nonnull((rt_nonnull(from, "src/codegen.sabk:1164:71"))->elem, "src/codegen.sabk:1164:76"))->len), items__4999), 4})); codegen__compound(ctx, v__4997, v__4998, v__5000); });
   }
   if (((rt_nonnull(to, "src/codegen.sabk:1165:12"))->is_failure && (from != to))) {
     u32 id = ({
-      tuple__30 result__4997 = map__map_get__ptr_types__Type__u32(ctx, (&(rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1166:29"))->c, "src/codegen.sabk:1166:31"))->error_ids), from);
-      u32 value__4998;
-      if (!result__4997._1)
-        value__4998 = ((u32)0LL);
+      tuple__30 result__5001 = map__map_get__ptr_types__Type__u32(ctx, (&(rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1166:29"))->c, "src/codegen.sabk:1166:31"))->error_ids), from);
+      u32 value__5002;
+      if (!result__5001._1)
+        value__5002 = ((u32)0LL);
       else
-        value__4998 = result__4997._0;
-      value__4998;
+        value__5002 = result__5001._0;
+      value__5002;
     });
-    slice__u8 v = ((rt_nonnull(from, "src/codegen.sabk:1167:26"))->is_tagged ? codegen__cat(ctx, ((slice__string){(items__4999[0] = ((slice__u8){(u8*)"(", 1}), items__4999[1] = value, items__4999[2] = ((slice__u8){(u8*)").tag", 5}), items__4999), 3})) : value);
-    return codegen__cat(ctx, ((slice__string){(items__5000[0] = ((slice__u8){(u8*)"((", 2}), items__5000[1] = codegen__c_type(ctx, g, to), items__5000[2] = ((slice__u8){(u8*)")rt_error(", 10}), items__5000[3] = codegen__unum(ctx, ((u64)(id))), items__5000[4] = ((slice__u8){(u8*)", (u64)(", 8}), items__5000[5] = v, items__5000[6] = ((slice__u8){(u8*)")))", 3}), items__5000), 7}));
+    slice__u8 v = ((rt_nonnull(from, "src/codegen.sabk:1167:26"))->is_tagged ? codegen__cat(ctx, ((slice__string){(items__5003[0] = ((slice__u8){(u8*)"(", 1}), items__5003[1] = value, items__5003[2] = ((slice__u8){(u8*)").tag", 5}), items__5003), 3})) : value);
+    return codegen__cat(ctx, ((slice__string){(items__5004[0] = ((slice__u8){(u8*)"((", 2}), items__5004[1] = codegen__c_type(ctx, g, to), items__5004[2] = ((slice__u8){(u8*)")rt_error(", 10}), items__5004[3] = codegen__unum(ctx, ((u64)(id))), items__5004[4] = ((slice__u8){(u8*)", (u64)(", 8}), items__5004[5] = v, items__5004[6] = ((slice__u8){(u8*)")))", 3}), items__5004), 7}));
   }
-  return codegen__cat(ctx, ((slice__string){(items__5001[0] = ((slice__u8){(u8*)"((", 2}), items__5001[1] = codegen__c_type(ctx, g, to), items__5001[2] = ((slice__u8){(u8*)")(", 2}), items__5001[3] = value, items__5001[4] = ((slice__u8){(u8*)"))", 2}), items__5001), 5}));
+  return codegen__cat(ctx, ((slice__string){(items__5005[0] = ((slice__u8){(u8*)"((", 2}), items__5005[1] = codegen__c_type(ctx, g, to), items__5005[2] = ((slice__u8){(u8*)")(", 2}), items__5005[3] = value, items__5005[4] = ((slice__u8){(u8*)"))", 2}), items__5005), 5}));
 }
 
 static slice__u8 codegen__compound(prelude__Context *ctx, codegen__CodeGen* g, types__Type* t, slice__u8 body) {
-  slice__u8 items__5002[3];
-  slice__u8 items__5003[5];
+  slice__u8 items__5006[3];
+  slice__u8 items__5007[5];
   if ((rt_nonnull(g, "src/codegen.sabk:1175:11"))->static_init) {
-    return codegen__cat(ctx, ((slice__string){(items__5002[0] = ((slice__u8){(u8*)"{", 1}), items__5002[1] = body, items__5002[2] = ((slice__u8){(u8*)"}", 1}), items__5002), 3}));
+    return codegen__cat(ctx, ((slice__string){(items__5006[0] = ((slice__u8){(u8*)"{", 1}), items__5006[1] = body, items__5006[2] = ((slice__u8){(u8*)"}", 1}), items__5006), 3}));
   }
-  return codegen__cat(ctx, ((slice__string){(items__5003[0] = ((slice__u8){(u8*)"((", 2}), items__5003[1] = codegen__c_type(ctx, g, t), items__5003[2] = ((slice__u8){(u8*)"){", 2}), items__5003[3] = body, items__5003[4] = ((slice__u8){(u8*)"})", 2}), items__5003), 5}));
+  return codegen__cat(ctx, ((slice__string){(items__5007[0] = ((slice__u8){(u8*)"((", 2}), items__5007[1] = codegen__c_type(ctx, g, t), items__5007[2] = ((slice__u8){(u8*)"){", 2}), items__5007[3] = body, items__5007[4] = ((slice__u8){(u8*)"})", 2}), items__5007), 5}));
 }
 
 static slice__u8 codegen__constant(prelude__Context *ctx, codegen__CodeGen* g, const__Const k, types__Type* t) {
-  slice__u8 items__5007[2];
-  slice__u8 items__5008[2];
-  slice__u8 items__5009[5];
-  slice__u8 items__5020[2];
-  slice__u8 items__5021[5];
+  slice__u8 items__5011[2];
+  slice__u8 items__5012[2];
+  slice__u8 items__5013[5];
+  slice__u8 items__5024[2];
+  slice__u8 items__5025[5];
   {
-    const__ConstKind switch__5004 = (k).kind;
-    switch (switch__5004) {
+    const__ConstKind switch__5008 = (k).kind;
+    switch (switch__5008) {
     case ((const__ConstKind)3LL):
     {
       return ((((k).i).lo != ((u64)0LL)) ? ((slice__u8){(u8*)"true", 4}) : ((slice__u8){(u8*)"false", 5}));
@@ -34940,31 +35049,31 @@ static slice__u8 codegen__constant(prelude__Context *ctx, codegen__CodeGen* g, c
     case ((const__ConstKind)1LL):
     {
       slice__u8 lit = ((slice__u8){(u8*)"", 0});
-      if (({ const__I128 v__5005 = (k).i; const__I128 v__5006 = const__i128(ctx, ((i64)(-9223372036854775807LL - 1))); const__i128_eq(ctx, v__5005, v__5006); })) {
+      if (({ const__I128 v__5009 = (k).i; const__I128 v__5010 = const__i128(ctx, ((i64)(-9223372036854775807LL - 1))); const__i128_eq(ctx, v__5009, v__5010); })) {
         lit = ((slice__u8){(u8*)"(-9223372036854775807LL - 1)", 28});
       } else {
         if (const__i128_fits(ctx, (k).i, ((i32)64LL), true)) {
-          lit = codegen__cat(ctx, ((slice__string){(items__5007[0] = const__i128_to_string(ctx, (k).i), items__5007[1] = ((slice__u8){(u8*)"LL", 2}), items__5007), 2}));
+          lit = codegen__cat(ctx, ((slice__string){(items__5011[0] = const__i128_to_string(ctx, (k).i), items__5011[1] = ((slice__u8){(u8*)"LL", 2}), items__5011), 2}));
         } else {
-          lit = codegen__cat(ctx, ((slice__string){(items__5008[0] = const__i128_to_string(ctx, (k).i), items__5008[1] = ((slice__u8){(u8*)"ULL", 3}), items__5008), 2}));
+          lit = codegen__cat(ctx, ((slice__string){(items__5012[0] = const__i128_to_string(ctx, (k).i), items__5012[1] = ((slice__u8){(u8*)"ULL", 3}), items__5012), 2}));
         }
       }
-      return codegen__cat(ctx, ((slice__string){(items__5009[0] = ((slice__u8){(u8*)"((", 2}), items__5009[1] = codegen__c_type(ctx, g, t), items__5009[2] = ((slice__u8){(u8*)")", 1}), items__5009[3] = lit, items__5009[4] = ((slice__u8){(u8*)")", 1}), items__5009), 5}));
+      return codegen__cat(ctx, ((slice__string){(items__5013[0] = ((slice__u8){(u8*)"((", 2}), items__5013[1] = codegen__c_type(ctx, g, t), items__5013[2] = ((slice__u8){(u8*)")", 1}), items__5013[3] = lit, items__5013[4] = ((slice__u8){(u8*)")", 1}), items__5013), 5}));
     }
     break;
     case ((const__ConstKind)2LL):
     {
       arr64__u8 buffer;
       snprintf((buffer).data, ((usize)64LL), ((u8*)"%.17g"), (k).f);
-      slice__u8 lit = ({ slice__u8 v__5010 = str__from_cstring(ctx, (buffer).data); prelude__Allocator v__5011 = ((*ctx)).allocator; str__copy_string(ctx, v__5010, v__5011); });
-      if ((((({ slice__u8 a__5012 = lit, b__5013 = ((slice__u8){(u8*)"inf", 3}); rt_bytes_equal(a__5012.ptr, a__5012.len, b__5013.ptr, b__5013.len); }) || ({ slice__u8 a__5014 = lit, b__5015 = ((slice__u8){(u8*)"-inf", 4}); rt_bytes_equal(a__5014.ptr, a__5014.len, b__5015.ptr, b__5015.len); })) || ({ slice__u8 a__5016 = lit, b__5017 = ((slice__u8){(u8*)"nan", 3}); rt_bytes_equal(a__5016.ptr, a__5016.len, b__5017.ptr, b__5017.len); })) || ({ slice__u8 a__5018 = lit, b__5019 = ((slice__u8){(u8*)"-nan", 4}); rt_bytes_equal(a__5018.ptr, a__5018.len, b__5019.ptr, b__5019.len); }))) {
+      slice__u8 lit = ({ slice__u8 v__5014 = str__from_cstring(ctx, (buffer).data); prelude__Allocator v__5015 = ((*ctx)).allocator; str__copy_string(ctx, v__5014, v__5015); });
+      if ((((({ slice__u8 a__5016 = lit, b__5017 = ((slice__u8){(u8*)"inf", 3}); rt_bytes_equal(a__5016.ptr, a__5016.len, b__5017.ptr, b__5017.len); }) || ({ slice__u8 a__5018 = lit, b__5019 = ((slice__u8){(u8*)"-inf", 4}); rt_bytes_equal(a__5018.ptr, a__5018.len, b__5019.ptr, b__5019.len); })) || ({ slice__u8 a__5020 = lit, b__5021 = ((slice__u8){(u8*)"nan", 3}); rt_bytes_equal(a__5020.ptr, a__5020.len, b__5021.ptr, b__5021.len); })) || ({ slice__u8 a__5022 = lit, b__5023 = ((slice__u8){(u8*)"-nan", 4}); rt_bytes_equal(a__5022.ptr, a__5022.len, b__5023.ptr, b__5023.len); }))) {
         lit = (((*slice__u8__at(lit, ((isize)0LL), "src/codegen.sabk:1201:26")) == ((u8)45LL)) ? ((slice__u8){(u8*)"(-1.0/0.0)", 10}) : (((*slice__u8__at(lit, ((isize)1LL), "src/codegen.sabk:1201:63")) == ((u8)97LL)) ? ((slice__u8){(u8*)"(0.0/0.0)", 9}) : ((slice__u8){(u8*)"(1.0/0.0)", 9})));
       } else {
         if (((!str__contains(ctx, lit, ((slice__u8){(u8*)".", 1}))) && (!str__contains(ctx, lit, ((slice__u8){(u8*)"e", 1}))))) {
-          lit = codegen__cat(ctx, ((slice__string){(items__5020[0] = lit, items__5020[1] = ((slice__u8){(u8*)".0", 2}), items__5020), 2}));
+          lit = codegen__cat(ctx, ((slice__string){(items__5024[0] = lit, items__5024[1] = ((slice__u8){(u8*)".0", 2}), items__5024), 2}));
         }
       }
-      return codegen__cat(ctx, ((slice__string){(items__5021[0] = ((slice__u8){(u8*)"((", 2}), items__5021[1] = codegen__c_type(ctx, g, t), items__5021[2] = ((slice__u8){(u8*)")", 1}), items__5021[3] = lit, items__5021[4] = ((slice__u8){(u8*)")", 1}), items__5021), 5}));
+      return codegen__cat(ctx, ((slice__string){(items__5025[0] = ((slice__u8){(u8*)"((", 2}), items__5025[1] = codegen__c_type(ctx, g, t), items__5025[2] = ((slice__u8){(u8*)")", 1}), items__5025[3] = lit, items__5025[4] = ((slice__u8){(u8*)")", 1}), items__5025), 5}));
     }
     break;
     default:
@@ -34977,76 +35086,76 @@ static slice__u8 codegen__constant(prelude__Context *ctx, codegen__CodeGen* g, c
 }
 
 static slice__u8 codegen__string_literal(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5022[2];
-  slice__u8 items__5023[3];
-  slice__u8 items__5028[3];
+  slice__u8 items__5026[2];
+  slice__u8 items__5027[3];
+  slice__u8 items__5032[3];
   slice__u8 bytes = patterns__string_literal_text(ctx, n);
-  slice__u8 lit = codegen__cat(ctx, ((slice__string){(items__5022[0] = ((slice__u8){(u8*)"(u8*)", 5}), items__5022[1] = codegen__c_string(ctx, bytes), items__5022), 2}));
+  slice__u8 lit = codegen__cat(ctx, ((slice__string){(items__5026[0] = ((slice__u8){(u8*)"(u8*)", 5}), items__5026[1] = codegen__c_string(ctx, bytes), items__5026), 2}));
   if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1213:11"))->ty, "src/codegen.sabk:1213:14"))->kind == ((types__TypeKind)6LL))) {
-    return codegen__cat(ctx, ((slice__string){(items__5023[0] = ((slice__u8){(u8*)"(", 1}), items__5023[1] = lit, items__5023[2] = ((slice__u8){(u8*)")", 1}), items__5023), 3}));
+    return codegen__cat(ctx, ((slice__string){(items__5027[0] = ((slice__u8){(u8*)"(", 1}), items__5027[1] = lit, items__5027[2] = ((slice__u8){(u8*)")", 1}), items__5027), 3}));
   }
-  return ({ codegen__CodeGen* v__5024 = g; types__Type* v__5027 = ({ types__Types* v__5025 = codegen__ts(ctx, g); types__Type* v__5026 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:1215:46"))->u8_; types__slice_of(ctx, v__5025, v__5026); }); slice__u8 v__5029 = codegen__cat(ctx, ((slice__string){(items__5028[0] = lit, items__5028[1] = ((slice__u8){(u8*)", ", 2}), items__5028[2] = codegen__num(ctx, ((i64)((bytes).len))), items__5028), 3})); codegen__compound(ctx, v__5024, v__5027, v__5029); });
+  return ({ codegen__CodeGen* v__5028 = g; types__Type* v__5031 = ({ types__Types* v__5029 = codegen__ts(ctx, g); types__Type* v__5030 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:1215:46"))->u8_; types__slice_of(ctx, v__5029, v__5030); }); slice__u8 v__5033 = codegen__cat(ctx, ((slice__string){(items__5032[0] = lit, items__5032[1] = ((slice__u8){(u8*)", ", 2}), items__5032[2] = codegen__num(ctx, ((i64)((bytes).len))), items__5032), 3})); codegen__compound(ctx, v__5028, v__5031, v__5033); });
 }
 
 static slice__u8 codegen__statement_expression(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 body, isize saved_indent) {
-  slice__u8 items__5030[4];
-  return codegen__cat(ctx, ((slice__string){(items__5030[0] = ((slice__u8){(u8*)"({\012", 3}), items__5030[1] = body, items__5030[2] = codegen__spaces(ctx, ((isize)(saved_indent * ((isize)2LL)))), items__5030[3] = ((slice__u8){(u8*)"})", 2}), items__5030), 4}));
+  slice__u8 items__5034[4];
+  return codegen__cat(ctx, ((slice__string){(items__5034[0] = ((slice__u8){(u8*)"({\012", 3}), items__5034[1] = body, items__5034[2] = codegen__spaces(ctx, ((isize)(saved_indent * ((isize)2LL)))), items__5034[3] = ((slice__u8){(u8*)"})", 2}), items__5034), 4}));
 }
 
 static slice__u8 codegen__expr_inner(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5032[3];
-  slice__u8 items__5033[3];
-  slice__u8 items__5038[5];
-  slice__u8 items__5039[5];
-  slice__u8 items__5040[3];
-  slice__u8 items__5045[2];
-  slice__u8 items__5046[7];
-  ast__Node* items__5047[2];
-  slice__u8 items__5049[7];
+  slice__u8 items__5036[3];
+  slice__u8 items__5037[3];
+  slice__u8 items__5042[5];
+  slice__u8 items__5043[5];
+  slice__u8 items__5044[3];
+  slice__u8 items__5049[2];
+  slice__u8 items__5050[7];
   ast__Node* items__5051[2];
-  ast__Node* items__5054[2];
-  slice__u8 items__5055[5];
-  slice__u8 items__5057[5];
-  slice__u8 items__5060[3];
-  slice__u8 items__5063[2];
-  slice__u8 items__5064[5];
-  slice__u8 items__5065[3];
-  slice__u8 items__5066[3];
-  slice__u8 items__5067[3];
-  slice__u8 items__5068[3];
+  slice__u8 items__5053[7];
+  ast__Node* items__5055[2];
+  ast__Node* items__5058[2];
+  slice__u8 items__5059[5];
+  slice__u8 items__5061[5];
+  slice__u8 items__5064[3];
+  slice__u8 items__5067[2];
+  slice__u8 items__5068[5];
+  slice__u8 items__5069[3];
+  slice__u8 items__5070[3];
+  slice__u8 items__5071[3];
   slice__u8 items__5072[3];
-  slice__u8 items__5074[2];
-  slice__u8 items__5077[4];
-  slice__u8 items__5080[2];
-  slice__u8 items__5082[7];
-  slice__u8 items__5083[5];
-  slice__u8 items__5085[4];
-  slice__u8 items__5088[2];
-  slice__u8 items__5090[2];
-  slice__u8 items__5091[5];
-  slice__u8 items__5096[5];
+  slice__u8 items__5076[3];
+  slice__u8 items__5078[2];
+  slice__u8 items__5081[4];
+  slice__u8 items__5084[2];
+  slice__u8 items__5086[7];
+  slice__u8 items__5087[5];
+  slice__u8 items__5089[4];
+  slice__u8 items__5092[2];
+  slice__u8 items__5094[2];
+  slice__u8 items__5095[5];
+  slice__u8 items__5100[5];
   if ((((rt_nonnull(n, "src/codegen.sabk:1224:11"))->cval).kind != ((const__ConstKind)0LL))) {
     return codegen__constant(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1225:30"))->cval, (rt_nonnull(n, "src/codegen.sabk:1225:38"))->ty);
   }
   {
-    ast__NodeKind switch__5031 = (rt_nonnull(n, "src/codegen.sabk:1227:15"))->kind;
+    ast__NodeKind switch__5035 = (rt_nonnull(n, "src/codegen.sabk:1227:15"))->kind;
     switch (0) { default:
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)41LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)41LL))) {
       return codegen__string_literal(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)39LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)39LL))) {
       if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1232:15"))->ty, "src/codegen.sabk:1232:18"))->kind == ((types__TypeKind)8LL))) {
         return codegen__compound(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1233:34"))->ty, ((slice__u8){(u8*)"0", 1}));
       }
-      return codegen__cat(ctx, ((slice__string){(items__5032[0] = ((slice__u8){(u8*)"((", 2}), items__5032[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1234:38"))->ty), items__5032[2] = ((slice__u8){(u8*)")0)", 3}), items__5032), 3}));
+      return codegen__cat(ctx, ((slice__string){(items__5036[0] = ((slice__u8){(u8*)"((", 2}), items__5036[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1234:38"))->ty), items__5036[2] = ((slice__u8){(u8*)")0)", 3}), items__5036), 3}));
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)40LL))) {
-      return codegen__cat(ctx, ((slice__string){(items__5033[0] = ((slice__u8){(u8*)"(*", 2}), items__5033[1] = codegen__current_ctx(ctx, g), items__5033[2] = ((slice__u8){(u8*)")", 1}), items__5033), 3}));
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)40LL))) {
+      return codegen__cat(ctx, ((slice__string){(items__5037[0] = ((slice__u8){(u8*)"(*", 2}), items__5037[1] = codegen__current_ctx(ctx, g), items__5037[2] = ((slice__u8){(u8*)")", 1}), items__5037), 3}));
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)34LL)) || (switch__5031.tag == ((ast__NodeKind__Tag)47LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)34LL)) || (switch__5035.tag == ((ast__NodeKind__Tag)47LL))) {
       ast__Node* d = (rt_nonnull(n, "src/codegen.sabk:1240:19"))->decl;
       if ((d != ((ast__Node*)0))) {
         if (((rt_nonnull(d, "src/codegen.sabk:1243:19"))->owner != ((module__Module*)0))) {
@@ -35057,31 +35166,31 @@ static slice__u8 codegen__expr_inner(prelude__Context *ctx, codegen__CodeGen* g,
       ast__Node* object = ((ast__Node*)0);
       {
         ast__Node* o;
-        if (({ ast__NodeKind is__5034 = (rt_nonnull(n, "src/codegen.sabk:1250:15"))->kind; is__5034.tag == ((ast__NodeKind__Tag)47LL) ? (o = is__5034.payload.Member.object, 1) : 0; })) {
+        if (({ ast__NodeKind is__5038 = (rt_nonnull(n, "src/codegen.sabk:1250:15"))->kind; is__5038.tag == ((ast__NodeKind__Tag)47LL) ? (o = is__5038.payload.Member.object, 1) : 0; })) {
           object = o;
         }
       }
       types__Type* base = (rt_nonnull(object, "src/codegen.sabk:1252:27"))->ty;
       slice__u8 arrow = (((rt_nonnull(base, "src/codegen.sabk:1253:30"))->kind == ((types__TypeKind)6LL)) ? ((slice__u8){(u8*)"->", 2}) : ((slice__u8){(u8*)".", 1}));
-      slice__u8 held = (((rt_nonnull(base, "src/codegen.sabk:1254:29"))->kind == ((types__TypeKind)6LL)) ? ({ codegen__CodeGen* v__5035 = g; slice__u8 v__5036 = codegen__expr(ctx, g, object); token__Token v__5037 = (rt_nonnull(n, "src/codegen.sabk:1254:73"))->tok; codegen__nonnull(ctx, v__5035, v__5036, v__5037); }) : codegen__expr(ctx, g, object));
+      slice__u8 held = (((rt_nonnull(base, "src/codegen.sabk:1254:29"))->kind == ((types__TypeKind)6LL)) ? ({ codegen__CodeGen* v__5039 = g; slice__u8 v__5040 = codegen__expr(ctx, g, object); token__Token v__5041 = (rt_nonnull(n, "src/codegen.sabk:1254:73"))->tok; codegen__nonnull(ctx, v__5039, v__5040, v__5041); }) : codegen__expr(ctx, g, object));
       if (((rt_nonnull(((((rt_nonnull(base, "src/codegen.sabk:1255:23"))->kind == ((types__TypeKind)6LL)) ? (rt_nonnull(base, "src/codegen.sabk:1255:42"))->elem : base)), "src/codegen.sabk:1255:58"))->kind == ((types__TypeKind)7LL))) {
-        return codegen__cat(ctx, ((slice__string){(items__5038[0] = ((slice__u8){(u8*)"(", 1}), items__5038[1] = held, items__5038[2] = ((slice__u8){(u8*)")", 1}), items__5038[3] = arrow, items__5038[4] = ((slice__u8){(u8*)"data", 4}), items__5038), 5}));
+        return codegen__cat(ctx, ((slice__string){(items__5042[0] = ((slice__u8){(u8*)"(", 1}), items__5042[1] = held, items__5042[2] = ((slice__u8){(u8*)")", 1}), items__5042[3] = arrow, items__5042[4] = ((slice__u8){(u8*)"data", 4}), items__5042), 5}));
       }
-      return codegen__cat(ctx, ((slice__string){(items__5039[0] = ((slice__u8){(u8*)"(", 1}), items__5039[1] = held, items__5039[2] = ((slice__u8){(u8*)")", 1}), items__5039[3] = arrow, items__5039[4] = codegen__local_name(ctx, ((rt_nonnull(n, "src/codegen.sabk:1257:56"))->tok).text), items__5039), 5}));
+      return codegen__cat(ctx, ((slice__string){(items__5043[0] = ((slice__u8){(u8*)"(", 1}), items__5043[1] = held, items__5043[2] = ((slice__u8){(u8*)")", 1}), items__5043[3] = arrow, items__5043[4] = codegen__local_name(ctx, ((rt_nonnull(n, "src/codegen.sabk:1257:56"))->tok).text), items__5043), 5}));
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)45LL))) {
-      ast__Node* inner = switch__5031.payload.Grouped.inner;
-      return codegen__cat(ctx, ((slice__string){(items__5040[0] = ((slice__u8){(u8*)"(", 1}), items__5040[1] = codegen__expr(ctx, g, inner), items__5040[2] = ((slice__u8){(u8*)")", 1}), items__5040), 3}));
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)45LL))) {
+      ast__Node* inner = switch__5035.payload.Grouped.inner;
+      return codegen__cat(ctx, ((slice__string){(items__5044[0] = ((slice__u8){(u8*)"(", 1}), items__5044[1] = codegen__expr(ctx, g, inner), items__5044[2] = ((slice__u8){(u8*)")", 1}), items__5044), 3}));
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)43LL))) {
-      ast__BinaryOp op = switch__5031.payload.Binary.op;
-      ast__Node* lhs = switch__5031.payload.Binary.lhs;
-      ast__Node* rhs = switch__5031.payload.Binary.rhs;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)43LL))) {
+      ast__BinaryOp op = switch__5035.payload.Binary.op;
+      ast__Node* lhs = switch__5035.payload.Binary.lhs;
+      ast__Node* rhs = switch__5035.payload.Binary.rhs;
       {
-        ast__BinaryOp switch__5041 = op;
-        switch (switch__5041) {
+        ast__BinaryOp switch__5045 = op;
+        switch (switch__5045) {
         case ((ast__BinaryOp)5LL):
         case ((ast__BinaryOp)6LL):
         case ((ast__BinaryOp)7LL):
@@ -35092,57 +35201,57 @@ static slice__u8 codegen__expr_inner(prelude__Context *ctx, codegen__CodeGen* g,
         case ((ast__BinaryOp)12LL):
         {
           if (((((op == ((ast__BinaryOp)9LL)) || (op == ((ast__BinaryOp)10LL)))) && (rt_nonnull(codegen__conv_or_ty(ctx, lhs), "src/codegen.sabk:1265:66"))->is_string)) {
-            return codegen__cat(ctx, ((slice__string){(items__5045[0] = ((op == ((ast__BinaryOp)10LL)) ? ((slice__u8){(u8*)"!", 1}) : ((slice__u8){(u8*)"", 0})), items__5045[1] = ({ codegen__CodeGen* v__5042 = g; slice__u8 v__5043 = codegen__expr(ctx, g, lhs); slice__u8 v__5044 = codegen__expr(ctx, g, rhs); codegen__string_equal(ctx, v__5042, v__5043, v__5044); }), items__5045), 2}));
+            return codegen__cat(ctx, ((slice__string){(items__5049[0] = ((op == ((ast__BinaryOp)10LL)) ? ((slice__u8){(u8*)"!", 1}) : ((slice__u8){(u8*)"", 0})), items__5049[1] = ({ codegen__CodeGen* v__5046 = g; slice__u8 v__5047 = codegen__expr(ctx, g, lhs); slice__u8 v__5048 = codegen__expr(ctx, g, rhs); codegen__string_equal(ctx, v__5046, v__5047, v__5048); }), items__5049), 2}));
           }
           if (((op == ((ast__BinaryOp)11LL)) || (op == ((ast__BinaryOp)12LL)))) {
-            return codegen__cat(ctx, ((slice__string){(items__5046[0] = ((slice__u8){(u8*)"(", 1}), items__5046[1] = codegen__expr(ctx, g, lhs), items__5046[2] = ((slice__u8){(u8*)" ", 1}), items__5046[3] = ((rt_nonnull(n, "src/codegen.sabk:1268:54"))->tok).text, items__5046[4] = ((slice__u8){(u8*)" ", 1}), items__5046[5] = codegen__expr(ctx, g, rhs), items__5046[6] = ((slice__u8){(u8*)")", 1}), items__5046), 7}));
+            return codegen__cat(ctx, ((slice__string){(items__5050[0] = ((slice__u8){(u8*)"(", 1}), items__5050[1] = codegen__expr(ctx, g, lhs), items__5050[2] = ((slice__u8){(u8*)" ", 1}), items__5050[3] = ((rt_nonnull(n, "src/codegen.sabk:1268:54"))->tok).text, items__5050[4] = ((slice__u8){(u8*)" ", 1}), items__5050[5] = codegen__expr(ctx, g, rhs), items__5050[6] = ((slice__u8){(u8*)")", 1}), items__5050), 7}));
           }
-          codegen__Ordered o = codegen__ordered(ctx, g, ((slice__ptr_ast__Node){(items__5047[0] = lhs, items__5047[1] = rhs, items__5047), 2}));
-          return ({ codegen__Ordered v__5048 = o; slice__u8 v__5050 = codegen__cat(ctx, ((slice__string){(items__5049[0] = ((slice__u8){(u8*)"(", 1}), items__5049[1] = (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1270:49")), items__5049[2] = ((slice__u8){(u8*)" ", 1}), items__5049[3] = ((rt_nonnull(n, "src/codegen.sabk:1270:61"))->tok).text, items__5049[4] = ((slice__u8){(u8*)" ", 1}), items__5049[5] = (*slice__string__at(grow__string__view((o).values), ((isize)1LL), "src/codegen.sabk:1270:84")), items__5049[6] = ((slice__u8){(u8*)")", 1}), items__5049), 7})); codegen__in_order(ctx, v__5048, v__5050); });
+          codegen__Ordered o = codegen__ordered(ctx, g, ((slice__ptr_ast__Node){(items__5051[0] = lhs, items__5051[1] = rhs, items__5051), 2}));
+          return ({ codegen__Ordered v__5052 = o; slice__u8 v__5054 = codegen__cat(ctx, ((slice__string){(items__5053[0] = ((slice__u8){(u8*)"(", 1}), items__5053[1] = (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1270:49")), items__5053[2] = ((slice__u8){(u8*)" ", 1}), items__5053[3] = ((rt_nonnull(n, "src/codegen.sabk:1270:61"))->tok).text, items__5053[4] = ((slice__u8){(u8*)" ", 1}), items__5053[5] = (*slice__string__at(grow__string__view((o).values), ((isize)1LL), "src/codegen.sabk:1270:84")), items__5053[6] = ((slice__u8){(u8*)")", 1}), items__5053), 7})); codegen__in_order(ctx, v__5052, v__5054); });
         }
         break;
         default:
         {
           if (((((op == ((ast__BinaryOp)3LL)) || (op == ((ast__BinaryOp)4LL)))) && ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1272:49"))->ty, "src/codegen.sabk:1272:52"))->kind == ((types__TypeKind)3LL)))) {
-            codegen__Ordered o = codegen__ordered(ctx, g, ((slice__ptr_ast__Node){(items__5051[0] = lhs, items__5051[1] = rhs, items__5051), 2}));
-            return ({ codegen__Ordered v__5052 = o; slice__u8 v__5053 = codegen__divide(ctx, g, n, (rt_nonnull(n, "src/codegen.sabk:1274:51"))->ty, (op == ((ast__BinaryOp)4LL)), (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1274:75")), (*slice__string__at(grow__string__view((o).values), ((isize)1LL), "src/codegen.sabk:1274:88")), rhs); codegen__in_order(ctx, v__5052, v__5053); });
+            codegen__Ordered o = codegen__ordered(ctx, g, ((slice__ptr_ast__Node){(items__5055[0] = lhs, items__5055[1] = rhs, items__5055), 2}));
+            return ({ codegen__Ordered v__5056 = o; slice__u8 v__5057 = codegen__divide(ctx, g, n, (rt_nonnull(n, "src/codegen.sabk:1274:51"))->ty, (op == ((ast__BinaryOp)4LL)), (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1274:75")), (*slice__string__at(grow__string__view((o).values), ((isize)1LL), "src/codegen.sabk:1274:88")), rhs); codegen__in_order(ctx, v__5056, v__5057); });
           }
-          codegen__Ordered o = codegen__ordered(ctx, g, ((slice__ptr_ast__Node){(items__5054[0] = lhs, items__5054[1] = rhs, items__5054), 2}));
-          slice__u8 value = codegen__cat(ctx, ((slice__string){(items__5055[0] = (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1277:37")), items__5055[1] = ((slice__u8){(u8*)" ", 1}), items__5055[2] = ((rt_nonnull(n, "src/codegen.sabk:1277:49"))->tok).text, items__5055[3] = ((slice__u8){(u8*)" ", 1}), items__5055[4] = (*slice__string__at(grow__string__view((o).values), ((isize)1LL), "src/codegen.sabk:1277:72")), items__5055), 5}));
+          codegen__Ordered o = codegen__ordered(ctx, g, ((slice__ptr_ast__Node){(items__5058[0] = lhs, items__5058[1] = rhs, items__5058), 2}));
+          slice__u8 value = codegen__cat(ctx, ((slice__string){(items__5059[0] = (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1277:37")), items__5059[1] = ((slice__u8){(u8*)" ", 1}), items__5059[2] = ((rt_nonnull(n, "src/codegen.sabk:1277:49"))->tok).text, items__5059[3] = ((slice__u8){(u8*)" ", 1}), items__5059[4] = (*slice__string__at(grow__string__view((o).values), ((isize)1LL), "src/codegen.sabk:1277:72")), items__5059), 5}));
           if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1279:19"))->ty, "src/codegen.sabk:1279:22"))->kind == ((types__TypeKind)3LL))) {
-            return ({ codegen__Ordered v__5056 = o; slice__u8 v__5058 = codegen__cat(ctx, ((slice__string){(items__5057[0] = ((slice__u8){(u8*)"((", 2}), items__5057[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1280:58"))->ty), items__5057[2] = ((slice__u8){(u8*)")(", 2}), items__5057[3] = value, items__5057[4] = ((slice__u8){(u8*)"))", 2}), items__5057), 5})); codegen__in_order(ctx, v__5056, v__5058); });
+            return ({ codegen__Ordered v__5060 = o; slice__u8 v__5062 = codegen__cat(ctx, ((slice__string){(items__5061[0] = ((slice__u8){(u8*)"((", 2}), items__5061[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1280:58"))->ty), items__5061[2] = ((slice__u8){(u8*)")(", 2}), items__5061[3] = value, items__5061[4] = ((slice__u8){(u8*)"))", 2}), items__5061), 5})); codegen__in_order(ctx, v__5060, v__5062); });
           }
-          return ({ codegen__Ordered v__5059 = o; slice__u8 v__5061 = codegen__cat(ctx, ((slice__string){(items__5060[0] = ((slice__u8){(u8*)"(", 1}), items__5060[1] = value, items__5060[2] = ((slice__u8){(u8*)")", 1}), items__5060), 3})); codegen__in_order(ctx, v__5059, v__5061); });
+          return ({ codegen__Ordered v__5063 = o; slice__u8 v__5065 = codegen__cat(ctx, ((slice__string){(items__5064[0] = ((slice__u8){(u8*)"(", 1}), items__5064[1] = value, items__5064[2] = ((slice__u8){(u8*)")", 1}), items__5064), 3})); codegen__in_order(ctx, v__5063, v__5065); });
         }
         break;
         }
       }
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)42LL))) {
-      ast__UnaryOp op = switch__5031.payload.Unary.op;
-      ast__Node* operand = switch__5031.payload.Unary.operand;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)42LL))) {
+      ast__UnaryOp op = switch__5035.payload.Unary.op;
+      ast__Node* operand = switch__5035.payload.Unary.operand;
       {
-        ast__UnaryOp switch__5062 = op;
-        switch (switch__5062) {
+        ast__UnaryOp switch__5066 = op;
+        switch (switch__5066) {
         case ((ast__UnaryOp)1LL):
         case ((ast__UnaryOp)2LL):
         {
-          slice__u8 value = codegen__cat(ctx, ((slice__string){(items__5063[0] = ((rt_nonnull(n, "src/codegen.sabk:1287:31"))->tok).text, items__5063[1] = codegen__expr(ctx, g, operand), items__5063), 2}));
+          slice__u8 value = codegen__cat(ctx, ((slice__string){(items__5067[0] = ((rt_nonnull(n, "src/codegen.sabk:1287:31"))->tok).text, items__5067[1] = codegen__expr(ctx, g, operand), items__5067), 2}));
           if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1288:19"))->ty, "src/codegen.sabk:1288:22"))->kind == ((types__TypeKind)3LL))) {
-            return codegen__cat(ctx, ((slice__string){(items__5064[0] = ((slice__u8){(u8*)"((", 2}), items__5064[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1289:46"))->ty), items__5064[2] = ((slice__u8){(u8*)")(", 2}), items__5064[3] = value, items__5064[4] = ((slice__u8){(u8*)"))", 2}), items__5064), 5}));
+            return codegen__cat(ctx, ((slice__string){(items__5068[0] = ((slice__u8){(u8*)"((", 2}), items__5068[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1289:46"))->ty), items__5068[2] = ((slice__u8){(u8*)")(", 2}), items__5068[3] = value, items__5068[4] = ((slice__u8){(u8*)"))", 2}), items__5068), 5}));
           }
-          return codegen__cat(ctx, ((slice__string){(items__5065[0] = ((slice__u8){(u8*)"(", 1}), items__5065[1] = value, items__5065[2] = ((slice__u8){(u8*)")", 1}), items__5065), 3}));
+          return codegen__cat(ctx, ((slice__string){(items__5069[0] = ((slice__u8){(u8*)"(", 1}), items__5069[1] = value, items__5069[2] = ((slice__u8){(u8*)")", 1}), items__5069), 3}));
         }
         break;
         case ((ast__UnaryOp)0LL):
         {
-          return codegen__cat(ctx, ((slice__string){(items__5066[0] = ((slice__u8){(u8*)"(!", 2}), items__5066[1] = codegen__expr(ctx, g, operand), items__5066[2] = ((slice__u8){(u8*)")", 1}), items__5066), 3}));
+          return codegen__cat(ctx, ((slice__string){(items__5070[0] = ((slice__u8){(u8*)"(!", 2}), items__5070[1] = codegen__expr(ctx, g, operand), items__5070[2] = ((slice__u8){(u8*)")", 1}), items__5070), 3}));
         }
         break;
         case ((ast__UnaryOp)3LL):
         {
-          return codegen__cat(ctx, ((slice__string){(items__5067[0] = ((slice__u8){(u8*)"(&", 2}), items__5067[1] = codegen__expr(ctx, g, operand), items__5067[2] = ((slice__u8){(u8*)")", 1}), items__5067), 3}));
+          return codegen__cat(ctx, ((slice__string){(items__5071[0] = ((slice__u8){(u8*)"(&", 2}), items__5071[1] = codegen__expr(ctx, g, operand), items__5071[2] = ((slice__u8){(u8*)")", 1}), items__5071), 3}));
         }
         break;
         default:
@@ -35154,103 +35263,103 @@ static slice__u8 codegen__expr_inner(prelude__Context *ctx, codegen__CodeGen* g,
       }
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)44LL))) {
-      ast__Node* pointer = switch__5031.payload.Deref.pointer;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)44LL))) {
+      ast__Node* pointer = switch__5035.payload.Deref.pointer;
       if (((rt_nonnull((rt_nonnull(pointer, "src/codegen.sabk:1300:21"))->ty, "src/codegen.sabk:1300:24"))->kind == ((types__TypeKind)5LL))) {
-        return codegen__cat(ctx, ((slice__string){(items__5068[0] = ((slice__u8){(u8*)"(*(sabk_void *)", 15}), items__5068[1] = codegen__expr(ctx, g, pointer), items__5068[2] = ((slice__u8){(u8*)")", 1}), items__5068), 3}));
+        return codegen__cat(ctx, ((slice__string){(items__5072[0] = ((slice__u8){(u8*)"(*(sabk_void *)", 15}), items__5072[1] = codegen__expr(ctx, g, pointer), items__5072[2] = ((slice__u8){(u8*)")", 1}), items__5072), 3}));
       }
-      return codegen__cat(ctx, ((slice__string){(items__5072[0] = ((slice__u8){(u8*)"(*", 2}), items__5072[1] = ({ codegen__CodeGen* v__5069 = g; slice__u8 v__5070 = codegen__expr(ctx, g, pointer); token__Token v__5071 = (rt_nonnull(n, "src/codegen.sabk:1302:57"))->tok; codegen__nonnull(ctx, v__5069, v__5070, v__5071); }), items__5072[2] = ((slice__u8){(u8*)")", 1}), items__5072), 3}));
+      return codegen__cat(ctx, ((slice__string){(items__5076[0] = ((slice__u8){(u8*)"(*", 2}), items__5076[1] = ({ codegen__CodeGen* v__5073 = g; slice__u8 v__5074 = codegen__expr(ctx, g, pointer); token__Token v__5075 = (rt_nonnull(n, "src/codegen.sabk:1302:57"))->tok; codegen__nonnull(ctx, v__5073, v__5074, v__5075); }), items__5076[2] = ((slice__u8){(u8*)")", 1}), items__5076), 3}));
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)65LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)65LL))) {
       isize saved_indent = (rt_nonnull(g, "src/codegen.sabk:1306:30"))->indent;
       grow__u8* body = ((grow__u8*)rt_new(ctx, (*ctx).allocator, sizeof(grow__u8), _Alignof(grow__u8), "src/codegen.sabk:1307:20"));
       grow__u8* saved = codegen__into_string(ctx, g, body);
       (rt_nonnull(g, "src/codegen.sabk:1309:11"))->indent++;
       slice__u8 result = codegen__emit_expansion(ctx, g, n);
       if (((result).len > ((isize)0LL))) {
-        ({ codegen__CodeGen* v__5073 = g; slice__u8 v__5075 = codegen__cat(ctx, ((slice__string){(items__5074[0] = result, items__5074[1] = ((slice__u8){(u8*)";", 1}), items__5074), 2})); codegen__line(ctx, v__5073, v__5075); });
+        ({ codegen__CodeGen* v__5077 = g; slice__u8 v__5079 = codegen__cat(ctx, ((slice__string){(items__5078[0] = result, items__5078[1] = ((slice__u8){(u8*)";", 1}), items__5078), 2})); codegen__line(ctx, v__5077, v__5079); });
       }
       (rt_nonnull(g, "src/codegen.sabk:1313:11"))->out = saved;
       (rt_nonnull(g, "src/codegen.sabk:1314:11"))->indent = saved_indent;
       return codegen__statement_expression(ctx, g, grow__u8__view((*rt_nonnull(body, "src/codegen.sabk:1315:45"))), saved_indent);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)48LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)48LL))) {
       return codegen__index(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)46LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)46LL))) {
       return codegen__call(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)58LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)58LL))) {
       if ((((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1323:15"))->ty, "src/codegen.sabk:1323:18"))->kind == ((types__TypeKind)7LL)) || ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1323:38"))->ty, "src/codegen.sabk:1323:41"))->kind == ((types__TypeKind)8LL)))) {
         return codegen__array_literal(ctx, g, n);
       }
       return codegen__struct_init(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)60LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)60LL))) {
       return codegen__array_literal(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)52LL))) {
-      ast__Node* of = switch__5031.payload.TypeInfo.of;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)52LL))) {
+      ast__Node* of = switch__5035.payload.TypeInfo.of;
       return codegen__type_info_ref(ctx, g, (rt_nonnull(of, "src/codegen.sabk:1331:36"))->ty);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)69LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)69LL))) {
       return codegen__is_test(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)54LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)54LL))) {
       return codegen__struct_init(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)55LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)55LL))) {
       return codegen__gen_or_return(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)56LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)56LL))) {
       return codegen__gen_or_else(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)30LL) && (switch__5031.payload.Switch.gives_value == true))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)30LL) && (switch__5035.payload.Switch.gives_value == true))) {
       isize saved_indent = (rt_nonnull(g, "src/codegen.sabk:1347:30"))->indent;
       grow__u8* body = ((grow__u8*)rt_new(ctx, (*ctx).allocator, sizeof(grow__u8), _Alignof(grow__u8), "src/codegen.sabk:1348:20"));
       grow__u8* saved = codegen__into_string(ctx, g, body);
       (rt_nonnull(g, "src/codegen.sabk:1350:11"))->indent++;
       slice__u8 result = codegen__tmp(ctx, g, ((slice__u8){(u8*)"value", 5}));
-      ({ codegen__CodeGen* v__5076 = g; slice__u8 v__5078 = codegen__cat(ctx, ((slice__string){(items__5077[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1352:33"))->ty), items__5077[1] = ((slice__u8){(u8*)" ", 1}), items__5077[2] = result, items__5077[3] = ((slice__u8){(u8*)";", 1}), items__5077), 4})); codegen__line(ctx, v__5076, v__5078); });
+      ({ codegen__CodeGen* v__5080 = g; slice__u8 v__5082 = codegen__cat(ctx, ((slice__string){(items__5081[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1352:33"))->ty), items__5081[1] = ((slice__u8){(u8*)" ", 1}), items__5081[2] = result, items__5081[3] = ((slice__u8){(u8*)";", 1}), items__5081), 4})); codegen__line(ctx, v__5080, v__5082); });
       map__map_put__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1353:20"))->value_vars), n, result);
       codegen__emit_switch(ctx, g, n, result);
-      ({ codegen__CodeGen* v__5079 = g; slice__u8 v__5081 = codegen__cat(ctx, ((slice__string){(items__5080[0] = result, items__5080[1] = ((slice__u8){(u8*)";", 1}), items__5080), 2})); codegen__line(ctx, v__5079, v__5081); });
+      ({ codegen__CodeGen* v__5083 = g; slice__u8 v__5085 = codegen__cat(ctx, ((slice__string){(items__5084[0] = result, items__5084[1] = ((slice__u8){(u8*)";", 1}), items__5084), 2})); codegen__line(ctx, v__5083, v__5085); });
       (rt_nonnull(g, "src/codegen.sabk:1356:11"))->out = saved;
       (rt_nonnull(g, "src/codegen.sabk:1357:11"))->indent = saved_indent;
       return codegen__statement_expression(ctx, g, grow__u8__view((*rt_nonnull(body, "src/codegen.sabk:1358:45"))), saved_indent);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)23LL) && (switch__5031.payload.If.gives_value == true))) {
-      ast__Node* cond = switch__5031.payload.If.cond;
-      ast__Node* then = switch__5031.payload.If.then;
-      ast__Node* else_ = switch__5031.payload.If.else_;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)23LL) && (switch__5035.payload.If.gives_value == true))) {
+      ast__Node* cond = switch__5035.payload.If.cond;
+      ast__Node* then = switch__5035.payload.If.then;
+      ast__Node* else_ = switch__5035.payload.If.else_;
       slice__u8 bindings = codegen__bindings_of(ctx, g, cond, ((isize)0LL));
-      slice__u8 choice = codegen__cat(ctx, ((slice__string){(items__5082[0] = ((slice__u8){(u8*)"(", 1}), items__5082[1] = codegen__expr(ctx, g, cond), items__5082[2] = ((slice__u8){(u8*)" \? ", 3}), items__5082[3] = codegen__expr(ctx, g, then), items__5082[4] = ((slice__u8){(u8*)" : ", 3}), items__5082[5] = codegen__expr(ctx, g, else_), items__5082[6] = ((slice__u8){(u8*)")", 1}), items__5082), 7}));
+      slice__u8 choice = codegen__cat(ctx, ((slice__string){(items__5086[0] = ((slice__u8){(u8*)"(", 1}), items__5086[1] = codegen__expr(ctx, g, cond), items__5086[2] = ((slice__u8){(u8*)" \? ", 3}), items__5086[3] = codegen__expr(ctx, g, then), items__5086[4] = ((slice__u8){(u8*)" : ", 3}), items__5086[5] = codegen__expr(ctx, g, else_), items__5086[6] = ((slice__u8){(u8*)")", 1}), items__5086), 7}));
       if (((bindings).len == ((isize)0LL))) {
         return choice;
       }
-      return codegen__cat(ctx, ((slice__string){(items__5083[0] = ((slice__u8){(u8*)"({\012", 3}), items__5083[1] = bindings, items__5083[2] = codegen__spaces(ctx, ((isize)((rt_nonnull(g, "src/codegen.sabk:1366:47"))->indent * ((isize)2LL)))), items__5083[3] = choice, items__5083[4] = ((slice__u8){(u8*)"; })", 4}), items__5083), 5}));
+      return codegen__cat(ctx, ((slice__string){(items__5087[0] = ((slice__u8){(u8*)"({\012", 3}), items__5087[1] = bindings, items__5087[2] = codegen__spaces(ctx, ((isize)((rt_nonnull(g, "src/codegen.sabk:1366:47"))->indent * ((isize)2LL)))), items__5087[3] = choice, items__5087[4] = ((slice__u8){(u8*)"; })", 4}), items__5087), 5}));
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)14LL) && (switch__5031.payload.Block.gives_value == true))) {
-      slice__ptr_ast__Node stmts = switch__5031.payload.Block.stmts;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)14LL) && (switch__5035.payload.Block.gives_value == true))) {
+      slice__ptr_ast__Node stmts = switch__5035.payload.Block.stmts;
       isize saved_indent = (rt_nonnull(g, "src/codegen.sabk:1371:30"))->indent;
       grow__u8* body = ((grow__u8*)rt_new(ctx, (*ctx).allocator, sizeof(grow__u8), _Alignof(grow__u8), "src/codegen.sabk:1372:20"));
       grow__u8* saved = codegen__into_string(ctx, g, body);
       (rt_nonnull(g, "src/codegen.sabk:1374:11"))->indent++;
       slice__u8 result = codegen__tmp(ctx, g, ((slice__u8){(u8*)"value", 5}));
-      ({ codegen__CodeGen* v__5084 = g; slice__u8 v__5086 = codegen__cat(ctx, ((slice__string){(items__5085[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1376:33"))->ty), items__5085[1] = ((slice__u8){(u8*)" ", 1}), items__5085[2] = result, items__5085[3] = ((slice__u8){(u8*)";", 1}), items__5085), 4})); codegen__line(ctx, v__5084, v__5086); });
+      ({ codegen__CodeGen* v__5088 = g; slice__u8 v__5090 = codegen__cat(ctx, ((slice__string){(items__5089[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1376:33"))->ty), items__5089[1] = ((slice__u8){(u8*)" ", 1}), items__5089[2] = result, items__5089[3] = ((slice__u8){(u8*)";", 1}), items__5089), 4})); codegen__line(ctx, v__5088, v__5090); });
       map__map_put__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1377:20"))->value_vars), n, result);
       codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
       (rt_nonnull(g, "src/codegen.sabk:1379:11"))->indent++;
@@ -35258,44 +35367,44 @@ static slice__u8 codegen__expr_inner(prelude__Context *ctx, codegen__CodeGen* g,
       (rt_nonnull(g, "src/codegen.sabk:1381:11"))->indent--;
       codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
       codegen__break_label(ctx, g, n);
-      ({ codegen__CodeGen* v__5087 = g; slice__u8 v__5089 = codegen__cat(ctx, ((slice__string){(items__5088[0] = result, items__5088[1] = ((slice__u8){(u8*)";", 1}), items__5088), 2})); codegen__line(ctx, v__5087, v__5089); });
+      ({ codegen__CodeGen* v__5091 = g; slice__u8 v__5093 = codegen__cat(ctx, ((slice__string){(items__5092[0] = result, items__5092[1] = ((slice__u8){(u8*)";", 1}), items__5092), 2})); codegen__line(ctx, v__5091, v__5093); });
       (rt_nonnull(g, "src/codegen.sabk:1385:11"))->out = saved;
       (rt_nonnull(g, "src/codegen.sabk:1386:11"))->indent = saved_indent;
       return codegen__statement_expression(ctx, g, grow__u8__view((*rt_nonnull(body, "src/codegen.sabk:1387:45"))), saved_indent);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)67LL))) {
-      ast__Node* payload = switch__5031.payload.VariantValue.payload;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)67LL))) {
+      ast__Node* payload = switch__5035.payload.VariantValue.payload;
       slice__u8 tag = codegen__constant(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1391:33"))->decl, "src/codegen.sabk:1391:38"))->cval, ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1391:46"))->ty, "src/codegen.sabk:1391:49"))->fields), ((isize)0LL), "src/codegen.sabk:1391:55"))).ty);
-      slice__u8 body = codegen__cat(ctx, ((slice__string){(items__5090[0] = ((slice__u8){(u8*)".tag = ", 7}), items__5090[1] = tag, items__5090), 2}));
+      slice__u8 body = codegen__cat(ctx, ((slice__string){(items__5094[0] = ((slice__u8){(u8*)".tag = ", 7}), items__5094[1] = tag, items__5094), 2}));
       if ((payload != ((ast__Node*)0))) {
-        body = codegen__cat(ctx, ((slice__string){(items__5091[0] = body, items__5091[1] = ((slice__u8){(u8*)", .payload.", 11}), items__5091[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1394:58"))->decl, "src/codegen.sabk:1394:63"))->tok).text), items__5091[3] = ((slice__u8){(u8*)" = ", 3}), items__5091[4] = codegen__expr(ctx, g, payload), items__5091), 5}));
+        body = codegen__cat(ctx, ((slice__string){(items__5095[0] = body, items__5095[1] = ((slice__u8){(u8*)", .payload.", 11}), items__5095[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1394:58"))->decl, "src/codegen.sabk:1394:63"))->tok).text), items__5095[3] = ((slice__u8){(u8*)" = ", 3}), items__5095[4] = codegen__expr(ctx, g, payload), items__5095), 5}));
       }
       return codegen__compound(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1395:30"))->ty, body);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)68LL))) {
-      ast__Node* object = switch__5031.payload.VariantAccess.object;
-      bool checked = switch__5031.payload.VariantAccess.checked;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)68LL))) {
+      ast__Node* object = switch__5035.payload.VariantAccess.object;
+      bool checked = switch__5035.payload.VariantAccess.checked;
       return codegen__variant_access(ctx, g, n, object, checked);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)50LL))) {
-      ast__Node* value = switch__5031.payload.Cast.value;
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)50LL))) {
+      ast__Node* value = switch__5035.payload.Cast.value;
       if ((((rt_nonnull((rt_nonnull(value, "src/codegen.sabk:1401:19"))->ty, "src/codegen.sabk:1401:22"))->kind == ((types__TypeKind)9LL)) && ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1401:45"))->ty, "src/codegen.sabk:1401:48"))->kind == ((types__TypeKind)8LL)))) {
-        return ({ codegen__CodeGen* v__5092 = g; slice__u8 v__5093 = codegen__expr(ctx, g, value); types__Type* v__5094 = (rt_nonnull(value, "src/codegen.sabk:1402:53"))->ty; types__Type* v__5095 = (rt_nonnull(n, "src/codegen.sabk:1402:59"))->ty; codegen__convert(ctx, v__5092, v__5093, v__5094, v__5095); });
+        return ({ codegen__CodeGen* v__5096 = g; slice__u8 v__5097 = codegen__expr(ctx, g, value); types__Type* v__5098 = (rt_nonnull(value, "src/codegen.sabk:1402:53"))->ty; types__Type* v__5099 = (rt_nonnull(n, "src/codegen.sabk:1402:59"))->ty; codegen__convert(ctx, v__5096, v__5097, v__5098, v__5099); });
       }
       if ((((rt_nonnull((rt_nonnull(value, "src/codegen.sabk:1403:19"))->ty, "src/codegen.sabk:1403:22"))->kind == ((types__TypeKind)8LL)) || ((rt_nonnull(value, "src/codegen.sabk:1403:46"))->ty == (rt_nonnull(n, "src/codegen.sabk:1403:54"))->ty))) {
         return codegen__expr(ctx, g, value);
       }
-      return codegen__cat(ctx, ((slice__string){(items__5096[0] = ((slice__u8){(u8*)"((", 2}), items__5096[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1405:38"))->ty), items__5096[2] = ((slice__u8){(u8*)")(", 2}), items__5096[3] = codegen__expr(ctx, g, value), items__5096[4] = ((slice__u8){(u8*)"))", 2}), items__5096), 5}));
+      return codegen__cat(ctx, ((slice__string){(items__5100[0] = ((slice__u8){(u8*)"((", 2}), items__5100[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1405:38"))->ty), items__5100[2] = ((slice__u8){(u8*)")(", 2}), items__5100[3] = codegen__expr(ctx, g, value), items__5100[4] = ((slice__u8){(u8*)"))", 2}), items__5100), 5}));
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)49LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)49LL))) {
       return codegen__slice(ctx, g, n);
       break;
     }
-    if ((switch__5031.tag == ((ast__NodeKind__Tag)57LL))) {
+    if ((switch__5035.tag == ((ast__NodeKind__Tag)57LL))) {
       return codegen__new_value(ctx, g, n);
       break;
     }
@@ -35307,48 +35416,48 @@ static slice__u8 codegen__expr_inner(prelude__Context *ctx, codegen__CodeGen* g,
 }
 
 static slice__u8 codegen__variant_access(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n, ast__Node* object, bool checked) {
-  slice__u8 items__5097[2];
-  slice__u8 items__5101[4];
-  slice__u8 items__5102[4];
-  prelude__Any items__5103[1];
-  slice__u8 items__5104[5];
-  slice__u8 items__5108[2];
-  slice__u8 items__5109[17];
-  slice__u8 items__5110[17];
+  slice__u8 items__5101[2];
+  slice__u8 items__5105[4];
+  slice__u8 items__5106[4];
+  prelude__Any items__5107[1];
+  slice__u8 items__5108[5];
+  slice__u8 items__5112[2];
+  slice__u8 items__5113[17];
+  slice__u8 items__5114[17];
   bool through = ((rt_nonnull((rt_nonnull(object, "src/codegen.sabk:1421:26"))->ty, "src/codegen.sabk:1421:29"))->kind == ((types__TypeKind)6LL));
   types__Type* t = (through ? (rt_nonnull((rt_nonnull(object, "src/codegen.sabk:1422:33"))->ty, "src/codegen.sabk:1422:36"))->elem : (rt_nonnull(object, "src/codegen.sabk:1422:53"))->ty);
-  slice__u8 field = codegen__cat(ctx, ((slice__string){(items__5097[0] = ((slice__u8){(u8*)"payload.", 8}), items__5097[1] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1423:46"))->decl, "src/codegen.sabk:1423:51"))->tok).text), items__5097), 2}));
+  slice__u8 field = codegen__cat(ctx, ((slice__string){(items__5101[0] = ((slice__u8){(u8*)"payload.", 8}), items__5101[1] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1423:46"))->decl, "src/codegen.sabk:1423:51"))->tok).text), items__5101), 2}));
   bool check = (checked && codegen__checks_bounds(ctx, g));
   if ((!check)) {
     if (through) {
-      return codegen__cat(ctx, ((slice__string){(items__5101[0] = ((slice__u8){(u8*)"(", 1}), items__5101[1] = ({ codegen__CodeGen* v__5098 = g; slice__u8 v__5099 = codegen__expr(ctx, g, object); token__Token v__5100 = (rt_nonnull(n, "src/codegen.sabk:1427:59"))->tok; codegen__nonnull(ctx, v__5098, v__5099, v__5100); }), items__5101[2] = ((slice__u8){(u8*)")->", 3}), items__5101[3] = field, items__5101), 4}));
+      return codegen__cat(ctx, ((slice__string){(items__5105[0] = ((slice__u8){(u8*)"(", 1}), items__5105[1] = ({ codegen__CodeGen* v__5102 = g; slice__u8 v__5103 = codegen__expr(ctx, g, object); token__Token v__5104 = (rt_nonnull(n, "src/codegen.sabk:1427:59"))->tok; codegen__nonnull(ctx, v__5102, v__5103, v__5104); }), items__5105[2] = ((slice__u8){(u8*)")->", 3}), items__5105[3] = field, items__5105), 4}));
     }
-    return codegen__cat(ctx, ((slice__string){(items__5102[0] = ((slice__u8){(u8*)"(", 1}), items__5102[1] = codegen__expr(ctx, g, object), items__5102[2] = ((slice__u8){(u8*)").", 2}), items__5102[3] = field, items__5102), 4}));
+    return codegen__cat(ctx, ((slice__string){(items__5106[0] = ((slice__u8){(u8*)"(", 1}), items__5106[1] = codegen__expr(ctx, g, object), items__5106[2] = ((slice__u8){(u8*)").", 2}), items__5106[3] = field, items__5106), 4}));
   }
   slice__u8 tag = codegen__constant(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1430:29"))->decl, "src/codegen.sabk:1430:34"))->cval, ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:1430:42"))->fields), ((isize)0LL), "src/codegen.sabk:1430:48"))).ty);
   slice__u8 v = codegen__tmp(ctx, g, ((slice__u8){(u8*)"variant", 7}));
-  slice__u8 panic = codegen__cat(ctx, ((slice__string){(items__5104[0] = ((slice__u8){(u8*)"rt_panic(", 9}), items__5104[1] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1432:48"))->tok), items__5104[2] = ((slice__u8){(u8*)", ", 2}), items__5104[3] = codegen__c_string(ctx, fmt__tformat(ctx, ((slice__u8){(u8*)"the value isn't .%", 18}), ((slice__prelude__Any){(items__5103[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1432:101"))->decl, "src/codegen.sabk:1432:106"))->tok).text}, .info = (&ti__1)}), items__5103), 1}))), items__5104[4] = ((slice__u8){(u8*)")", 1}), items__5104), 5}));
+  slice__u8 panic = codegen__cat(ctx, ((slice__string){(items__5108[0] = ((slice__u8){(u8*)"rt_panic(", 9}), items__5108[1] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1432:48"))->tok), items__5108[2] = ((slice__u8){(u8*)", ", 2}), items__5108[3] = codegen__c_string(ctx, fmt__tformat(ctx, ((slice__u8){(u8*)"the value isn't .%", 18}), ((slice__prelude__Any){(items__5107[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1432:101"))->decl, "src/codegen.sabk:1432:106"))->tok).text}, .info = (&ti__1)}), items__5107), 1}))), items__5108[4] = ((slice__u8){(u8*)")", 1}), items__5108), 5}));
   if ((through || generics__is_place(ctx, object))) {
-    slice__u8 address = (through ? ({ codegen__CodeGen* v__5105 = g; slice__u8 v__5106 = codegen__expr(ctx, g, object); token__Token v__5107 = (rt_nonnull(n, "src/codegen.sabk:1434:66"))->tok; codegen__nonnull(ctx, v__5105, v__5106, v__5107); }) : codegen__cat(ctx, ((slice__string){(items__5108[0] = ((slice__u8){(u8*)"&", 1}), items__5108[1] = codegen__expr(ctx, g, object), items__5108), 2})));
-    return codegen__cat(ctx, ((slice__string){(items__5109[0] = ((slice__u8){(u8*)"(*({ ", 5}), items__5109[1] = codegen__c_type(ctx, g, t), items__5109[2] = ((slice__u8){(u8*)" *", 2}), items__5109[3] = v, items__5109[4] = ((slice__u8){(u8*)" = ", 3}), items__5109[5] = address, items__5109[6] = ((slice__u8){(u8*)"; if (", 6}), items__5109[7] = v, items__5109[8] = ((slice__u8){(u8*)"->tag != ", 9}), items__5109[9] = tag, items__5109[10] = ((slice__u8){(u8*)") ", 2}), items__5109[11] = panic, items__5109[12] = ((slice__u8){(u8*)"; &", 3}), items__5109[13] = v, items__5109[14] = ((slice__u8){(u8*)"->", 2}), items__5109[15] = field, items__5109[16] = ((slice__u8){(u8*)"; }))", 5}), items__5109), 17}));
+    slice__u8 address = (through ? ({ codegen__CodeGen* v__5109 = g; slice__u8 v__5110 = codegen__expr(ctx, g, object); token__Token v__5111 = (rt_nonnull(n, "src/codegen.sabk:1434:66"))->tok; codegen__nonnull(ctx, v__5109, v__5110, v__5111); }) : codegen__cat(ctx, ((slice__string){(items__5112[0] = ((slice__u8){(u8*)"&", 1}), items__5112[1] = codegen__expr(ctx, g, object), items__5112), 2})));
+    return codegen__cat(ctx, ((slice__string){(items__5113[0] = ((slice__u8){(u8*)"(*({ ", 5}), items__5113[1] = codegen__c_type(ctx, g, t), items__5113[2] = ((slice__u8){(u8*)" *", 2}), items__5113[3] = v, items__5113[4] = ((slice__u8){(u8*)" = ", 3}), items__5113[5] = address, items__5113[6] = ((slice__u8){(u8*)"; if (", 6}), items__5113[7] = v, items__5113[8] = ((slice__u8){(u8*)"->tag != ", 9}), items__5113[9] = tag, items__5113[10] = ((slice__u8){(u8*)") ", 2}), items__5113[11] = panic, items__5113[12] = ((slice__u8){(u8*)"; &", 3}), items__5113[13] = v, items__5113[14] = ((slice__u8){(u8*)"->", 2}), items__5113[15] = field, items__5113[16] = ((slice__u8){(u8*)"; }))", 5}), items__5113), 17}));
   }
-  return codegen__cat(ctx, ((slice__string){(items__5110[0] = ((slice__u8){(u8*)"({ ", 3}), items__5110[1] = codegen__c_type(ctx, g, t), items__5110[2] = ((slice__u8){(u8*)" ", 1}), items__5110[3] = v, items__5110[4] = ((slice__u8){(u8*)" = ", 3}), items__5110[5] = codegen__expr(ctx, g, object), items__5110[6] = ((slice__u8){(u8*)"; if (", 6}), items__5110[7] = v, items__5110[8] = ((slice__u8){(u8*)".tag != ", 8}), items__5110[9] = tag, items__5110[10] = ((slice__u8){(u8*)") ", 2}), items__5110[11] = panic, items__5110[12] = ((slice__u8){(u8*)"; ", 2}), items__5110[13] = v, items__5110[14] = ((slice__u8){(u8*)".", 1}), items__5110[15] = field, items__5110[16] = ((slice__u8){(u8*)"; })", 4}), items__5110), 17}));
+  return codegen__cat(ctx, ((slice__string){(items__5114[0] = ((slice__u8){(u8*)"({ ", 3}), items__5114[1] = codegen__c_type(ctx, g, t), items__5114[2] = ((slice__u8){(u8*)" ", 1}), items__5114[3] = v, items__5114[4] = ((slice__u8){(u8*)" = ", 3}), items__5114[5] = codegen__expr(ctx, g, object), items__5114[6] = ((slice__u8){(u8*)"; if (", 6}), items__5114[7] = v, items__5114[8] = ((slice__u8){(u8*)".tag != ", 8}), items__5114[9] = tag, items__5114[10] = ((slice__u8){(u8*)") ", 2}), items__5114[11] = panic, items__5114[12] = ((slice__u8){(u8*)"; ", 2}), items__5114[13] = v, items__5114[14] = ((slice__u8){(u8*)".", 1}), items__5114[15] = field, items__5114[16] = ((slice__u8){(u8*)"; })", 4}), items__5114), 17}));
 }
 
 static slice__u8 codegen__internal_error(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  prelude__Any items__5111[1];
-  ({ slice__u8 v__5112 = fmt__tformat(ctx, ((slice__u8){(u8*)"[internal error]: the code generator can't handle %\012", 52}), ((slice__prelude__Any){(items__5111[0] = ((prelude__Any){.value = (slice__u8[1]){(ast__old_shape(ctx, n)).tag}, .info = (&ti__1)}), items__5111), 1})); slice__prelude__Any v__5113 = ((slice__prelude__Any){0}); io__eprint(ctx, v__5112, v__5113); });
+  prelude__Any items__5115[1];
+  ({ slice__u8 v__5116 = fmt__tformat(ctx, ((slice__u8){(u8*)"[internal error]: the code generator can't handle %\012", 52}), ((slice__prelude__Any){(items__5115[0] = ((prelude__Any){.value = (slice__u8[1]){(ast__old_shape(ctx, n)).tag}, .info = (&ti__1)}), items__5115), 1})); slice__prelude__Any v__5117 = ((slice__prelude__Any){0}); io__eprint(ctx, v__5116, v__5117); });
   (rt_nonnull(g, "src/codegen.sabk:1446:7"))->error_count++;
   return ((slice__u8){(u8*)"0", 1});
 }
 
 static slice__u8 codegen__new_value(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5116[3];
-  slice__u8 items__5117[10];
-  slice__u8 items__5118[15];
-  slice__u8 items__5119[3];
-  slice__u8 items__5120[13];
-  slice__u8 items__5121[13];
+  slice__u8 items__5120[3];
+  slice__u8 items__5121[10];
+  slice__u8 items__5122[15];
+  slice__u8 items__5123[3];
+  slice__u8 items__5124[13];
+  slice__u8 items__5125[13];
   ast__Node* first = ((ast__Node*)0);
   ast__Node* second = ((ast__Node*)0);
   ast__Node* value = ((ast__Node*)0);
@@ -35356,63 +35465,63 @@ static slice__u8 codegen__new_value(prelude__Context *ctx, codegen__CodeGen* g, 
     ast__Node* a;
     ast__Node* b;
     ast__Node* v;
-    if (({ ast__NodeKind is__5114 = (rt_nonnull(n, "src/codegen.sabk:1454:11"))->kind; is__5114.tag == ((ast__NodeKind__Tag)57LL) ? (a = is__5114.payload.New.first, b = is__5114.payload.New.second, v = is__5114.payload.New.value, 1) : 0; })) {
-      ({ tuple__45 values__5115 = ((tuple__45){._0 = a, ._1 = b, ._2 = v}); first = values__5115._0; second = values__5115._1; value = values__5115._2; });
+    if (({ ast__NodeKind is__5118 = (rt_nonnull(n, "src/codegen.sabk:1454:11"))->kind; is__5118.tag == ((ast__NodeKind__Tag)57LL) ? (a = is__5118.payload.New.first, b = is__5118.payload.New.second, v = is__5118.payload.New.value, 1) : 0; })) {
+      ({ tuple__45 values__5119 = ((tuple__45){._0 = a, ._1 = b, ._2 = v}); first = values__5119._0; second = values__5119._1; value = values__5119._2; });
     }
   }
   if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1456:11"))->ty, "src/codegen.sabk:1456:14"))->kind == ((types__TypeKind)8LL))) {
-    slice__u8 allocator = ((second != ((ast__Node*)0)) ? codegen__expr(ctx, g, second) : codegen__cat(ctx, ((slice__string){(items__5116[0] = ((slice__u8){(u8*)"(*", 2}), items__5116[1] = codegen__current_ctx(ctx, g), items__5116[2] = ((slice__u8){(u8*)").allocator", 11}), items__5116), 3})));
-    slice__u8 made = codegen__cat(ctx, ((slice__string){(items__5117[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1458:36"))->ty), items__5117[1] = ((slice__u8){(u8*)"__make(", 7}), items__5117[2] = codegen__current_ctx(ctx, g), items__5117[3] = ((slice__u8){(u8*)", ", 2}), items__5117[4] = allocator, items__5117[5] = ((slice__u8){(u8*)", ", 2}), items__5117[6] = codegen__expr(ctx, g, first), items__5117[7] = ((slice__u8){(u8*)", ", 2}), items__5117[8] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1459:38"))->tok), items__5117[9] = ((slice__u8){(u8*)")", 1}), items__5117), 10}));
+    slice__u8 allocator = ((second != ((ast__Node*)0)) ? codegen__expr(ctx, g, second) : codegen__cat(ctx, ((slice__string){(items__5120[0] = ((slice__u8){(u8*)"(*", 2}), items__5120[1] = codegen__current_ctx(ctx, g), items__5120[2] = ((slice__u8){(u8*)").allocator", 11}), items__5120), 3})));
+    slice__u8 made = codegen__cat(ctx, ((slice__string){(items__5121[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1458:36"))->ty), items__5121[1] = ((slice__u8){(u8*)"__make(", 7}), items__5121[2] = codegen__current_ctx(ctx, g), items__5121[3] = ((slice__u8){(u8*)", ", 2}), items__5121[4] = allocator, items__5121[5] = ((slice__u8){(u8*)", ", 2}), items__5121[6] = codegen__expr(ctx, g, first), items__5121[7] = ((slice__u8){(u8*)", ", 2}), items__5121[8] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1459:38"))->tok), items__5121[9] = ((slice__u8){(u8*)")", 1}), items__5121), 10}));
     if ((!comptime__has_defaults(ctx, (rt_nonnull(g, "src/codegen.sabk:1460:29"))->c, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1460:34"))->ty, "src/codegen.sabk:1460:37"))->elem))) {
       return made;
     }
     slice__u8 s = codegen__tmp(ctx, g, ((slice__u8){(u8*)"new", 3}));
-    return codegen__cat(ctx, ((slice__string){(items__5118[0] = ((slice__u8){(u8*)"({ ", 3}), items__5118[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1464:39"))->ty), items__5118[2] = ((slice__u8){(u8*)" ", 1}), items__5118[3] = s, items__5118[4] = ((slice__u8){(u8*)" = ", 3}), items__5118[5] = made, items__5118[6] = ((slice__u8){(u8*)"; for (isize i = 0; i < ", 24}), items__5118[7] = s, items__5118[8] = ((slice__u8){(u8*)".len; i++) ", 11}), items__5118[9] = s, items__5118[10] = ((slice__u8){(u8*)".ptr[i] = ", 10}), items__5118[11] = codegen__default_value(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1465:53"))->ty, "src/codegen.sabk:1465:56"))->elem), items__5118[12] = ((slice__u8){(u8*)"; ", 2}), items__5118[13] = s, items__5118[14] = ((slice__u8){(u8*)"; })", 4}), items__5118), 15}));
+    return codegen__cat(ctx, ((slice__string){(items__5122[0] = ((slice__u8){(u8*)"({ ", 3}), items__5122[1] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1464:39"))->ty), items__5122[2] = ((slice__u8){(u8*)" ", 1}), items__5122[3] = s, items__5122[4] = ((slice__u8){(u8*)" = ", 3}), items__5122[5] = made, items__5122[6] = ((slice__u8){(u8*)"; for (isize i = 0; i < ", 24}), items__5122[7] = s, items__5122[8] = ((slice__u8){(u8*)".len; i++) ", 11}), items__5122[9] = s, items__5122[10] = ((slice__u8){(u8*)".ptr[i] = ", 10}), items__5122[11] = codegen__default_value(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1465:53"))->ty, "src/codegen.sabk:1465:56"))->elem), items__5122[12] = ((slice__u8){(u8*)"; ", 2}), items__5122[13] = s, items__5122[14] = ((slice__u8){(u8*)"; })", 4}), items__5122), 15}));
   }
   types__Type* of = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1467:16"))->ty, "src/codegen.sabk:1467:19"))->elem;
   slice__u8 t = codegen__c_type(ctx, g, of);
-  slice__u8 allocator = ((first != ((ast__Node*)0)) ? codegen__expr(ctx, g, first) : codegen__cat(ctx, ((slice__string){(items__5119[0] = ((slice__u8){(u8*)"(*", 2}), items__5119[1] = codegen__current_ctx(ctx, g), items__5119[2] = ((slice__u8){(u8*)").allocator", 11}), items__5119), 3})));
-  slice__u8 made = codegen__cat(ctx, ((slice__string){(items__5120[0] = ((slice__u8){(u8*)"((", 2}), items__5120[1] = t, items__5120[2] = ((slice__u8){(u8*)"*)rt_new(", 9}), items__5120[3] = codegen__current_ctx(ctx, g), items__5120[4] = ((slice__u8){(u8*)", ", 2}), items__5120[5] = allocator, items__5120[6] = ((slice__u8){(u8*)", sizeof(", 9}), items__5120[7] = t, items__5120[8] = ((slice__u8){(u8*)"), _Alignof(", 12}), items__5120[9] = t, items__5120[10] = ((slice__u8){(u8*)"), ", 3}), items__5120[11] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1471:34"))->tok), items__5120[12] = ((slice__u8){(u8*)"))", 2}), items__5120), 13}));
+  slice__u8 allocator = ((first != ((ast__Node*)0)) ? codegen__expr(ctx, g, first) : codegen__cat(ctx, ((slice__string){(items__5123[0] = ((slice__u8){(u8*)"(*", 2}), items__5123[1] = codegen__current_ctx(ctx, g), items__5123[2] = ((slice__u8){(u8*)").allocator", 11}), items__5123), 3})));
+  slice__u8 made = codegen__cat(ctx, ((slice__string){(items__5124[0] = ((slice__u8){(u8*)"((", 2}), items__5124[1] = t, items__5124[2] = ((slice__u8){(u8*)"*)rt_new(", 9}), items__5124[3] = codegen__current_ctx(ctx, g), items__5124[4] = ((slice__u8){(u8*)", ", 2}), items__5124[5] = allocator, items__5124[6] = ((slice__u8){(u8*)", sizeof(", 9}), items__5124[7] = t, items__5124[8] = ((slice__u8){(u8*)"), _Alignof(", 12}), items__5124[9] = t, items__5124[10] = ((slice__u8){(u8*)"), ", 3}), items__5124[11] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1471:34"))->tok), items__5124[12] = ((slice__u8){(u8*)"))", 2}), items__5124), 13}));
   slice__u8 v = ((value != ((ast__Node*)0)) ? codegen__expr(ctx, g, value) : (comptime__has_defaults(ctx, (rt_nonnull(g, "src/codegen.sabk:1473:71"))->c, of) ? codegen__default_value(ctx, g, of) : ((slice__u8){(u8*)"", 0})));
   if (((v).len == ((isize)0LL))) {
     return made;
   }
   slice__u8 p = codegen__tmp(ctx, g, ((slice__u8){(u8*)"new", 3}));
-  return codegen__cat(ctx, ((slice__string){(items__5121[0] = ((slice__u8){(u8*)"({ ", 3}), items__5121[1] = t, items__5121[2] = ((slice__u8){(u8*)" *", 2}), items__5121[3] = p, items__5121[4] = ((slice__u8){(u8*)" = ", 3}), items__5121[5] = made, items__5121[6] = ((slice__u8){(u8*)"; *", 3}), items__5121[7] = p, items__5121[8] = ((slice__u8){(u8*)" = ", 3}), items__5121[9] = v, items__5121[10] = ((slice__u8){(u8*)"; ", 2}), items__5121[11] = p, items__5121[12] = ((slice__u8){(u8*)"; })", 4}), items__5121), 13}));
+  return codegen__cat(ctx, ((slice__string){(items__5125[0] = ((slice__u8){(u8*)"({ ", 3}), items__5125[1] = t, items__5125[2] = ((slice__u8){(u8*)" *", 2}), items__5125[3] = p, items__5125[4] = ((slice__u8){(u8*)" = ", 3}), items__5125[5] = made, items__5125[6] = ((slice__u8){(u8*)"; *", 3}), items__5125[7] = p, items__5125[8] = ((slice__u8){(u8*)" = ", 3}), items__5125[9] = v, items__5125[10] = ((slice__u8){(u8*)"; ", 2}), items__5125[11] = p, items__5125[12] = ((slice__u8){(u8*)"; })", 4}), items__5125), 13}));
 }
 
 static slice__u8 codegen__failed(prelude__Context *ctx, slice__u8 values, types__Type* t) {
-  slice__u8 items__5122[3];
-  slice__u8 items__5123[3];
-  slice__u8 items__5124[2];
-  slice__u8 items__5125[2];
+  slice__u8 items__5126[3];
+  slice__u8 items__5127[3];
+  slice__u8 items__5128[2];
+  slice__u8 items__5129[2];
   slice__u8 flag = values;
   types__Type* flag_type = t;
   if ((rt_nonnull(t, "src/codegen.sabk:1485:11"))->is_tuple) {
-    flag = codegen__cat(ctx, ((slice__string){(items__5122[0] = flag, items__5122[1] = ((slice__u8){(u8*)"._", 2}), items__5122[2] = codegen__num(ctx, ((i64)(((isize)(((rt_nonnull(t, "src/codegen.sabk:1486:38"))->fields).len - ((isize)1LL)))))), items__5122), 3}));
+    flag = codegen__cat(ctx, ((slice__string){(items__5126[0] = flag, items__5126[1] = ((slice__u8){(u8*)"._", 2}), items__5126[2] = codegen__num(ctx, ((i64)(((isize)(((rt_nonnull(t, "src/codegen.sabk:1486:38"))->fields).len - ((isize)1LL)))))), items__5126), 3}));
     flag_type = ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:1487:23"))->fields), ((isize)(((rt_nonnull(t, "src/codegen.sabk:1487:32"))->fields).len - ((isize)1LL))), "src/codegen.sabk:1487:29"))).ty;
   }
   if ((rt_nonnull(flag_type, "src/codegen.sabk:1489:19"))->is_tagged) {
-    flag = codegen__cat(ctx, ((slice__string){(items__5123[0] = ((slice__u8){(u8*)"(", 1}), items__5123[1] = flag, items__5123[2] = ((slice__u8){(u8*)").tag", 5}), items__5123), 3}));
+    flag = codegen__cat(ctx, ((slice__string){(items__5127[0] = ((slice__u8){(u8*)"(", 1}), items__5127[1] = flag, items__5127[2] = ((slice__u8){(u8*)").tag", 5}), items__5127), 3}));
   }
-  return (((rt_nonnull(flag_type, "src/codegen.sabk:1491:26"))->kind == ((types__TypeKind)2LL)) ? codegen__cat(ctx, ((slice__string){(items__5124[0] = ((slice__u8){(u8*)"!", 1}), items__5124[1] = flag, items__5124), 2})) : codegen__cat(ctx, ((slice__string){(items__5125[0] = flag, items__5125[1] = ((slice__u8){(u8*)" != 0", 5}), items__5125), 2})));
+  return (((rt_nonnull(flag_type, "src/codegen.sabk:1491:26"))->kind == ((types__TypeKind)2LL)) ? codegen__cat(ctx, ((slice__string){(items__5128[0] = ((slice__u8){(u8*)"!", 1}), items__5128[1] = flag, items__5128), 2})) : codegen__cat(ctx, ((slice__string){(items__5129[0] = flag, items__5129[1] = ((slice__u8){(u8*)" != 0", 5}), items__5129), 2})));
 }
 
 static slice__u8 codegen__gen_or_return(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5128[6];
-  slice__u8 items__5131[3];
-  slice__u8 items__5133[3];
-  slice__u8 items__5135[6];
-  slice__u8 items__5138[5];
-  slice__u8 items__5141[6];
-  slice__u8 items__5144[3];
-  slice__u8 items__5147[5];
-  slice__u8 items__5149[2];
-  slice__u8 items__5152[2];
+  slice__u8 items__5132[6];
+  slice__u8 items__5135[3];
+  slice__u8 items__5137[3];
+  slice__u8 items__5139[6];
+  slice__u8 items__5142[5];
+  slice__u8 items__5145[6];
+  slice__u8 items__5148[3];
+  slice__u8 items__5151[5];
+  slice__u8 items__5153[2];
+  slice__u8 items__5156[2];
   ast__Node* inner = ((ast__Node*)0);
   {
     ast__Node* value;
-    if (({ ast__NodeKind is__5126 = (rt_nonnull(n, "src/codegen.sabk:1498:11"))->kind; is__5126.tag == ((ast__NodeKind__Tag)55LL) ? (value = is__5126.payload.OrReturn.value, 1) : 0; })) {
+    if (({ ast__NodeKind is__5130 = (rt_nonnull(n, "src/codegen.sabk:1498:11"))->kind; is__5130.tag == ((ast__NodeKind__Tag)55LL) ? (value = is__5130.payload.OrReturn.value, 1) : 0; })) {
       inner = value;
     }
   }
@@ -35422,10 +35531,10 @@ static slice__u8 codegen__gen_or_return(prelude__Context *ctx, codegen__CodeGen*
   grow__u8* saved = codegen__into_string(ctx, g, body);
   (rt_nonnull(g, "src/codegen.sabk:1504:7"))->indent++;
   slice__u8 v = codegen__tmp(ctx, g, ((slice__u8){(u8*)"result", 6}));
-  ({ codegen__CodeGen* v__5127 = g; slice__u8 v__5129 = codegen__cat(ctx, ((slice__string){(items__5128[0] = codegen__c_type(ctx, g, t), items__5128[1] = ((slice__u8){(u8*)" ", 1}), items__5128[2] = v, items__5128[3] = ((slice__u8){(u8*)" = ", 3}), items__5128[4] = codegen__expr(ctx, g, inner), items__5128[5] = ((slice__u8){(u8*)";", 1}), items__5128), 6})); codegen__line(ctx, v__5127, v__5129); });
-  ({ codegen__CodeGen* v__5130 = g; slice__u8 v__5132 = codegen__cat(ctx, ((slice__string){(items__5131[0] = ((slice__u8){(u8*)"if (", 4}), items__5131[1] = codegen__failed(ctx, v, t), items__5131[2] = ((slice__u8){(u8*)") {", 3}), items__5131), 3})); codegen__line(ctx, v__5130, v__5132); });
+  ({ codegen__CodeGen* v__5131 = g; slice__u8 v__5133 = codegen__cat(ctx, ((slice__string){(items__5132[0] = codegen__c_type(ctx, g, t), items__5132[1] = ((slice__u8){(u8*)" ", 1}), items__5132[2] = v, items__5132[3] = ((slice__u8){(u8*)" = ", 3}), items__5132[4] = codegen__expr(ctx, g, inner), items__5132[5] = ((slice__u8){(u8*)";", 1}), items__5132), 6})); codegen__line(ctx, v__5131, v__5133); });
+  ({ codegen__CodeGen* v__5134 = g; slice__u8 v__5136 = codegen__cat(ctx, ((slice__string){(items__5135[0] = ((slice__u8){(u8*)"if (", 4}), items__5135[1] = codegen__failed(ctx, v, t), items__5135[2] = ((slice__u8){(u8*)") {", 3}), items__5135), 3})); codegen__line(ctx, v__5134, v__5136); });
   (rt_nonnull(g, "src/codegen.sabk:1508:7"))->indent++;
-  slice__u8 flag = ((rt_nonnull(t, "src/codegen.sabk:1511:22"))->is_tuple ? codegen__cat(ctx, ((slice__string){(items__5133[0] = v, items__5133[1] = ((slice__u8){(u8*)"._", 2}), items__5133[2] = codegen__num(ctx, ((i64)(((isize)(((rt_nonnull(t, "src/codegen.sabk:1511:51"))->fields).len - ((isize)1LL)))))), items__5133), 3})) : v);
+  slice__u8 flag = ((rt_nonnull(t, "src/codegen.sabk:1511:22"))->is_tuple ? codegen__cat(ctx, ((slice__string){(items__5137[0] = v, items__5137[1] = ((slice__u8){(u8*)"._", 2}), items__5137[2] = codegen__num(ctx, ((i64)(((isize)(((rt_nonnull(t, "src/codegen.sabk:1511:51"))->fields).len - ((isize)1LL)))))), items__5137), 3})) : v);
   types__Type* ret = (rt_nonnull((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1512:17"))->current_fn, "src/codegen.sabk:1512:28"))->ty, "src/codegen.sabk:1512:31"))->ret;
   types__Type* flag_type = ((rt_nonnull(t, "src/codegen.sabk:1513:27"))->is_tuple ? ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:1513:39"))->fields), ((isize)(((rt_nonnull(t, "src/codegen.sabk:1513:48"))->fields).len - ((isize)1LL))), "src/codegen.sabk:1513:45"))).ty : t);
   types__Type* ret_flag = ((rt_nonnull(ret, "src/codegen.sabk:1514:28"))->is_tuple ? ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(ret, "src/codegen.sabk:1514:42"))->fields), ((isize)(((rt_nonnull(ret, "src/codegen.sabk:1514:53"))->fields).len - ((isize)1LL))), "src/codegen.sabk:1514:48"))).ty : ret);
@@ -35436,36 +35545,36 @@ static slice__u8 codegen__gen_or_return(prelude__Context *ctx, codegen__CodeGen*
   if ((rt_nonnull(ret, "src/codegen.sabk:1518:13"))->is_tuple) {
     slice__u8 fields = ((slice__u8){(u8*)"", 0});
     {
-      isize end__5134 = ((isize)(((rt_nonnull(ret, "src/codegen.sabk:1520:26"))->fields).len - ((isize)1LL)));
-      for (isize i = ((isize)0LL); i < end__5134; i++) {
+      isize end__5138 = ((isize)(((rt_nonnull(ret, "src/codegen.sabk:1520:26"))->fields).len - ((isize)1LL)));
+      for (isize i = ((isize)0LL); i < end__5138; i++) {
         if (comptime__has_defaults(ctx, (rt_nonnull(g, "src/codegen.sabk:1521:32"))->c, ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(ret, "src/codegen.sabk:1521:39"))->fields), i, "src/codegen.sabk:1521:45"))).ty)) {
-          fields = codegen__cat(ctx, ((slice__string){(items__5135[0] = fields, items__5135[1] = ((slice__u8){(u8*)"._", 2}), items__5135[2] = codegen__num(ctx, ((i64)(i))), items__5135[3] = ((slice__u8){(u8*)" = ", 3}), items__5135[4] = codegen__default_value(ctx, g, ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(ret, "src/codegen.sabk:1522:80"))->fields), i, "src/codegen.sabk:1522:86"))).ty), items__5135[5] = ((slice__u8){(u8*)", ", 2}), items__5135), 6}));
+          fields = codegen__cat(ctx, ((slice__string){(items__5139[0] = fields, items__5139[1] = ((slice__u8){(u8*)"._", 2}), items__5139[2] = codegen__num(ctx, ((i64)(i))), items__5139[3] = ((slice__u8){(u8*)" = ", 3}), items__5139[4] = codegen__default_value(ctx, g, ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(ret, "src/codegen.sabk:1522:80"))->fields), i, "src/codegen.sabk:1522:86"))).ty), items__5139[5] = ((slice__u8){(u8*)", ", 2}), items__5139), 6}));
         }
       }
     }
-    value = ({ codegen__CodeGen* v__5136 = g; types__Type* v__5137 = ret; slice__u8 v__5139 = codegen__cat(ctx, ((slice__string){(items__5138[0] = fields, items__5138[1] = ((slice__u8){(u8*)"._", 2}), items__5138[2] = codegen__num(ctx, ((i64)(((isize)(((rt_nonnull(ret, "src/codegen.sabk:1523:60"))->fields).len - ((isize)1LL)))))), items__5138[3] = ((slice__u8){(u8*)" = ", 3}), items__5138[4] = flag, items__5138), 5})); codegen__compound(ctx, v__5136, v__5137, v__5139); });
+    value = ({ codegen__CodeGen* v__5140 = g; types__Type* v__5141 = ret; slice__u8 v__5143 = codegen__cat(ctx, ((slice__string){(items__5142[0] = fields, items__5142[1] = ((slice__u8){(u8*)"._", 2}), items__5142[2] = codegen__num(ctx, ((i64)(((isize)(((rt_nonnull(ret, "src/codegen.sabk:1523:60"))->fields).len - ((isize)1LL)))))), items__5142[3] = ((slice__u8){(u8*)" = ", 3}), items__5142[4] = flag, items__5142), 5})); codegen__compound(ctx, v__5140, v__5141, v__5143); });
   }
   if (codegen__has_defers(ctx, g)) {
     slice__u8 r = codegen__tmp(ctx, g, ((slice__u8){(u8*)"ret", 3}));
-    ({ codegen__CodeGen* v__5140 = g; slice__u8 v__5142 = codegen__cat(ctx, ((slice__string){(items__5141[0] = codegen__c_type(ctx, g, ret), items__5141[1] = ((slice__u8){(u8*)" ", 1}), items__5141[2] = r, items__5141[3] = ((slice__u8){(u8*)" = ", 3}), items__5141[4] = value, items__5141[5] = ((slice__u8){(u8*)";", 1}), items__5141), 6})); codegen__line(ctx, v__5140, v__5142); });
+    ({ codegen__CodeGen* v__5144 = g; slice__u8 v__5146 = codegen__cat(ctx, ((slice__string){(items__5145[0] = codegen__c_type(ctx, g, ret), items__5145[1] = ((slice__u8){(u8*)" ", 1}), items__5145[2] = r, items__5145[3] = ((slice__u8){(u8*)" = ", 3}), items__5145[4] = value, items__5145[5] = ((slice__u8){(u8*)";", 1}), items__5145), 6})); codegen__line(ctx, v__5144, v__5146); });
     codegen__emit_defers_until(ctx, g, ((isize)0LL));
     value = r;
   }
-  ({ codegen__CodeGen* v__5143 = g; slice__u8 v__5145 = codegen__cat(ctx, ((slice__string){(items__5144[0] = ((slice__u8){(u8*)"return ", 7}), items__5144[1] = value, items__5144[2] = ((slice__u8){(u8*)";", 1}), items__5144), 3})); codegen__line(ctx, v__5143, v__5145); });
+  ({ codegen__CodeGen* v__5147 = g; slice__u8 v__5149 = codegen__cat(ctx, ((slice__string){(items__5148[0] = ((slice__u8){(u8*)"return ", 7}), items__5148[1] = value, items__5148[2] = ((slice__u8){(u8*)";", 1}), items__5148), 3})); codegen__line(ctx, v__5147, v__5149); });
   (rt_nonnull(g, "src/codegen.sabk:1532:7"))->indent--;
   codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
   if ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1535:11"))->ty, "src/codegen.sabk:1535:14"))->is_tuple) {
     slice__u8 fields = ((slice__u8){(u8*)"", 0});
     {
-      isize end__5146 = ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1537:24"))->ty, "src/codegen.sabk:1537:27"))->fields).len;
-      for (isize i = ((isize)0LL); i < end__5146; i++) {
-        fields = codegen__cat(ctx, ((slice__string){(items__5147[0] = fields, items__5147[1] = ((i > ((isize)0LL)) ? ((slice__u8){(u8*)", ", 2}) : ((slice__u8){(u8*)"", 0})), items__5147[2] = v, items__5147[3] = ((slice__u8){(u8*)"._", 2}), items__5147[4] = codegen__num(ctx, ((i64)(i))), items__5147), 5}));
+      isize end__5150 = ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1537:24"))->ty, "src/codegen.sabk:1537:27"))->fields).len;
+      for (isize i = ((isize)0LL); i < end__5150; i++) {
+        fields = codegen__cat(ctx, ((slice__string){(items__5151[0] = fields, items__5151[1] = ((i > ((isize)0LL)) ? ((slice__u8){(u8*)", ", 2}) : ((slice__u8){(u8*)"", 0})), items__5151[2] = v, items__5151[3] = ((slice__u8){(u8*)"._", 2}), items__5151[4] = codegen__num(ctx, ((i64)(i))), items__5151), 5}));
       }
     }
-    ({ codegen__CodeGen* v__5148 = g; slice__u8 v__5150 = codegen__cat(ctx, ((slice__string){(items__5149[0] = codegen__compound(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1539:35"))->ty, fields), items__5149[1] = ((slice__u8){(u8*)";", 1}), items__5149), 2})); codegen__line(ctx, v__5148, v__5150); });
+    ({ codegen__CodeGen* v__5152 = g; slice__u8 v__5154 = codegen__cat(ctx, ((slice__string){(items__5153[0] = codegen__compound(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1539:35"))->ty, fields), items__5153[1] = ((slice__u8){(u8*)";", 1}), items__5153), 2})); codegen__line(ctx, v__5152, v__5154); });
   } else {
     if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1540:18"))->ty, "src/codegen.sabk:1540:21"))->kind != ((types__TypeKind)1LL))) {
-      ({ codegen__CodeGen* v__5151 = g; slice__u8 v__5153 = codegen__cat(ctx, ((slice__string){(items__5152[0] = v, items__5152[1] = ((slice__u8){(u8*)"._0;", 4}), items__5152), 2})); codegen__line(ctx, v__5151, v__5153); });
+      ({ codegen__CodeGen* v__5155 = g; slice__u8 v__5157 = codegen__cat(ctx, ((slice__string){(items__5156[0] = v, items__5156[1] = ((slice__u8){(u8*)"._0;", 4}), items__5156), 2})); codegen__line(ctx, v__5155, v__5157); });
     }
   }
   (rt_nonnull(g, "src/codegen.sabk:1543:7"))->out = saved;
@@ -35474,22 +35583,22 @@ static slice__u8 codegen__gen_or_return(prelude__Context *ctx, codegen__CodeGen*
 }
 
 static slice__u8 codegen__gen_or_else(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5157[6];
-  slice__u8 items__5160[4];
-  slice__u8 items__5163[2];
-  slice__u8 items__5164[2];
-  slice__u8 items__5165[3];
-  slice__u8 items__5168[5];
-  slice__u8 items__5171[2];
-  slice__u8 items__5172[6];
+  slice__u8 items__5161[6];
+  slice__u8 items__5164[4];
+  slice__u8 items__5167[2];
+  slice__u8 items__5168[2];
+  slice__u8 items__5169[3];
+  slice__u8 items__5172[5];
   slice__u8 items__5175[2];
+  slice__u8 items__5176[6];
+  slice__u8 items__5179[2];
   ast__Node* inner = ((ast__Node*)0);
   ast__Node* fallback = ((ast__Node*)0);
   {
     ast__Node* value;
     ast__Node* f;
-    if (({ ast__NodeKind is__5154 = (rt_nonnull(n, "src/codegen.sabk:1552:11"))->kind; is__5154.tag == ((ast__NodeKind__Tag)56LL) ? (value = is__5154.payload.OrElse.value, f = is__5154.payload.OrElse.fallback, 1) : 0; })) {
-      ({ tuple__22 values__5155 = ((tuple__22){._0 = value, ._1 = f}); inner = values__5155._0; fallback = values__5155._1; });
+    if (({ ast__NodeKind is__5158 = (rt_nonnull(n, "src/codegen.sabk:1552:11"))->kind; is__5158.tag == ((ast__NodeKind__Tag)56LL) ? (value = is__5158.payload.OrElse.value, f = is__5158.payload.OrElse.fallback, 1) : 0; })) {
+      ({ tuple__22 values__5159 = ((tuple__22){._0 = value, ._1 = f}); inner = values__5159._0; fallback = values__5159._1; });
     }
   }
   types__Type* t = (rt_nonnull(inner, "src/codegen.sabk:1554:19"))->ty;
@@ -35499,37 +35608,37 @@ static slice__u8 codegen__gen_or_else(prelude__Context *ctx, codegen__CodeGen* g
   (rt_nonnull(g, "src/codegen.sabk:1558:7"))->indent++;
   slice__u8 v = codegen__tmp(ctx, g, ((slice__u8){(u8*)"result", 6}));
   slice__u8 r = codegen__tmp(ctx, g, ((slice__u8){(u8*)"value", 5}));
-  ({ codegen__CodeGen* v__5156 = g; slice__u8 v__5158 = codegen__cat(ctx, ((slice__string){(items__5157[0] = codegen__c_type(ctx, g, t), items__5157[1] = ((slice__u8){(u8*)" ", 1}), items__5157[2] = v, items__5157[3] = ((slice__u8){(u8*)" = ", 3}), items__5157[4] = codegen__expr(ctx, g, inner), items__5157[5] = ((slice__u8){(u8*)";", 1}), items__5157), 6})); codegen__line(ctx, v__5156, v__5158); });
-  ({ codegen__CodeGen* v__5159 = g; slice__u8 v__5161 = codegen__cat(ctx, ((slice__string){(items__5160[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1562:29"))->ty), items__5160[1] = ((slice__u8){(u8*)" ", 1}), items__5160[2] = r, items__5160[3] = ((slice__u8){(u8*)";", 1}), items__5160), 4})); codegen__line(ctx, v__5159, v__5161); });
+  ({ codegen__CodeGen* v__5160 = g; slice__u8 v__5162 = codegen__cat(ctx, ((slice__string){(items__5161[0] = codegen__c_type(ctx, g, t), items__5161[1] = ((slice__u8){(u8*)" ", 1}), items__5161[2] = v, items__5161[3] = ((slice__u8){(u8*)" = ", 3}), items__5161[4] = codegen__expr(ctx, g, inner), items__5161[5] = ((slice__u8){(u8*)";", 1}), items__5161), 6})); codegen__line(ctx, v__5160, v__5162); });
+  ({ codegen__CodeGen* v__5163 = g; slice__u8 v__5165 = codegen__cat(ctx, ((slice__string){(items__5164[0] = codegen__c_type(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1562:29"))->ty), items__5164[1] = ((slice__u8){(u8*)" ", 1}), items__5164[2] = r, items__5164[3] = ((slice__u8){(u8*)";", 1}), items__5164), 4})); codegen__line(ctx, v__5163, v__5165); });
   bool option = expressions__is_option(ctx, (rt_nonnull(g, "src/codegen.sabk:1564:30"))->c, t);
   bool pointer = ((!option) && (!(rt_nonnull(t, "src/codegen.sabk:1565:33"))->is_tuple));
-  ({ codegen__CodeGen* v__5162 = g; slice__u8 v__5166 = codegen__cat(ctx, ((slice__string){(items__5165[0] = ((slice__u8){(u8*)"if (", 4}), items__5165[1] = (option ? codegen__cat(ctx, ((slice__string){(items__5163[0] = v, items__5163[1] = ((slice__u8){(u8*)".tag == 0", 9}), items__5163), 2})) : (pointer ? codegen__cat(ctx, ((slice__string){(items__5164[0] = v, items__5164[1] = ((slice__u8){(u8*)" == 0", 5}), items__5164), 2})) : codegen__failed(ctx, v, t))), items__5165[2] = ((slice__u8){(u8*)")", 1}), items__5165), 3})); codegen__line(ctx, v__5162, v__5166); });
-  ({ codegen__CodeGen* v__5167 = g; slice__u8 v__5169 = codegen__cat(ctx, ((slice__string){(items__5168[0] = ((slice__u8){(u8*)"  ", 2}), items__5168[1] = r, items__5168[2] = ((slice__u8){(u8*)" = ", 3}), items__5168[3] = codegen__expr(ctx, g, fallback), items__5168[4] = ((slice__u8){(u8*)";", 1}), items__5168), 5})); codegen__line(ctx, v__5167, v__5169); });
+  ({ codegen__CodeGen* v__5166 = g; slice__u8 v__5170 = codegen__cat(ctx, ((slice__string){(items__5169[0] = ((slice__u8){(u8*)"if (", 4}), items__5169[1] = (option ? codegen__cat(ctx, ((slice__string){(items__5167[0] = v, items__5167[1] = ((slice__u8){(u8*)".tag == 0", 9}), items__5167), 2})) : (pointer ? codegen__cat(ctx, ((slice__string){(items__5168[0] = v, items__5168[1] = ((slice__u8){(u8*)" == 0", 5}), items__5168), 2})) : codegen__failed(ctx, v, t))), items__5169[2] = ((slice__u8){(u8*)")", 1}), items__5169), 3})); codegen__line(ctx, v__5166, v__5170); });
+  ({ codegen__CodeGen* v__5171 = g; slice__u8 v__5173 = codegen__cat(ctx, ((slice__string){(items__5172[0] = ((slice__u8){(u8*)"  ", 2}), items__5172[1] = r, items__5172[2] = ((slice__u8){(u8*)" = ", 3}), items__5172[3] = codegen__expr(ctx, g, fallback), items__5172[4] = ((slice__u8){(u8*)";", 1}), items__5172), 5})); codegen__line(ctx, v__5171, v__5173); });
   codegen__line(ctx, g, ((slice__u8){(u8*)"else", 4}));
-  ({ codegen__CodeGen* v__5170 = g; slice__u8 v__5173 = codegen__cat(ctx, ((slice__string){(items__5172[0] = ((slice__u8){(u8*)"  ", 2}), items__5172[1] = r, items__5172[2] = ((slice__u8){(u8*)" = ", 3}), items__5172[3] = v, items__5172[4] = (option ? codegen__cat(ctx, ((slice__string){(items__5171[0] = ((slice__u8){(u8*)".payload.", 9}), items__5171[1] = codegen__local_name(ctx, ((slice__u8){(u8*)"Some", 4})), items__5171), 2})) : (pointer ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)"._0", 3}))), items__5172[5] = ((slice__u8){(u8*)";", 1}), items__5172), 6})); codegen__line(ctx, v__5170, v__5173); });
-  ({ codegen__CodeGen* v__5174 = g; slice__u8 v__5176 = codegen__cat(ctx, ((slice__string){(items__5175[0] = r, items__5175[1] = ((slice__u8){(u8*)";", 1}), items__5175), 2})); codegen__line(ctx, v__5174, v__5176); });
+  ({ codegen__CodeGen* v__5174 = g; slice__u8 v__5177 = codegen__cat(ctx, ((slice__string){(items__5176[0] = ((slice__u8){(u8*)"  ", 2}), items__5176[1] = r, items__5176[2] = ((slice__u8){(u8*)" = ", 3}), items__5176[3] = v, items__5176[4] = (option ? codegen__cat(ctx, ((slice__string){(items__5175[0] = ((slice__u8){(u8*)".payload.", 9}), items__5175[1] = codegen__local_name(ctx, ((slice__u8){(u8*)"Some", 4})), items__5175), 2})) : (pointer ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)"._0", 3}))), items__5176[5] = ((slice__u8){(u8*)";", 1}), items__5176), 6})); codegen__line(ctx, v__5174, v__5177); });
+  ({ codegen__CodeGen* v__5178 = g; slice__u8 v__5180 = codegen__cat(ctx, ((slice__string){(items__5179[0] = r, items__5179[1] = ((slice__u8){(u8*)";", 1}), items__5179), 2})); codegen__line(ctx, v__5178, v__5180); });
   (rt_nonnull(g, "src/codegen.sabk:1571:7"))->out = saved;
   (rt_nonnull(g, "src/codegen.sabk:1572:7"))->indent = saved_indent;
   return codegen__statement_expression(ctx, g, grow__u8__view((*rt_nonnull(body, "src/codegen.sabk:1573:41"))), saved_indent);
 }
 
 static slice__u8 codegen__array_literal(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5179[3];
-  slice__u8 items__5182[6];
-  prelude__Any items__5185[3];
-  slice__u8 items__5188[7];
-  slice__u8 items__5191[5];
-  slice__u8 items__5195[3];
+  slice__u8 items__5183[3];
+  slice__u8 items__5186[6];
+  prelude__Any items__5189[3];
+  slice__u8 items__5192[7];
+  slice__u8 items__5195[5];
+  slice__u8 items__5199[3];
   slice__ptr_ast__Node items_nodes = check__items_of(ctx, n);
   grow__string each = {0};
   slice__u8 items = ((slice__u8){(u8*)"", 0});
   {
-    slice__ptr_ast__Node seq__5177 = items_nodes;
-    for (isize i__5178 = 0; i__5178 < seq__5177.len; i__5178++) {
-      ast__Node* item = seq__5177.ptr[i__5178];
+    slice__ptr_ast__Node seq__5181 = items_nodes;
+    for (isize i__5182 = 0; i__5182 < seq__5181.len; i__5182++) {
+      ast__Node* item = seq__5181.ptr[i__5182];
       slice__u8 c = codegen__expr(ctx, g, item);
       array__array_add__string(ctx, (&each), c);
-      items = codegen__cat(ctx, ((slice__string){(items__5179[0] = items, items__5179[1] = (((items).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5179[2] = c, items__5179), 3}));
+      items = codegen__cat(ctx, ((slice__string){(items__5183[0] = items, items__5183[1] = (((items).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5183[2] = c, items__5183), 3}));
     }
   }
   if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1585:11"))->ty, "src/codegen.sabk:1585:14"))->kind == ((types__TypeKind)8LL))) {
@@ -35538,41 +35647,41 @@ static slice__u8 codegen__array_literal(prelude__Context *ctx, codegen__CodeGen*
     }
     slice__u8 count = codegen__num(ctx, ((i64)((items_nodes).len)));
     if (((rt_nonnull(g, "src/codegen.sabk:1590:15"))->static_init || ((rt_nonnull(g, "src/codegen.sabk:1590:32"))->current_fn == ((ast__Node*)0)))) {
-      return ({ codegen__CodeGen* v__5180 = g; types__Type* v__5181 = (rt_nonnull(n, "src/codegen.sabk:1591:34"))->ty; slice__u8 v__5183 = codegen__cat(ctx, ((slice__string){(items__5182[0] = ((slice__u8){(u8*)"(", 1}), items__5182[1] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1591:59"))->ty, "src/codegen.sabk:1591:62"))->elem), items__5182[2] = ((slice__u8){(u8*)"[]){", 4}), items__5182[3] = items, items__5182[4] = ((slice__u8){(u8*)"}, ", 3}), items__5182[5] = count, items__5182), 6})); codegen__compound(ctx, v__5180, v__5181, v__5183); });
+      return ({ codegen__CodeGen* v__5184 = g; types__Type* v__5185 = (rt_nonnull(n, "src/codegen.sabk:1591:34"))->ty; slice__u8 v__5187 = codegen__cat(ctx, ((slice__string){(items__5186[0] = ((slice__u8){(u8*)"(", 1}), items__5186[1] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1591:59"))->ty, "src/codegen.sabk:1591:62"))->elem), items__5186[2] = ((slice__u8){(u8*)"[]){", 4}), items__5186[3] = items, items__5186[4] = ((slice__u8){(u8*)"}, ", 3}), items__5186[5] = count, items__5186), 6})); codegen__compound(ctx, v__5184, v__5185, v__5187); });
     }
     slice__u8 name = codegen__tmp(ctx, g, ((slice__u8){(u8*)"items", 5}));
-    ({ grow__u8* v__5184 = (&(rt_nonnull(g, "src/codegen.sabk:1595:21"))->fn_storage); slice__prelude__Any v__5186 = ((slice__prelude__Any){(items__5185[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1595:60"))->ty, "src/codegen.sabk:1595:63"))->elem)}, .info = (&ti__1)}), items__5185[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5185[2] = ((prelude__Any){.value = (slice__u8[1]){count}, .info = (&ti__1)}), items__5185), 3}); fmt__print_to(ctx, v__5184, ((slice__u8){(u8*)"  % %[%];\012", 10}), v__5186); });
+    ({ grow__u8* v__5188 = (&(rt_nonnull(g, "src/codegen.sabk:1595:21"))->fn_storage); slice__prelude__Any v__5190 = ((slice__prelude__Any){(items__5189[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1595:60"))->ty, "src/codegen.sabk:1595:63"))->elem)}, .info = (&ti__1)}), items__5189[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5189[2] = ((prelude__Any){.value = (slice__u8[1]){count}, .info = (&ti__1)}), items__5189), 3}); fmt__print_to(ctx, v__5188, ((slice__u8){(u8*)"  % %[%];\012", 10}), v__5190); });
     slice__u8 fill = ((slice__u8){(u8*)"", 0});
     {
-      isize end__5187 = (items_nodes).len;
-      for (isize i = ((isize)0LL); i < end__5187; i++) {
-        fill = codegen__cat(ctx, ((slice__string){(items__5188[0] = fill, items__5188[1] = name, items__5188[2] = ((slice__u8){(u8*)"[", 1}), items__5188[3] = codegen__num(ctx, ((i64)(i))), items__5188[4] = ((slice__u8){(u8*)"] = ", 4}), items__5188[5] = (*slice__string__at(grow__string__view(each), i, "src/codegen.sabk:1598:61")), items__5188[6] = ((slice__u8){(u8*)", ", 2}), items__5188), 7}));
+      isize end__5191 = (items_nodes).len;
+      for (isize i = ((isize)0LL); i < end__5191; i++) {
+        fill = codegen__cat(ctx, ((slice__string){(items__5192[0] = fill, items__5192[1] = name, items__5192[2] = ((slice__u8){(u8*)"[", 1}), items__5192[3] = codegen__num(ctx, ((i64)(i))), items__5192[4] = ((slice__u8){(u8*)"] = ", 4}), items__5192[5] = (*slice__string__at(grow__string__view(each), i, "src/codegen.sabk:1598:61")), items__5192[6] = ((slice__u8){(u8*)", ", 2}), items__5192), 7}));
       }
     }
-    return ({ codegen__CodeGen* v__5189 = g; types__Type* v__5190 = (rt_nonnull(n, "src/codegen.sabk:1599:30"))->ty; slice__u8 v__5192 = codegen__cat(ctx, ((slice__string){(items__5191[0] = ((slice__u8){(u8*)"(", 1}), items__5191[1] = fill, items__5191[2] = name, items__5191[3] = ((slice__u8){(u8*)"), ", 3}), items__5191[4] = count, items__5191), 5})); codegen__compound(ctx, v__5189, v__5190, v__5192); });
+    return ({ codegen__CodeGen* v__5193 = g; types__Type* v__5194 = (rt_nonnull(n, "src/codegen.sabk:1599:30"))->ty; slice__u8 v__5196 = codegen__cat(ctx, ((slice__string){(items__5195[0] = ((slice__u8){(u8*)"(", 1}), items__5195[1] = fill, items__5195[2] = name, items__5195[3] = ((slice__u8){(u8*)"), ", 3}), items__5195[4] = count, items__5195), 5})); codegen__compound(ctx, v__5193, v__5194, v__5196); });
   }
-  return ({ codegen__CodeGen* v__5193 = g; types__Type* v__5194 = (rt_nonnull(n, "src/codegen.sabk:1601:26"))->ty; slice__u8 v__5196 = codegen__cat(ctx, ((slice__string){(items__5195[0] = ((slice__u8){(u8*)"{", 1}), items__5195[1] = (((items).len == ((isize)0LL)) ? ((slice__u8){(u8*)"0", 1}) : items), items__5195[2] = ((slice__u8){(u8*)"}", 1}), items__5195), 3})); codegen__compound(ctx, v__5193, v__5194, v__5196); });
+  return ({ codegen__CodeGen* v__5197 = g; types__Type* v__5198 = (rt_nonnull(n, "src/codegen.sabk:1601:26"))->ty; slice__u8 v__5200 = codegen__cat(ctx, ((slice__string){(items__5199[0] = ((slice__u8){(u8*)"{", 1}), items__5199[1] = (((items).len == ((isize)0LL)) ? ((slice__u8){(u8*)"0", 1}) : items), items__5199[2] = ((slice__u8){(u8*)"}", 1}), items__5199), 3})); codegen__compound(ctx, v__5197, v__5198, v__5200); });
 }
 
 static slice__u8 codegen__sequence(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
   if (((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1606:11"))->ty, "src/codegen.sabk:1606:14"))->kind == ((types__TypeKind)9LL))) {
-    return ({ codegen__CodeGen* v__5197 = g; slice__u8 v__5198 = codegen__expr(ctx, g, n); types__Type* v__5199 = (rt_nonnull(n, "src/codegen.sabk:1607:41"))->ty; types__Type* v__5202 = ({ types__Types* v__5200 = codegen__ts(ctx, g); types__Type* v__5201 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1607:63"))->ty, "src/codegen.sabk:1607:66"))->elem; types__slice_of(ctx, v__5200, v__5201); }); codegen__convert(ctx, v__5197, v__5198, v__5199, v__5202); });
+    return ({ codegen__CodeGen* v__5201 = g; slice__u8 v__5202 = codegen__expr(ctx, g, n); types__Type* v__5203 = (rt_nonnull(n, "src/codegen.sabk:1607:41"))->ty; types__Type* v__5206 = ({ types__Types* v__5204 = codegen__ts(ctx, g); types__Type* v__5205 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1607:63"))->ty, "src/codegen.sabk:1607:66"))->elem; types__slice_of(ctx, v__5204, v__5205); }); codegen__convert(ctx, v__5201, v__5202, v__5203, v__5206); });
   }
   return codegen__expr(ctx, g, n);
 }
 
 static slice__u8 codegen__nonnull(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 pointer, token__Token at) {
-  slice__u8 items__5203[5];
+  slice__u8 items__5207[5];
   if (((rt_nonnull(g, "src/codegen.sabk:1613:11"))->static_init || (!codegen__checks_bounds(ctx, g)))) {
     return pointer;
   }
-  return codegen__cat(ctx, ((slice__string){(items__5203[0] = ((slice__u8){(u8*)"rt_nonnull(", 11}), items__5203[1] = pointer, items__5203[2] = ((slice__u8){(u8*)", ", 2}), items__5203[3] = codegen__location(ctx, g, at), items__5203[4] = ((slice__u8){(u8*)")", 1}), items__5203), 5}));
+  return codegen__cat(ctx, ((slice__string){(items__5207[0] = ((slice__u8){(u8*)"rt_nonnull(", 11}), items__5207[1] = pointer, items__5207[2] = ((slice__u8){(u8*)", ", 2}), items__5207[3] = codegen__location(ctx, g, at), items__5207[4] = ((slice__u8){(u8*)")", 1}), items__5207), 5}));
 }
 
 static bool codegen__checks_bounds(prelude__Context *ctx, codegen__CodeGen* g) {
   {
-    vm__BoundsChecks switch__5204 = ((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1621:15"))->c, "src/codegen.sabk:1621:17"))->build).bounds_checks;
-    switch (switch__5204) {
+    vm__BoundsChecks switch__5208 = ((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1621:15"))->c, "src/codegen.sabk:1621:17"))->build).bounds_checks;
+    switch (switch__5208) {
     case ((vm__BoundsChecks)1LL):
     {
       return false;
@@ -35585,7 +35694,7 @@ static bool codegen__checks_bounds(prelude__Context *ctx, codegen__CodeGen* g) {
     break;
     default:
     {
-      return (((rt_nonnull(g, "src/codegen.sabk:1624:23"))->current_fn == ((ast__Node*)0)) || (!(({ ast__NodeKind is__5205 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1624:49"))->current_fn, "src/codegen.sabk:1624:60"))->kind; (is__5205.tag == ((ast__NodeKind__Tag)2LL) && (is__5205.payload.Fn.no_bounds_check == true)) ? (1) : 0; }))));
+      return (((rt_nonnull(g, "src/codegen.sabk:1624:23"))->current_fn == ((ast__Node*)0)) || (!(({ ast__NodeKind is__5209 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1624:49"))->current_fn, "src/codegen.sabk:1624:60"))->kind; (is__5209.tag == ((ast__NodeKind__Tag)2LL) && (is__5209.payload.Fn.no_bounds_check == true)) ? (1) : 0; }))));
     }
     break;
     }
@@ -35593,70 +35702,70 @@ static bool codegen__checks_bounds(prelude__Context *ctx, codegen__CodeGen* g) {
 }
 
 static slice__u8 codegen__index(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5212[8];
-  slice__u8 items__5213[5];
-  slice__u8 items__5214[5];
-  slice__u8 items__5215[15];
-  slice__u8 items__5216[5];
-  slice__u8 items__5217[9];
-  slice__u8 items__5218[7];
-  slice__u8 items__5219[5];
+  slice__u8 items__5216[8];
+  slice__u8 items__5217[5];
+  slice__u8 items__5218[5];
+  slice__u8 items__5219[15];
+  slice__u8 items__5220[5];
+  slice__u8 items__5221[9];
+  slice__u8 items__5222[7];
   slice__u8 items__5223[5];
+  slice__u8 items__5227[5];
   ast__Node* object = ((ast__Node*)0);
   ast__Node* index_node = ((ast__Node*)0);
   {
     ast__Node* o;
     ast__Node* i;
-    if (({ ast__NodeKind is__5206 = (rt_nonnull(n, "src/codegen.sabk:1631:11"))->kind; is__5206.tag == ((ast__NodeKind__Tag)48LL) ? (o = is__5206.payload.Index.object, i = is__5206.payload.Index.index, 1) : 0; })) {
-      ({ tuple__22 values__5207 = ((tuple__22){._0 = o, ._1 = i}); object = values__5207._0; index_node = values__5207._1; });
+    if (({ ast__NodeKind is__5210 = (rt_nonnull(n, "src/codegen.sabk:1631:11"))->kind; is__5210.tag == ((ast__NodeKind__Tag)48LL) ? (o = is__5210.payload.Index.object, i = is__5210.payload.Index.index, 1) : 0; })) {
+      ({ tuple__22 values__5211 = ((tuple__22){._0 = o, ._1 = i}); object = values__5211._0; index_node = values__5211._1; });
     }
   }
   types__Type* t = (rt_nonnull(object, "src/codegen.sabk:1633:20"))->ty;
   if (((rt_nonnull(t, "src/codegen.sabk:1634:11"))->kind == ((types__TypeKind)9LL))) {
-    t = ({ types__Types* v__5208 = codegen__ts(ctx, g); types__Type* v__5209 = (rt_nonnull(t, "src/codegen.sabk:1635:31"))->elem; types__slice_of(ctx, v__5208, v__5209); });
+    t = ({ types__Types* v__5212 = codegen__ts(ctx, g); types__Type* v__5213 = (rt_nonnull(t, "src/codegen.sabk:1635:31"))->elem; types__slice_of(ctx, v__5212, v__5213); });
   }
   bool checked = codegen__checks_bounds(ctx, g);
   if (((((!(rt_nonnull(g, "src/codegen.sabk:1637:12"))->static_init) && lower__has_call(ctx, object)) && lower__has_call(ctx, index_node)) && ((rt_nonnull(t, "src/codegen.sabk:1637:73"))->kind != ((types__TypeKind)7LL)))) {
     slice__u8 base = codegen__tmp(ctx, g, ((slice__u8){(u8*)"base", 4}));
     slice__u8 at = codegen__tmp(ctx, g, ((slice__u8){(u8*)"at", 2}));
-    slice__u8 index_type = ({ codegen__CodeGen* v__5210 = g; types__Type* v__5211 = codegen__conv_or_ty(ctx, index_node); codegen__c_type(ctx, v__5210, v__5211); });
+    slice__u8 index_type = ({ codegen__CodeGen* v__5214 = g; types__Type* v__5215 = codegen__conv_or_ty(ctx, index_node); codegen__c_type(ctx, v__5214, v__5215); });
     slice__u8 place = ((slice__u8){(u8*)"", 0});
     if ((((rt_nonnull(t, "src/codegen.sabk:1644:15"))->kind == ((types__TypeKind)8LL)) && checked)) {
-      place = codegen__cat(ctx, ((slice__string){(items__5212[0] = codegen__c_type(ctx, g, t), items__5212[1] = ((slice__u8){(u8*)"__at(", 5}), items__5212[2] = base, items__5212[3] = ((slice__u8){(u8*)", ", 2}), items__5212[4] = at, items__5212[5] = ((slice__u8){(u8*)", ", 2}), items__5212[6] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1645:84"))->tok), items__5212[7] = ((slice__u8){(u8*)")", 1}), items__5212), 8}));
+      place = codegen__cat(ctx, ((slice__string){(items__5216[0] = codegen__c_type(ctx, g, t), items__5216[1] = ((slice__u8){(u8*)"__at(", 5}), items__5216[2] = base, items__5216[3] = ((slice__u8){(u8*)", ", 2}), items__5216[4] = at, items__5216[5] = ((slice__u8){(u8*)", ", 2}), items__5216[6] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1645:84"))->tok), items__5216[7] = ((slice__u8){(u8*)")", 1}), items__5216), 8}));
     } else {
       if (((rt_nonnull(t, "src/codegen.sabk:1646:20"))->kind == ((types__TypeKind)8LL))) {
-        place = codegen__cat(ctx, ((slice__string){(items__5213[0] = ((slice__u8){(u8*)"&", 1}), items__5213[1] = base, items__5213[2] = ((slice__u8){(u8*)".ptr[", 5}), items__5213[3] = at, items__5213[4] = ((slice__u8){(u8*)"]", 1}), items__5213), 5}));
+        place = codegen__cat(ctx, ((slice__string){(items__5217[0] = ((slice__u8){(u8*)"&", 1}), items__5217[1] = base, items__5217[2] = ((slice__u8){(u8*)".ptr[", 5}), items__5217[3] = at, items__5217[4] = ((slice__u8){(u8*)"]", 1}), items__5217), 5}));
       } else {
-        place = codegen__cat(ctx, ((slice__string){(items__5214[0] = ((slice__u8){(u8*)"&", 1}), items__5214[1] = base, items__5214[2] = ((slice__u8){(u8*)"[", 1}), items__5214[3] = at, items__5214[4] = ((slice__u8){(u8*)"]", 1}), items__5214), 5}));
+        place = codegen__cat(ctx, ((slice__string){(items__5218[0] = ((slice__u8){(u8*)"&", 1}), items__5218[1] = base, items__5218[2] = ((slice__u8){(u8*)"[", 1}), items__5218[3] = at, items__5218[4] = ((slice__u8){(u8*)"]", 1}), items__5218), 5}));
       }
     }
-    return codegen__cat(ctx, ((slice__string){(items__5215[0] = ((slice__u8){(u8*)"(*({ ", 5}), items__5215[1] = codegen__c_type(ctx, g, t), items__5215[2] = ((slice__u8){(u8*)" ", 1}), items__5215[3] = base, items__5215[4] = ((slice__u8){(u8*)" = ", 3}), items__5215[5] = codegen__sequence(ctx, g, object), items__5215[6] = ((slice__u8){(u8*)"; ", 2}), items__5215[7] = index_type, items__5215[8] = ((slice__u8){(u8*)" ", 1}), items__5215[9] = at, items__5215[10] = ((slice__u8){(u8*)" = ", 3}), items__5215[11] = codegen__expr(ctx, g, index_node), items__5215[12] = ((slice__u8){(u8*)"; ", 2}), items__5215[13] = place, items__5215[14] = ((slice__u8){(u8*)"; }))", 5}), items__5215), 15}));
+    return codegen__cat(ctx, ((slice__string){(items__5219[0] = ((slice__u8){(u8*)"(*({ ", 5}), items__5219[1] = codegen__c_type(ctx, g, t), items__5219[2] = ((slice__u8){(u8*)" ", 1}), items__5219[3] = base, items__5219[4] = ((slice__u8){(u8*)" = ", 3}), items__5219[5] = codegen__sequence(ctx, g, object), items__5219[6] = ((slice__u8){(u8*)"; ", 2}), items__5219[7] = index_type, items__5219[8] = ((slice__u8){(u8*)" ", 1}), items__5219[9] = at, items__5219[10] = ((slice__u8){(u8*)" = ", 3}), items__5219[11] = codegen__expr(ctx, g, index_node), items__5219[12] = ((slice__u8){(u8*)"; ", 2}), items__5219[13] = place, items__5219[14] = ((slice__u8){(u8*)"; }))", 5}), items__5219), 15}));
   }
   slice__u8 i = codegen__expr(ctx, g, index_node);
   bool known = (((rt_nonnull(index_node, "src/codegen.sabk:1654:28"))->cval).kind == ((const__ConstKind)1LL));
   if ((((rt_nonnull(t, "src/codegen.sabk:1656:11"))->kind == ((types__TypeKind)8LL)) && (!checked))) {
-    return codegen__cat(ctx, ((slice__string){(items__5216[0] = ((slice__u8){(u8*)"(", 1}), items__5216[1] = codegen__sequence(ctx, g, object), items__5216[2] = ((slice__u8){(u8*)").ptr[", 6}), items__5216[3] = i, items__5216[4] = ((slice__u8){(u8*)"]", 1}), items__5216), 5}));
+    return codegen__cat(ctx, ((slice__string){(items__5220[0] = ((slice__u8){(u8*)"(", 1}), items__5220[1] = codegen__sequence(ctx, g, object), items__5220[2] = ((slice__u8){(u8*)").ptr[", 6}), items__5220[3] = i, items__5220[4] = ((slice__u8){(u8*)"]", 1}), items__5220), 5}));
   }
   if (((rt_nonnull(t, "src/codegen.sabk:1658:11"))->kind == ((types__TypeKind)8LL))) {
-    return codegen__cat(ctx, ((slice__string){(items__5217[0] = ((slice__u8){(u8*)"(*", 2}), items__5217[1] = codegen__c_type(ctx, g, t), items__5217[2] = ((slice__u8){(u8*)"__at(", 5}), items__5217[3] = codegen__sequence(ctx, g, object), items__5217[4] = ((slice__u8){(u8*)", ", 2}), items__5217[5] = i, items__5217[6] = ((slice__u8){(u8*)", ", 2}), items__5217[7] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1659:99"))->tok), items__5217[8] = ((slice__u8){(u8*)"))", 2}), items__5217), 9}));
+    return codegen__cat(ctx, ((slice__string){(items__5221[0] = ((slice__u8){(u8*)"(*", 2}), items__5221[1] = codegen__c_type(ctx, g, t), items__5221[2] = ((slice__u8){(u8*)"__at(", 5}), items__5221[3] = codegen__sequence(ctx, g, object), items__5221[4] = ((slice__u8){(u8*)", ", 2}), items__5221[5] = i, items__5221[6] = ((slice__u8){(u8*)", ", 2}), items__5221[7] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1659:99"))->tok), items__5221[8] = ((slice__u8){(u8*)"))", 2}), items__5221), 9}));
   }
   if (((rt_nonnull(t, "src/codegen.sabk:1660:11"))->kind == ((types__TypeKind)7LL))) {
     if (((!known) && checked)) {
-      i = codegen__cat(ctx, ((slice__string){(items__5218[0] = ((slice__u8){(u8*)"rt_index(", 9}), items__5218[1] = i, items__5218[2] = ((slice__u8){(u8*)", ", 2}), items__5218[3] = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:1662:50"))->len), items__5218[4] = ((slice__u8){(u8*)", ", 2}), items__5218[5] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1662:76"))->tok), items__5218[6] = ((slice__u8){(u8*)")", 1}), items__5218), 7}));
+      i = codegen__cat(ctx, ((slice__string){(items__5222[0] = ((slice__u8){(u8*)"rt_index(", 9}), items__5222[1] = i, items__5222[2] = ((slice__u8){(u8*)", ", 2}), items__5222[3] = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:1662:50"))->len), items__5222[4] = ((slice__u8){(u8*)", ", 2}), items__5222[5] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:1662:76"))->tok), items__5222[6] = ((slice__u8){(u8*)")", 1}), items__5222), 7}));
     }
-    return codegen__cat(ctx, ((slice__string){(items__5219[0] = ((slice__u8){(u8*)"(", 1}), items__5219[1] = codegen__expr(ctx, g, object), items__5219[2] = ((slice__u8){(u8*)").data[", 7}), items__5219[3] = i, items__5219[4] = ((slice__u8){(u8*)"]", 1}), items__5219), 5}));
+    return codegen__cat(ctx, ((slice__string){(items__5223[0] = ((slice__u8){(u8*)"(", 1}), items__5223[1] = codegen__expr(ctx, g, object), items__5223[2] = ((slice__u8){(u8*)").data[", 7}), items__5223[3] = i, items__5223[4] = ((slice__u8){(u8*)"]", 1}), items__5223), 5}));
   }
-  return codegen__cat(ctx, ((slice__string){(items__5223[0] = ((slice__u8){(u8*)"(", 1}), items__5223[1] = ({ codegen__CodeGen* v__5220 = g; slice__u8 v__5221 = codegen__expr(ctx, g, object); token__Token v__5222 = (rt_nonnull(n, "src/codegen.sabk:1665:51"))->tok; codegen__nonnull(ctx, v__5220, v__5221, v__5222); }), items__5223[2] = ((slice__u8){(u8*)")[", 2}), items__5223[3] = i, items__5223[4] = ((slice__u8){(u8*)"]", 1}), items__5223), 5}));
+  return codegen__cat(ctx, ((slice__string){(items__5227[0] = ((slice__u8){(u8*)"(", 1}), items__5227[1] = ({ codegen__CodeGen* v__5224 = g; slice__u8 v__5225 = codegen__expr(ctx, g, object); token__Token v__5226 = (rt_nonnull(n, "src/codegen.sabk:1665:51"))->tok; codegen__nonnull(ctx, v__5224, v__5225, v__5226); }), items__5227[2] = ((slice__u8){(u8*)")[", 2}), items__5227[3] = i, items__5227[4] = ((slice__u8){(u8*)"]", 1}), items__5227), 5}));
 }
 
 static slice__u8 codegen__slice(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5226[2];
-  slice__u8 items__5231[15];
-  slice__u8 items__5232[8];
-  slice__u8 items__5233[10];
-  slice__u8 items__5234[3];
-  slice__u8 items__5235[8];
-  slice__u8 items__5236[12];
+  slice__u8 items__5230[2];
+  slice__u8 items__5235[15];
+  slice__u8 items__5236[8];
+  slice__u8 items__5237[10];
+  slice__u8 items__5238[3];
+  slice__u8 items__5239[8];
+  slice__u8 items__5240[12];
   ast__Node* object = ((ast__Node*)0);
   ast__Node* lo_node = ((ast__Node*)0);
   ast__Node* hi_node = ((ast__Node*)0);
@@ -35664,8 +35773,8 @@ static slice__u8 codegen__slice(prelude__Context *ctx, codegen__CodeGen* g, ast_
     ast__Node* o;
     ast__Node* a;
     ast__Node* b;
-    if (({ ast__NodeKind is__5224 = (rt_nonnull(n, "src/codegen.sabk:1673:11"))->kind; is__5224.tag == ((ast__NodeKind__Tag)49LL) ? (o = is__5224.payload.Slice.object, a = is__5224.payload.Slice.lo, b = is__5224.payload.Slice.hi, 1) : 0; })) {
-      ({ tuple__45 values__5225 = ((tuple__45){._0 = o, ._1 = a, ._2 = b}); object = values__5225._0; lo_node = values__5225._1; hi_node = values__5225._2; });
+    if (({ ast__NodeKind is__5228 = (rt_nonnull(n, "src/codegen.sabk:1673:11"))->kind; is__5228.tag == ((ast__NodeKind__Tag)49LL) ? (o = is__5228.payload.Slice.object, a = is__5228.payload.Slice.lo, b = is__5228.payload.Slice.hi, 1) : 0; })) {
+      ({ tuple__45 values__5229 = ((tuple__45){._0 = o, ._1 = a, ._2 = b}); object = values__5229._0; lo_node = values__5229._1; hi_node = values__5229._2; });
     }
   }
   types__Type* t = (rt_nonnull(object, "src/codegen.sabk:1675:20"))->ty;
@@ -35675,19 +35784,19 @@ static slice__u8 codegen__slice(prelude__Context *ctx, codegen__CodeGen* g, ast_
   bool checked = codegen__checks_bounds(ctx, g);
   if ((((((rt_nonnull(t, "src/codegen.sabk:1680:12"))->kind == ((types__TypeKind)8LL)) || ((rt_nonnull(t, "src/codegen.sabk:1680:32"))->kind == ((types__TypeKind)9LL)))) && (!checked))) {
     slice__u8 s = codegen__tmp(ctx, g, ((slice__u8){(u8*)"seq", 3}));
-    slice__u8 hi = ((hi_node != ((ast__Node*)0)) ? codegen__expr(ctx, g, hi_node) : codegen__cat(ctx, ((slice__string){(items__5226[0] = s, items__5226[1] = ((slice__u8){(u8*)".len", 4}), items__5226), 2})));
-    return codegen__cat(ctx, ((slice__string){(items__5231[0] = ((slice__u8){(u8*)"({ ", 3}), items__5231[1] = ({ codegen__CodeGen* v__5227 = g; types__Type* v__5230 = ({ types__Types* v__5228 = codegen__ts(ctx, g); types__Type* v__5229 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1684:55"))->ty, "src/codegen.sabk:1684:58"))->elem; types__slice_of(ctx, v__5228, v__5229); }); codegen__c_type(ctx, v__5227, v__5230); }), items__5231[2] = ((slice__u8){(u8*)" ", 1}), items__5231[3] = s, items__5231[4] = ((slice__u8){(u8*)" = ", 3}), items__5231[5] = codegen__sequence(ctx, g, object), items__5231[6] = ((slice__u8){(u8*)"; ", 2}), items__5231[7] = name, items__5231[8] = ((slice__u8){(u8*)"__part(", 7}), items__5231[9] = s, items__5231[10] = ((slice__u8){(u8*)".ptr, ", 6}), items__5231[11] = lo, items__5231[12] = ((slice__u8){(u8*)", ", 2}), items__5231[13] = hi, items__5231[14] = ((slice__u8){(u8*)"); })", 5}), items__5231), 15}));
+    slice__u8 hi = ((hi_node != ((ast__Node*)0)) ? codegen__expr(ctx, g, hi_node) : codegen__cat(ctx, ((slice__string){(items__5230[0] = s, items__5230[1] = ((slice__u8){(u8*)".len", 4}), items__5230), 2})));
+    return codegen__cat(ctx, ((slice__string){(items__5235[0] = ((slice__u8){(u8*)"({ ", 3}), items__5235[1] = ({ codegen__CodeGen* v__5231 = g; types__Type* v__5234 = ({ types__Types* v__5232 = codegen__ts(ctx, g); types__Type* v__5233 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:1684:55"))->ty, "src/codegen.sabk:1684:58"))->elem; types__slice_of(ctx, v__5232, v__5233); }); codegen__c_type(ctx, v__5231, v__5234); }), items__5235[2] = ((slice__u8){(u8*)" ", 1}), items__5235[3] = s, items__5235[4] = ((slice__u8){(u8*)" = ", 3}), items__5235[5] = codegen__sequence(ctx, g, object), items__5235[6] = ((slice__u8){(u8*)"; ", 2}), items__5235[7] = name, items__5235[8] = ((slice__u8){(u8*)"__part(", 7}), items__5235[9] = s, items__5235[10] = ((slice__u8){(u8*)".ptr, ", 6}), items__5235[11] = lo, items__5235[12] = ((slice__u8){(u8*)", ", 2}), items__5235[13] = hi, items__5235[14] = ((slice__u8){(u8*)"); })", 5}), items__5235), 15}));
   }
   if ((((rt_nonnull(t, "src/codegen.sabk:1687:11"))->kind == ((types__TypeKind)8LL)) || ((rt_nonnull(t, "src/codegen.sabk:1687:31"))->kind == ((types__TypeKind)9LL)))) {
     if ((hi_node == ((ast__Node*)0))) {
-      return codegen__cat(ctx, ((slice__string){(items__5232[0] = name, items__5232[1] = ((slice__u8){(u8*)"__from(", 7}), items__5232[2] = codegen__sequence(ctx, g, object), items__5232[3] = ((slice__u8){(u8*)", ", 2}), items__5232[4] = lo, items__5232[5] = ((slice__u8){(u8*)", ", 2}), items__5232[6] = where, items__5232[7] = ((slice__u8){(u8*)")", 1}), items__5232), 8}));
+      return codegen__cat(ctx, ((slice__string){(items__5236[0] = name, items__5236[1] = ((slice__u8){(u8*)"__from(", 7}), items__5236[2] = codegen__sequence(ctx, g, object), items__5236[3] = ((slice__u8){(u8*)", ", 2}), items__5236[4] = lo, items__5236[5] = ((slice__u8){(u8*)", ", 2}), items__5236[6] = where, items__5236[7] = ((slice__u8){(u8*)")", 1}), items__5236), 8}));
     }
-    return codegen__cat(ctx, ((slice__string){(items__5233[0] = name, items__5233[1] = ((slice__u8){(u8*)"__slice(", 8}), items__5233[2] = codegen__sequence(ctx, g, object), items__5233[3] = ((slice__u8){(u8*)", ", 2}), items__5233[4] = lo, items__5233[5] = ((slice__u8){(u8*)", ", 2}), items__5233[6] = codegen__expr(ctx, g, hi_node), items__5233[7] = ((slice__u8){(u8*)", ", 2}), items__5233[8] = where, items__5233[9] = ((slice__u8){(u8*)")", 1}), items__5233), 10}));
+    return codegen__cat(ctx, ((slice__string){(items__5237[0] = name, items__5237[1] = ((slice__u8){(u8*)"__slice(", 8}), items__5237[2] = codegen__sequence(ctx, g, object), items__5237[3] = ((slice__u8){(u8*)", ", 2}), items__5237[4] = lo, items__5237[5] = ((slice__u8){(u8*)", ", 2}), items__5237[6] = codegen__expr(ctx, g, hi_node), items__5237[7] = ((slice__u8){(u8*)", ", 2}), items__5237[8] = where, items__5237[9] = ((slice__u8){(u8*)")", 1}), items__5237), 10}));
   }
   slice__u8 ptr = ((slice__u8){(u8*)"", 0});
   slice__u8 len = ((slice__u8){(u8*)"", 0});
   if (((rt_nonnull(t, "src/codegen.sabk:1694:11"))->kind == ((types__TypeKind)7LL))) {
-    ptr = codegen__cat(ctx, ((slice__string){(items__5234[0] = ((slice__u8){(u8*)"(", 1}), items__5234[1] = codegen__expr(ctx, g, object), items__5234[2] = ((slice__u8){(u8*)").data", 6}), items__5234), 3}));
+    ptr = codegen__cat(ctx, ((slice__string){(items__5238[0] = ((slice__u8){(u8*)"(", 1}), items__5238[1] = codegen__expr(ctx, g, object), items__5238[2] = ((slice__u8){(u8*)").data", 6}), items__5238), 3}));
     len = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:1696:22"))->len);
   } else {
     ptr = codegen__expr(ctx, g, object);
@@ -35695,39 +35804,39 @@ static slice__u8 codegen__slice(prelude__Context *ctx, codegen__CodeGen* g, ast_
   }
   slice__u8 hi = ((hi_node != ((ast__Node*)0)) ? codegen__expr(ctx, g, hi_node) : len);
   if ((!checked)) {
-    return codegen__cat(ctx, ((slice__string){(items__5235[0] = name, items__5235[1] = ((slice__u8){(u8*)"__part(", 7}), items__5235[2] = ptr, items__5235[3] = ((slice__u8){(u8*)", ", 2}), items__5235[4] = lo, items__5235[5] = ((slice__u8){(u8*)", ", 2}), items__5235[6] = hi, items__5235[7] = ((slice__u8){(u8*)")", 1}), items__5235), 8}));
+    return codegen__cat(ctx, ((slice__string){(items__5239[0] = name, items__5239[1] = ((slice__u8){(u8*)"__part(", 7}), items__5239[2] = ptr, items__5239[3] = ((slice__u8){(u8*)", ", 2}), items__5239[4] = lo, items__5239[5] = ((slice__u8){(u8*)", ", 2}), items__5239[6] = hi, items__5239[7] = ((slice__u8){(u8*)")", 1}), items__5239), 8}));
   }
-  return codegen__cat(ctx, ((slice__string){(items__5236[0] = name, items__5236[1] = ((slice__u8){(u8*)"__sub(", 6}), items__5236[2] = ptr, items__5236[3] = ((slice__u8){(u8*)", ", 2}), items__5236[4] = len, items__5236[5] = ((slice__u8){(u8*)", ", 2}), items__5236[6] = lo, items__5236[7] = ((slice__u8){(u8*)", ", 2}), items__5236[8] = hi, items__5236[9] = ((slice__u8){(u8*)", ", 2}), items__5236[10] = where, items__5236[11] = ((slice__u8){(u8*)")", 1}), items__5236), 12}));
+  return codegen__cat(ctx, ((slice__string){(items__5240[0] = name, items__5240[1] = ((slice__u8){(u8*)"__sub(", 6}), items__5240[2] = ptr, items__5240[3] = ((slice__u8){(u8*)", ", 2}), items__5240[4] = len, items__5240[5] = ((slice__u8){(u8*)", ", 2}), items__5240[6] = lo, items__5240[7] = ((slice__u8){(u8*)", ", 2}), items__5240[8] = hi, items__5240[9] = ((slice__u8){(u8*)", ", 2}), items__5240[10] = where, items__5240[11] = ((slice__u8){(u8*)")", 1}), items__5240), 12}));
 }
 
 static ast__Node* codegen__prelude_decl(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 name) {
   return ({
-    tuple__25 result__5237 = map__map_get__module__ScopeKey__ptr_ast__Node(ctx, (&(rt_nonnull((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1708:23"))->res, "src/codegen.sabk:1708:27"))->prelude, "src/codegen.sabk:1708:35"))->scope), ((module__ScopeKey){.name = name}));
-    ast__Node* value__5238;
-    if (!result__5237._1)
-      value__5238 = ((ast__Node*)0);
+    tuple__25 result__5241 = map__map_get__module__ScopeKey__ptr_ast__Node(ctx, (&(rt_nonnull((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1708:23"))->res, "src/codegen.sabk:1708:27"))->prelude, "src/codegen.sabk:1708:35"))->scope), ((module__ScopeKey){.name = name}));
+    ast__Node* value__5242;
+    if (!result__5241._1)
+      value__5242 = ((ast__Node*)0);
     else
-      value__5238 = result__5237._0;
-    value__5238;
+      value__5242 = result__5241._0;
+    value__5242;
   });
 }
 
 static slice__u8 codegen__default_context(prelude__Context *ctx, codegen__CodeGen* g) {
-  return ({ codegen__CodeGen* v__5239 = g; ast__Node* v__5240 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"default_context", 15})); codegen__global_name(ctx, v__5239, v__5240); });
+  return ({ codegen__CodeGen* v__5243 = g; ast__Node* v__5244 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"default_context", 15})); codegen__global_name(ctx, v__5243, v__5244); });
 }
 
 static slice__u8 codegen__call(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5252[2];
-  slice__u8 items__5253[3];
-  slice__u8 items__5254[3];
-  slice__u8 items__5256[4];
+  slice__u8 items__5256[2];
+  slice__u8 items__5257[3];
+  slice__u8 items__5258[3];
+  slice__u8 items__5260[4];
   ast__Node* callee = ((ast__Node*)0);
   slice__ptr_ast__Node args = {0};
   {
     ast__Node* e;
     slice__ptr_ast__Node a;
-    if (({ ast__NodeKind is__5241 = (rt_nonnull(n, "src/codegen.sabk:1716:11"))->kind; is__5241.tag == ((ast__NodeKind__Tag)46LL) ? (e = is__5241.payload.Call.callee, a = is__5241.payload.Call.args, 1) : 0; })) {
-      ({ tuple__46 values__5242 = ((tuple__46){._0 = e, ._1 = a}); callee = values__5242._0; args = values__5242._1; });
+    if (({ ast__NodeKind is__5245 = (rt_nonnull(n, "src/codegen.sabk:1716:11"))->kind; is__5245.tag == ((ast__NodeKind__Tag)46LL) ? (e = is__5245.payload.Call.callee, a = is__5245.payload.Call.args, 1) : 0; })) {
+      ({ tuple__46 values__5246 = ((tuple__46){._0 = e, ._1 = a}); callee = values__5246._0; args = values__5246._1; });
     }
   }
   types__Type* t = (rt_nonnull(callee, "src/codegen.sabk:1718:20"))->ty;
@@ -35743,20 +35852,20 @@ static slice__u8 codegen__call(prelude__Context *ctx, codegen__CodeGen* g, ast__
   }
   grow__bool to_double = {0};
   {
-    isize end__5243 = (args).len;
-    for (isize i = ((isize)0LL); i < end__5243; i++) {
+    isize end__5247 = (args).len;
+    for (isize i = ((isize)0LL); i < end__5247; i++) {
       if ((((fun != ((ast__Node*)0)) && (i < (params).len)) && check__is_type_param(ctx, (*slice__ptr_ast__Node__at(params, i, "src/codegen.sabk:1732:66"))))) {
         continue;
       }
       array__array_add__ptr_ast__Node(ctx, (&parts), (*slice__ptr_ast__Node__at(args, i, "src/codegen.sabk:1734:31")));
-      ({ grow__bool* v__5244 = (&to_double); bool v__5247 = ((i >= ((rt_nonnull(t, "src/codegen.sabk:1735:38"))->params).len) && ({ types__Type* v__5245 = (rt_nonnull((*slice__ptr_ast__Node__at(args, i, "src/codegen.sabk:1735:56")), "src/codegen.sabk:1735:60"))->ty; types__Type* v__5246 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:1735:72"))->f32_; (v__5245 == v__5246); })); array__array_add__bool(ctx, v__5244, v__5247); });
+      ({ grow__bool* v__5248 = (&to_double); bool v__5251 = ((i >= ((rt_nonnull(t, "src/codegen.sabk:1735:38"))->params).len) && ({ types__Type* v__5249 = (rt_nonnull((*slice__ptr_ast__Node__at(args, i, "src/codegen.sabk:1735:56")), "src/codegen.sabk:1735:60"))->ty; types__Type* v__5250 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:1735:72"))->f32_; (v__5249 == v__5250); })); array__array_add__bool(ctx, v__5248, v__5251); });
     }
   }
   if ((fun != ((ast__Node*)0))) {
     {
-      isize end__5248 = (params).len;
-      for (isize i = (args).len; i < end__5248; i++) {
-        ({ grow__ptr_ast__Node* v__5249 = (&parts); ast__Node* v__5250 = check__value_of(ctx, (*slice__ptr_ast__Node__at(params, i, "src/codegen.sabk:1739:46"))); array__array_add__ptr_ast__Node(ctx, v__5249, v__5250); });
+      isize end__5252 = (params).len;
+      for (isize i = (args).len; i < end__5252; i++) {
+        ({ grow__ptr_ast__Node* v__5253 = (&parts); ast__Node* v__5254 = check__value_of(ctx, (*slice__ptr_ast__Node__at(params, i, "src/codegen.sabk:1739:46"))); array__array_add__ptr_ast__Node(ctx, v__5253, v__5254); });
         array__array_add__bool(ctx, (&to_double), false);
       }
     }
@@ -35765,18 +35874,18 @@ static slice__u8 codegen__call(prelude__Context *ctx, codegen__CodeGen* g, ast__
   slice__u8 joined = (is_extern ? ((slice__u8){(u8*)"", 0}) : codegen__current_ctx(ctx, g));
   isize first = ((fun != ((ast__Node*)0)) ? ((isize)0LL) : ((isize)1LL));
   {
-    isize end__5251 = ((o).values).len;
-    for (isize k = first; k < end__5251; k++) {
-      slice__u8 arg = ((*slice__bool__at(grow__bool__view(to_double), ((isize)(k - first)), "src/codegen.sabk:1748:32")) ? codegen__cat(ctx, ((slice__string){(items__5252[0] = ((slice__u8){(u8*)"(f64)", 5}), items__5252[1] = (*slice__string__at(grow__string__view((o).values), k, "src/codegen.sabk:1748:66")), items__5252), 2})) : (*slice__string__at(grow__string__view((o).values), k, "src/codegen.sabk:1748:84")));
-      joined = codegen__cat(ctx, ((slice__string){(items__5253[0] = joined, items__5253[1] = (((joined).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5253[2] = arg, items__5253), 3}));
+    isize end__5255 = ((o).values).len;
+    for (isize k = first; k < end__5255; k++) {
+      slice__u8 arg = ((*slice__bool__at(grow__bool__view(to_double), ((isize)(k - first)), "src/codegen.sabk:1748:32")) ? codegen__cat(ctx, ((slice__string){(items__5256[0] = ((slice__u8){(u8*)"(f64)", 5}), items__5256[1] = (*slice__string__at(grow__string__view((o).values), k, "src/codegen.sabk:1748:66")), items__5256), 2})) : (*slice__string__at(grow__string__view((o).values), k, "src/codegen.sabk:1748:84")));
+      joined = codegen__cat(ctx, ((slice__string){(items__5257[0] = joined, items__5257[1] = (((joined).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5257[2] = arg, items__5257), 3}));
     }
   }
-  slice__u8 name = ((fun != ((ast__Node*)0)) ? codegen__global_name(ctx, g, fun) : codegen__cat(ctx, ((slice__string){(items__5254[0] = ((slice__u8){(u8*)"(", 1}), items__5254[1] = (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1751:75")), items__5254[2] = ((slice__u8){(u8*)")", 1}), items__5254), 3})));
-  return ({ codegen__Ordered v__5255 = o; slice__u8 v__5257 = codegen__cat(ctx, ((slice__string){(items__5256[0] = name, items__5256[1] = ((slice__u8){(u8*)"(", 1}), items__5256[2] = joined, items__5256[3] = ((slice__u8){(u8*)")", 1}), items__5256), 4})); codegen__in_order(ctx, v__5255, v__5257); });
+  slice__u8 name = ((fun != ((ast__Node*)0)) ? codegen__global_name(ctx, g, fun) : codegen__cat(ctx, ((slice__string){(items__5258[0] = ((slice__u8){(u8*)"(", 1}), items__5258[1] = (*slice__string__at(grow__string__view((o).values), ((isize)0LL), "src/codegen.sabk:1751:75")), items__5258[2] = ((slice__u8){(u8*)")", 1}), items__5258), 3})));
+  return ({ codegen__Ordered v__5259 = o; slice__u8 v__5261 = codegen__cat(ctx, ((slice__string){(items__5260[0] = name, items__5260[1] = ((slice__u8){(u8*)"(", 1}), items__5260[2] = joined, items__5260[3] = ((slice__u8){(u8*)")", 1}), items__5260), 4})); codegen__in_order(ctx, v__5259, v__5261); });
 }
 
 static slice__u8 codegen__struct_init(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5265[6];
+  slice__u8 items__5269[6];
   types__Type* t = (rt_nonnull(n, "src/codegen.sabk:1756:15"))->ty;
   if (((rt_nonnull(t, "src/codegen.sabk:1757:11"))->kind == ((types__TypeKind)1LL))) {
     return ((slice__u8){(u8*)"((sabk_void){})", 15});
@@ -35785,29 +35894,29 @@ static slice__u8 codegen__struct_init(prelude__Context *ctx, codegen__CodeGen* g
   grow__ptr_ast__Node values = {0};
   grow__string names = {0};
   {
-    isize end__5258 = (items).len;
-    for (isize i = ((isize)0LL); i < end__5258; i++) {
+    isize end__5262 = (items).len;
+    for (isize i = ((isize)0LL); i < end__5262; i++) {
       ast__Node* item = (*slice__ptr_ast__Node__at(items, i, "src/codegen.sabk:1765:25"));
-      ({ grow__ptr_ast__Node* v__5259 = (&values); ast__Node* v__5260 = check__item_value(ctx, item); array__array_add__ptr_ast__Node(ctx, v__5259, v__5260); });
+      ({ grow__ptr_ast__Node* v__5263 = (&values); ast__Node* v__5264 = check__item_value(ctx, item); array__array_add__ptr_ast__Node(ctx, v__5263, v__5264); });
       array__array_add__string(ctx, (&names), ((((rt_nonnull(item, "src/codegen.sabk:1767:36"))->kind).tag == ((ast__NodeKind__Tag)59LL)) ? ((rt_nonnull(item, "src/codegen.sabk:1767:65"))->tok).text : ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:1767:81"))->fields), i, "src/codegen.sabk:1767:87"))).name));
     }
   }
   codegen__Ordered o = codegen__ordered(ctx, g, grow__ptr_ast__Node__view(values));
   map__Map__string__string given = {0};
   {
-    isize end__5261 = (names).len;
-    for (isize i = ((isize)0LL); i < end__5261; i++) {
+    isize end__5265 = (names).len;
+    for (isize i = ((isize)0LL); i < end__5265; i++) {
       map__map_put__string__string(ctx, (&given), (*slice__string__at(grow__string__view(names), i, "src/codegen.sabk:1772:30")), (*slice__string__at(grow__string__view((o).values), i, "src/codegen.sabk:1772:43")));
     }
   }
   slice__u8 body = ((slice__u8){(u8*)"", 0});
   {
-    grow__types__Field seq__5262 = (rt_nonnull(t, "src/codegen.sabk:1774:17"))->fields;
-    for (isize i__5263 = 0; i__5263 < seq__5262.len; i__5263++) {
-      types__Field f = seq__5262.ptr[i__5263];
-      tuple__1 values__5264 = map__map_get__string__string(ctx, (&given), (f).name);
-      slice__u8 text = values__5264._0;
-      bool found = values__5264._1;
+    grow__types__Field seq__5266 = (rt_nonnull(t, "src/codegen.sabk:1774:17"))->fields;
+    for (isize i__5267 = 0; i__5267 < seq__5266.len; i__5267++) {
+      types__Field f = seq__5266.ptr[i__5267];
+      tuple__1 values__5268 = map__map_get__string__string(ctx, (&given), (f).name);
+      slice__u8 text = values__5268._0;
+      bool found = values__5268._1;
       ast__Node* default_node = (((f).decl != ((ast__Node*)0)) ? check__value_of(ctx, (f).decl) : ((ast__Node*)0));
       if ((((!found) && ((rt_nonnull(t, "src/codegen.sabk:1777:25"))->kind == ((types__TypeKind)11LL))) && (default_node != ((ast__Node*)0)))) {
         text = codegen__expr(ctx, g, default_node);
@@ -35821,12 +35930,12 @@ static slice__u8 codegen__struct_init(prelude__Context *ctx, codegen__CodeGen* g
         }
       }
       if (((text).len > ((isize)0LL))) {
-        body = codegen__cat(ctx, ((slice__string){(items__5265[0] = body, items__5265[1] = (((body).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5265[2] = ((slice__u8){(u8*)".", 1}), items__5265[3] = codegen__local_name(ctx, (f).name), items__5265[4] = ((slice__u8){(u8*)" = ", 3}), items__5265[5] = text, items__5265), 6}));
+        body = codegen__cat(ctx, ((slice__string){(items__5269[0] = body, items__5269[1] = (((body).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5269[2] = ((slice__u8){(u8*)".", 1}), items__5269[3] = codegen__local_name(ctx, (f).name), items__5269[4] = ((slice__u8){(u8*)" = ", 3}), items__5269[5] = text, items__5269), 6}));
       }
     }
   }
   map__map_free__string__string(ctx, (&given));
-  return ({ codegen__Ordered v__5266 = o; slice__u8 v__5267 = codegen__compound(ctx, g, t, (((body).len == ((isize)0LL)) ? ((slice__u8){(u8*)"0", 1}) : body)); codegen__in_order(ctx, v__5266, v__5267); });
+  return ({ codegen__Ordered v__5270 = o; slice__u8 v__5271 = codegen__compound(ctx, g, t, (((body).len == ((isize)0LL)) ? ((slice__u8){(u8*)"0", 1}) : body)); codegen__in_order(ctx, v__5270, v__5271); });
 }
 
 static bool codegen__is_alnum(prelude__Context *ctx, u8 c) {
@@ -35834,62 +35943,62 @@ static bool codegen__is_alnum(prelude__Context *ctx, u8 c) {
 }
 
 static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
-  slice__u8 items__5274[2];
-  prelude__Any items__5279[2];
-  prelude__Any items__5285[1];
-  prelude__Any items__5302[1];
-  slice__u8 items__5315[5];
-  slice__u8 items__5318[3];
-  slice__u8 items__5321[5];
-  slice__u8 items__5324[3];
+  slice__u8 items__5278[2];
+  prelude__Any items__5283[2];
+  prelude__Any items__5289[1];
+  prelude__Any items__5306[1];
+  slice__u8 items__5319[5];
+  slice__u8 items__5322[3];
+  slice__u8 items__5325[5];
+  slice__u8 items__5328[3];
   (rt_nonnull(g, "src/codegen.sabk:1796:7"))->out = (&(rt_nonnull(g, "src/codegen.sabk:1796:16"))->bodies);
   map__Map__string__i32 used = {0};
   map__map_put__ptr_module__Module__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1799:16"))->module_prefix), (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1799:33"))->res, "src/codegen.sabk:1799:37"))->prelude, ((slice__u8){(u8*)"prelude", 7}));
   {
-    grow__ptr_module__Module seq__5268 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1800:17"))->res, "src/codegen.sabk:1800:21"))->modules;
-    for (isize i__5269 = 0; i__5269 < seq__5268.len; i__5269++) {
-      module__Module* m = seq__5268.ptr[i__5269];
+    grow__ptr_module__Module seq__5272 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1800:17"))->res, "src/codegen.sabk:1800:21"))->modules;
+    for (isize i__5273 = 0; i__5273 < seq__5272.len; i__5273++) {
+      module__Module* m = seq__5272.ptr[i__5273];
       grow__u8 stem = {0};
       {
-        slice__u8 seq__5270 = path__path_stem(ctx, (rt_nonnull(m, "src/codegen.sabk:1802:31"))->path);
-        for (isize i__5271 = 0; i__5271 < seq__5270.len; i__5271++) {
-          u8 c = seq__5270.ptr[i__5271];
-          ({ grow__u8* v__5272 = (&stem); u8 v__5273 = (codegen__is_alnum(ctx, c) ? c : ((u8)95LL)); array__array_add__u8(ctx, v__5272, v__5273); });
+        slice__u8 seq__5274 = path__path_stem(ctx, (rt_nonnull(m, "src/codegen.sabk:1802:31"))->path);
+        for (isize i__5275 = 0; i__5275 < seq__5274.len; i__5275++) {
+          u8 c = seq__5274.ptr[i__5275];
+          ({ grow__u8* v__5276 = (&stem); u8 v__5277 = (codegen__is_alnum(ctx, c) ? c : ((u8)95LL)); array__array_add__u8(ctx, v__5276, v__5277); });
         }
       }
       slice__u8 name = grow__u8__view(stem);
       if ((((name).len == ((isize)0LL)) || ((((*slice__u8__at(name, ((isize)0LL), "src/codegen.sabk:1805:35")) >= ((u8)48LL)) && ((*slice__u8__at(name, ((isize)0LL), "src/codegen.sabk:1805:53")) <= ((u8)57LL)))))) {
-        name = codegen__cat(ctx, ((slice__string){(items__5274[0] = ((slice__u8){(u8*)"m_", 2}), items__5274[1] = name, items__5274), 2}));
+        name = codegen__cat(ctx, ((slice__string){(items__5278[0] = ((slice__u8){(u8*)"m_", 2}), items__5278[1] = name, items__5278), 2}));
       }
       i32 n = ({
-        tuple__28 result__5275 = map__map_get__string__i32(ctx, (&used), name);
-        i32 value__5276;
-        if (!result__5275._1)
-          value__5276 = ((i32)0LL);
+        tuple__28 result__5279 = map__map_get__string__i32(ctx, (&used), name);
+        i32 value__5280;
+        if (!result__5279._1)
+          value__5280 = ((i32)0LL);
         else
-          value__5276 = result__5275._0;
-        value__5276;
+          value__5280 = result__5279._0;
+        value__5280;
       });
       map__map_put__string__i32(ctx, (&used), name, ((i32)(n + ((i32)1LL))));
-      ({ map__Map__ptr_module__Module__string* v__5277 = (&(rt_nonnull(g, "src/codegen.sabk:1809:20"))->module_prefix); module__Module* v__5278 = m; slice__u8 v__5280 = ((n != ((i32)0LL)) ? fmt__format(ctx, ((slice__u8){(u8*)"%{}%", 4}), ((slice__prelude__Any){(items__5279[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5279[1] = ((prelude__Any){.value = (i32[1]){n}, .info = (&ti__4)}), items__5279), 2})) : str__copy_string(ctx, name, ((*ctx)).allocator)); map__map_put__ptr_module__Module__string(ctx, v__5277, v__5278, v__5280); });
+      ({ map__Map__ptr_module__Module__string* v__5281 = (&(rt_nonnull(g, "src/codegen.sabk:1809:20"))->module_prefix); module__Module* v__5282 = m; slice__u8 v__5284 = ((n != ((i32)0LL)) ? fmt__format(ctx, ((slice__u8){(u8*)"%{}%", 4}), ((slice__prelude__Any){(items__5283[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5283[1] = ((prelude__Any){.value = (i32[1]){n}, .info = (&ti__4)}), items__5283), 2})) : str__copy_string(ctx, name, ((*ctx)).allocator)); map__map_put__ptr_module__Module__string(ctx, v__5281, v__5282, v__5284); });
     }
   }
   module__Module* root = (*slice__ptr_module__Module__at(grow__ptr_module__Module__view((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1813:18"))->res, "src/codegen.sabk:1813:22"))->modules), ((isize)0LL), "src/codegen.sabk:1813:29"));
   ast__Node* main_fn = ({
-    tuple__25 result__5281 = map__map_get__module__ScopeKey__ptr_ast__Node(ctx, (&(rt_nonnull(root, "src/codegen.sabk:1814:33"))->scope), ((module__ScopeKey){.name = ((slice__u8){(u8*)"main", 4})}));
-    ast__Node* value__5282;
-    if (!result__5281._1)
-      value__5282 = ((ast__Node*)0);
+    tuple__25 result__5285 = map__map_get__module__ScopeKey__ptr_ast__Node(ctx, (&(rt_nonnull(root, "src/codegen.sabk:1814:33"))->scope), ((module__ScopeKey){.name = ((slice__u8){(u8*)"main", 4})}));
+    ast__Node* value__5286;
+    if (!result__5285._1)
+      value__5286 = ((ast__Node*)0);
     else
-      value__5282 = result__5281._0;
-    value__5282;
+      value__5286 = result__5285._0;
+    value__5286;
   });
   if ((((main_fn == ((ast__Node*)0)) || (!codegen__is_function(ctx, main_fn))) || codegen__is_extern_decl(ctx, main_fn))) {
-    ({ codegen__CodeGen* v__5283 = g; token__Token v__5284 = (*slice__token__Token__at((rt_nonnull(root, "src/codegen.sabk:1816:27"))->tokens, ((isize)0LL), "src/codegen.sabk:1816:33")); slice__u8 v__5286 = fmt__tformat(ctx, ((slice__u8){(u8*)"the program needs a `fn main()` in %", 36}), ((slice__prelude__Any){(items__5285[0] = ((prelude__Any){.value = (slice__u8[1]){(rt_nonnull(root, "src/codegen.sabk:1816:91"))->path}, .info = (&ti__1)}), items__5285), 1})); codegen__gen_error(ctx, v__5283, v__5284, v__5286); });
+    ({ codegen__CodeGen* v__5287 = g; token__Token v__5288 = (*slice__token__Token__at((rt_nonnull(root, "src/codegen.sabk:1816:27"))->tokens, ((isize)0LL), "src/codegen.sabk:1816:33")); slice__u8 v__5290 = fmt__tformat(ctx, ((slice__u8){(u8*)"the program needs a `fn main()` in %", 36}), ((slice__prelude__Any){(items__5289[0] = ((prelude__Any){.value = (slice__u8[1]){(rt_nonnull(root, "src/codegen.sabk:1816:91"))->path}, .info = (&ti__1)}), items__5289), 1})); codegen__gen_error(ctx, v__5287, v__5288, v__5290); });
     return ((slice__u8){(u8*)"", 0});
   }
   types__Type* ret = (rt_nonnull((rt_nonnull(main_fn, "src/codegen.sabk:1819:23"))->ty, "src/codegen.sabk:1819:26"))->ret;
-  if ((((check__fn_params(ctx, main_fn)).len > ((isize)0LL)) || (((((rt_nonnull(ret, "src/codegen.sabk:1820:44"))->kind != ((types__TypeKind)1LL)) && ({ types__Type* v__5287 = ret; types__Type* v__5288 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:1820:74"))->i32_; (v__5287 != v__5288); })) && (!(rt_nonnull(ret, "src/codegen.sabk:1820:86"))->is_failure))))) {
+  if ((((check__fn_params(ctx, main_fn)).len > ((isize)0LL)) || (((((rt_nonnull(ret, "src/codegen.sabk:1820:44"))->kind != ((types__TypeKind)1LL)) && ({ types__Type* v__5291 = ret; types__Type* v__5292 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:1820:74"))->i32_; (v__5291 != v__5292); })) && (!(rt_nonnull(ret, "src/codegen.sabk:1820:86"))->is_failure))))) {
     codegen__gen_error(ctx, g, (rt_nonnull(main_fn, "src/codegen.sabk:1821:30"))->tok, ((slice__u8){(u8*)"`main` must take no parameters and return `void`, `i32` or `Error`", 66}));
     return ((slice__u8){(u8*)"", 0});
   }
@@ -35899,17 +36008,17 @@ static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
   array__array_append__ptr_module__Module(ctx, (&all), grow__ptr_module__Module__view((rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1830:26"))->res, "src/codegen.sabk:1830:30"))->modules));
   codegen__find_reachable(ctx, g, main_fn);
   {
-    grow__ptr_module__Module seq__5289 = all;
-    for (isize i__5290 = 0; i__5290 < seq__5289.len; i__5290++) {
-      module__Module* m = seq__5289.ptr[i__5290];
+    grow__ptr_module__Module seq__5293 = all;
+    for (isize i__5294 = 0; i__5294 < seq__5293.len; i__5294++) {
+      module__Module* m = seq__5293.ptr[i__5294];
       {
-        slice__ptr_ast__Node seq__5291 = check__root_list(ctx, m);
-        for (isize i__5292 = 0; i__5292 < seq__5291.len; i__5292++) {
-          ast__Node* d = seq__5291.ptr[i__5292];
+        slice__ptr_ast__Node seq__5295 = check__root_list(ctx, m);
+        for (isize i__5296 = 0; i__5296 < seq__5295.len; i__5296++) {
+          ast__Node* d = seq__5295.ptr[i__5296];
           bool native = false;
           {
             ast__Node* body;
-            if ((({ ast__NodeKind is__5293 = (rt_nonnull(d, "src/codegen.sabk:1838:19"))->kind; (is__5293.tag == ((ast__NodeKind__Tag)2LL) && (is__5293.payload.Fn.is_extern == true)) ? (body = is__5293.payload.Fn.body, 1) : 0; }) && (body == ((ast__Node*)0)))) {
+            if ((({ ast__NodeKind is__5297 = (rt_nonnull(d, "src/codegen.sabk:1838:19"))->kind; (is__5297.tag == ((ast__NodeKind__Tag)2LL) && (is__5297.payload.Fn.is_extern == true)) ? (body = is__5297.payload.Fn.body, 1) : 0; }) && (body == ((ast__Node*)0)))) {
               native = true;
             }
           }
@@ -35918,36 +36027,36 @@ static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
           }
           ast__Node* fun = d;
           codegen__Reached reached = ({
-            tuple__34 result__5294 = map__map_get__ptr_ast__Node__codegen__Reached(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1845:38"))->reached_from), fun);
-            codegen__Reached value__5295;
-            if (!result__5294._1)
-              value__5295 = ((codegen__Reached){0});
+            tuple__34 result__5298 = map__map_get__ptr_ast__Node__codegen__Reached(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1845:38"))->reached_from), fun);
+            codegen__Reached value__5299;
+            if (!result__5298._1)
+              value__5299 = ((codegen__Reached){0});
             else
-              value__5295 = result__5294._0;
-            value__5295;
+              value__5299 = result__5298._0;
+            value__5299;
           });
           while (((((reached).from != ((ast__Node*)0)) && ((rt_nonnull((reached).from, "src/codegen.sabk:1846:57"))->owner == (rt_nonnull(d, "src/codegen.sabk:1846:68"))->owner)) && (((({
-            tuple__34 result__5296 = map__map_get__ptr_ast__Node__codegen__Reached(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1847:32"))->reached_from), (reached).from);
-            codegen__Reached value__5297;
-            if (!result__5296._1)
-              value__5297 = ((codegen__Reached){0});
+            tuple__34 result__5300 = map__map_get__ptr_ast__Node__codegen__Reached(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1847:32"))->reached_from), (reached).from);
+            codegen__Reached value__5301;
+            if (!result__5300._1)
+              value__5301 = ((codegen__Reached){0});
             else
-              value__5297 = result__5296._0;
-            value__5297;
+              value__5301 = result__5300._0;
+            value__5301;
           }))).use != ((ast__Node*)0)))) {
             fun = (reached).from;
             reached = ({
-              tuple__34 result__5298 = map__map_get__ptr_ast__Node__codegen__Reached(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1849:38"))->reached_from), fun);
-              codegen__Reached value__5299;
-              if (!result__5298._1)
-                value__5299 = ((codegen__Reached){0});
+              tuple__34 result__5302 = map__map_get__ptr_ast__Node__codegen__Reached(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1849:38"))->reached_from), fun);
+              codegen__Reached value__5303;
+              if (!result__5302._1)
+                value__5303 = ((codegen__Reached){0});
               else
-                value__5299 = result__5298._0;
-              value__5299;
+                value__5303 = result__5302._0;
+              value__5303;
             });
           }
           ast__Node* at = (((reached).use != ((ast__Node*)0)) ? (reached).use : d);
-          ({ codegen__CodeGen* v__5300 = g; token__Token v__5301 = (rt_nonnull(at, "src/codegen.sabk:1852:29"))->tok; slice__u8 v__5303 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it", 101}), ((slice__prelude__Any){(items__5302[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(fun, "src/codegen.sabk:1853:46"))->tok).text}, .info = (&ti__1)}), items__5302), 1})); codegen__gen_error(ctx, v__5300, v__5301, v__5303); });
+          ({ codegen__CodeGen* v__5304 = g; token__Token v__5305 = (rt_nonnull(at, "src/codegen.sabk:1852:29"))->tok; slice__u8 v__5307 = fmt__tformat(ctx, ((slice__u8){(u8*)"`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it", 101}), ((slice__prelude__Any){(items__5306[0] = ((prelude__Any){.value = (slice__u8[1]){((rt_nonnull(fun, "src/codegen.sabk:1853:46"))->tok).text}, .info = (&ti__1)}), items__5306), 1})); codegen__gen_error(ctx, v__5304, v__5305, v__5307); });
           return ((slice__u8){(u8*)"", 0});
         }
       }
@@ -35955,13 +36064,13 @@ static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
   }
   grow__ptr_ast__Node functions = {0};
   {
-    grow__ptr_module__Module seq__5304 = all;
-    for (isize i__5305 = 0; i__5305 < seq__5304.len; i__5305++) {
-      module__Module* m = seq__5304.ptr[i__5305];
+    grow__ptr_module__Module seq__5308 = all;
+    for (isize i__5309 = 0; i__5309 < seq__5308.len; i__5309++) {
+      module__Module* m = seq__5308.ptr[i__5309];
       {
-        slice__ptr_ast__Node seq__5306 = check__root_list(ctx, m);
-        for (isize i__5307 = 0; i__5307 < seq__5306.len; i__5307++) {
-          ast__Node* d = seq__5306.ptr[i__5307];
+        slice__ptr_ast__Node seq__5310 = check__root_list(ctx, m);
+        for (isize i__5311 = 0; i__5311 < seq__5310.len; i__5311++) {
+          ast__Node* d = seq__5310.ptr[i__5311];
           if ((codegen__is_function(ctx, d) && (!resolve__is_template(ctx, d)))) {
             (rt_nonnull(g, "src/codegen.sabk:1861:19"))->functions_total++;
             if (map__map_has__ptr_ast__Node__bool(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1862:32"))->reachable), d)) {
@@ -35977,9 +36086,9 @@ static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
     }
   }
   {
-    grow__ptr_ast__Node seq__5308 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1869:24"))->c, "src/codegen.sabk:1869:26"))->instances;
-    for (isize i__5309 = 0; i__5309 < seq__5308.len; i__5309++) {
-      ast__Node* instance = seq__5308.ptr[i__5309];
+    grow__ptr_ast__Node seq__5312 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1869:24"))->c, "src/codegen.sabk:1869:26"))->instances;
+    for (isize i__5313 = 0; i__5313 < seq__5312.len; i__5313++) {
+      ast__Node* instance = seq__5312.ptr[i__5313];
       if ((((rt_nonnull(instance, "src/codegen.sabk:1870:22"))->kind).tag == ((ast__NodeKind__Tag)2LL))) {
         (rt_nonnull(g, "src/codegen.sabk:1871:15"))->functions_total++;
         if (map__map_has__ptr_ast__Node__bool(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1872:28"))->reachable), instance)) {
@@ -35990,16 +36099,16 @@ static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
   }
   (rt_nonnull(g, "src/codegen.sabk:1876:7"))->functions_emitted = (functions).len;
   {
-    grow__ptr_ast__Node seq__5310 = functions;
-    for (isize i__5311 = 0; i__5311 < seq__5310.len; i__5311++) {
-      ast__Node* f = seq__5310.ptr[i__5311];
+    grow__ptr_ast__Node seq__5314 = functions;
+    for (isize i__5315 = 0; i__5315 < seq__5314.len; i__5315++) {
+      ast__Node* f = seq__5314.ptr[i__5315];
       codegen__emit_fn_prototype(ctx, g, f);
     }
   }
   {
-    grow__ptr_ast__Node seq__5312 = functions;
-    for (isize i__5313 = 0; i__5313 < seq__5312.len; i__5313++) {
-      ast__Node* f = seq__5312.ptr[i__5313];
+    grow__ptr_ast__Node seq__5316 = functions;
+    for (isize i__5317 = 0; i__5317 < seq__5316.len; i__5317++) {
+      ast__Node* f = seq__5316.ptr[i__5317];
       codegen__emit_fn_body(ctx, g, f);
     }
   }
@@ -36007,20 +36116,20 @@ static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
   codegen__mapped(ctx, g, ((slice__u8){(u8*)"int main(int argc, char **argv) {", 33}));
   codegen__mapped(ctx, g, ((slice__u8){(u8*)"  rt_argc = argc;", 17}));
   codegen__mapped(ctx, g, ((slice__u8){(u8*)"  rt_argv = argv;", 17}));
-  ({ codegen__CodeGen* v__5314 = g; slice__u8 v__5316 = codegen__cat(ctx, ((slice__string){(items__5315[0] = ((slice__u8){(u8*)"  ", 2}), items__5315[1] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1887:37"))->c, "src/codegen.sabk:1887:39"))->context_type), items__5315[2] = ((slice__u8){(u8*)" ctx = ", 7}), items__5315[3] = codegen__default_context(ctx, g), items__5315[4] = ((slice__u8){(u8*)"(&rt_boot_context);", 19}), items__5315), 5})); codegen__mapped(ctx, v__5314, v__5316); });
+  ({ codegen__CodeGen* v__5318 = g; slice__u8 v__5320 = codegen__cat(ctx, ((slice__string){(items__5319[0] = ((slice__u8){(u8*)"  ", 2}), items__5319[1] = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1887:37"))->c, "src/codegen.sabk:1887:39"))->context_type), items__5319[2] = ((slice__u8){(u8*)" ctx = ", 7}), items__5319[3] = codegen__default_context(ctx, g), items__5319[4] = ((slice__u8){(u8*)"(&rt_boot_context);", 19}), items__5319), 5})); codegen__mapped(ctx, v__5318, v__5320); });
   if (((rt_nonnull(ret, "src/codegen.sabk:1888:13"))->kind == ((types__TypeKind)1LL))) {
-    ({ codegen__CodeGen* v__5317 = g; slice__u8 v__5319 = codegen__cat(ctx, ((slice__string){(items__5318[0] = ((slice__u8){(u8*)"  ", 2}), items__5318[1] = codegen__global_name(ctx, g, main_fn), items__5318[2] = ((slice__u8){(u8*)"(&ctx);", 7}), items__5318), 3})); codegen__mapped(ctx, v__5317, v__5319); });
+    ({ codegen__CodeGen* v__5321 = g; slice__u8 v__5323 = codegen__cat(ctx, ((slice__string){(items__5322[0] = ((slice__u8){(u8*)"  ", 2}), items__5322[1] = codegen__global_name(ctx, g, main_fn), items__5322[2] = ((slice__u8){(u8*)"(&ctx);", 7}), items__5322), 3})); codegen__mapped(ctx, v__5321, v__5323); });
     codegen__mapped(ctx, g, ((slice__u8){(u8*)"  return 0;", 11}));
   } else {
     if ((rt_nonnull(ret, "src/codegen.sabk:1891:20"))->is_failure) {
-      ({ codegen__CodeGen* v__5320 = g; slice__u8 v__5322 = codegen__cat(ctx, ((slice__string){(items__5321[0] = ((slice__u8){(u8*)"  ", 2}), items__5321[1] = codegen__c_type(ctx, g, ret), items__5321[2] = ((slice__u8){(u8*)" failed = ", 10}), items__5321[3] = codegen__global_name(ctx, g, main_fn), items__5321[4] = ((slice__u8){(u8*)"(&ctx);", 7}), items__5321), 5})); codegen__mapped(ctx, v__5320, v__5322); });
+      ({ codegen__CodeGen* v__5324 = g; slice__u8 v__5326 = codegen__cat(ctx, ((slice__string){(items__5325[0] = ((slice__u8){(u8*)"  ", 2}), items__5325[1] = codegen__c_type(ctx, g, ret), items__5325[2] = ((slice__u8){(u8*)" failed = ", 10}), items__5325[3] = codegen__global_name(ctx, g, main_fn), items__5325[4] = ((slice__u8){(u8*)"(&ctx);", 7}), items__5325), 5})); codegen__mapped(ctx, v__5324, v__5326); });
       codegen__mapped(ctx, g, ((slice__u8){(u8*)"  if (failed) {", 15}));
       codegen__mapped(ctx, g, ((slice__u8){(u8*)"    rt_report_error(failed);", 28}));
       codegen__mapped(ctx, g, ((slice__u8){(u8*)"    return 1;", 13}));
       codegen__mapped(ctx, g, ((slice__u8){(u8*)"  }", 3}));
       codegen__mapped(ctx, g, ((slice__u8){(u8*)"  return 0;", 11}));
     } else {
-      ({ codegen__CodeGen* v__5323 = g; slice__u8 v__5325 = codegen__cat(ctx, ((slice__string){(items__5324[0] = ((slice__u8){(u8*)"  return ", 9}), items__5324[1] = codegen__global_name(ctx, g, main_fn), items__5324[2] = ((slice__u8){(u8*)"(&ctx);", 7}), items__5324), 3})); codegen__mapped(ctx, v__5323, v__5325); });
+      ({ codegen__CodeGen* v__5327 = g; slice__u8 v__5329 = codegen__cat(ctx, ((slice__string){(items__5328[0] = ((slice__u8){(u8*)"  return ", 9}), items__5328[1] = codegen__global_name(ctx, g, main_fn), items__5328[2] = ((slice__u8){(u8*)"(&ctx);", 7}), items__5328), 3})); codegen__mapped(ctx, v__5327, v__5329); });
     }
   }
   codegen__mapped(ctx, g, ((slice__u8){(u8*)"}", 1}));
@@ -36054,82 +36163,82 @@ static slice__u8 codegen__generate(prelude__Context *ctx, codegen__CodeGen* g) {
 
 static void codegen__mapped(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 text) {
   if ((rt_nonnull(g, "src/codegen.sabk:1933:11"))->line_directives) {
-    ({ grow__u8* v__5326 = (&(rt_nonnull(g, "src/codegen.sabk:1934:26"))->bodies); slice__u8 v__5327 = codegen__line_directive(ctx, g); str__append_string(ctx, v__5326, v__5327); });
+    ({ grow__u8* v__5330 = (&(rt_nonnull(g, "src/codegen.sabk:1934:26"))->bodies); slice__u8 v__5331 = codegen__line_directive(ctx, g); str__append_string(ctx, v__5330, v__5331); });
   }
   str__append_string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1935:22"))->bodies), text);
   array__array_add__u8(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1936:18"))->bodies), ((u8)10LL));
 }
 
 static slice__u8 codegen__error_table(prelude__Context *ctx, codegen__CodeGen* g, bool report) {
-  prelude__Any items__5329[1];
   prelude__Any items__5333[1];
-  prelude__Any items__5334[1];
-  prelude__Any items__5338[4];
-  slice__u8 items__5340[18];
+  prelude__Any items__5337[1];
+  prelude__Any items__5338[1];
+  prelude__Any items__5342[4];
+  slice__u8 items__5344[18];
   ast__Node* decl = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"sabk_error_type", 15}));
   grow__u8 out = {0};
-  ({ grow__u8* v__5328 = (&out); slice__prelude__Any v__5330 = ((slice__prelude__Any){(items__5329[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__fn_signature(ctx, g, decl)}, .info = (&ti__1)}), items__5329), 1}); fmt__print_to(ctx, v__5328, ((slice__u8){(u8*)"\012/* the failure enums that became Errors */\012% {\012", 48}), v__5330); });
+  ({ grow__u8* v__5332 = (&out); slice__prelude__Any v__5334 = ((slice__prelude__Any){(items__5333[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__fn_signature(ctx, g, decl)}, .info = (&ti__1)}), items__5333), 1}); fmt__print_to(ctx, v__5332, ((slice__u8){(u8*)"\012/* the failure enums that became Errors */\012% {\012", 48}), v__5334); });
   slice__u8 info = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1946:28"))->c, "src/codegen.sabk:1946:30"))->type_info_type);
-  slice__u8 id = ({ codegen__CodeGen* v__5331 = g; ast__Node* v__5332 = (*slice__ptr_ast__Node__at(check__fn_params(ctx, decl), ((isize)0LL), "src/codegen.sabk:1947:41")); codegen__var_name(ctx, v__5331, v__5332); });
+  slice__u8 id = ({ codegen__CodeGen* v__5335 = g; ast__Node* v__5336 = (*slice__ptr_ast__Node__at(check__fn_params(ctx, decl), ((isize)0LL), "src/codegen.sabk:1947:41")); codegen__var_name(ctx, v__5335, v__5336); });
   grow__ptr_types__Type enums = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:1948:19"))->c, "src/codegen.sabk:1948:21"))->error_enums;
   if (((enums).len == ((isize)0LL))) {
-    fmt__print_to(ctx, (&out), ((slice__u8){(u8*)"  (void)%;\012  return 0;\012}\012", 25}), ((slice__prelude__Any){(items__5333[0] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5333), 1}));
+    fmt__print_to(ctx, (&out), ((slice__u8){(u8*)"  (void)%;\012  return 0;\012}\012", 25}), ((slice__prelude__Any){(items__5337[0] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5337), 1}));
   } else {
-    fmt__print_to(ctx, (&out), ((slice__u8){(u8*)"  static % *const enums[] = {", 29}), ((slice__prelude__Any){(items__5334[0] = ((prelude__Any){.value = (slice__u8[1]){info}, .info = (&ti__1)}), items__5334), 1}));
+    fmt__print_to(ctx, (&out), ((slice__u8){(u8*)"  static % *const enums[] = {", 29}), ((slice__prelude__Any){(items__5338[0] = ((prelude__Any){.value = (slice__u8[1]){info}, .info = (&ti__1)}), items__5338), 1}));
     {
-      isize end__5335 = (enums).len;
-      for (isize i = ((isize)0LL); i < end__5335; i++) {
+      isize end__5339 = (enums).len;
+      for (isize i = ((isize)0LL); i < end__5339; i++) {
         if ((i > ((isize)0LL))) {
           str__append_string(ctx, (&out), ((slice__u8){(u8*)", ", 2}));
         }
-        ({ grow__u8* v__5336 = (&out); slice__u8 v__5337 = codegen__type_info_ref(ctx, g, (*slice__ptr_types__Type__at(grow__ptr_types__Type__view(enums), i, "src/codegen.sabk:1956:55"))); str__append_string(ctx, v__5336, v__5337); });
+        ({ grow__u8* v__5340 = (&out); slice__u8 v__5341 = codegen__type_info_ref(ctx, g, (*slice__ptr_types__Type__at(grow__ptr_types__Type__view(enums), i, "src/codegen.sabk:1956:55"))); str__append_string(ctx, v__5340, v__5341); });
       }
     }
-    fmt__print_to(ctx, (&out), ((slice__u8){(u8*)"};\012  return % >= 1 && % <= % \? enums[% - 1] : 0;\012}\012", 51}), ((slice__prelude__Any){(items__5338[0] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5338[1] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5338[2] = ((prelude__Any){.value = (isize[1]){(enums).len}, .info = (&ti__3)}), items__5338[3] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5338), 4}));
+    fmt__print_to(ctx, (&out), ((slice__u8){(u8*)"};\012  return % >= 1 && % <= % \? enums[% - 1] : 0;\012}\012", 51}), ((slice__prelude__Any){(items__5342[0] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5342[1] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5342[2] = ((prelude__Any){.value = (isize[1]){(enums).len}, .info = (&ti__3)}), items__5342[3] = ((prelude__Any){.value = (slice__u8[1]){id}, .info = (&ti__1)}), items__5342), 4}));
   }
   if ((!report)) {
     return grow__u8__view(out);
   }
-  ({ grow__u8* v__5339 = (&out); slice__u8 v__5341 = codegen__cat(ctx, ((slice__string){(items__5340[0] = ((slice__u8){(u8*)"static void rt_report_error(u64 e) {\012", 37}), items__5340[1] = ((slice__u8){(u8*)"  ", 2}), items__5340[2] = info, items__5340[3] = ((slice__u8){(u8*)" *t = sabk_error_type((u32)(e >> 32));\012", 39}), items__5340[4] = ((slice__u8){(u8*)"  i64 v = (i64)(u32)e;\012", 23}), items__5340[5] = ((slice__u8){(u8*)"  fflush(NULL);\012", 16}), items__5340[6] = ((slice__u8){(u8*)"  if (!t) {\012", 12}), items__5340[7] = ((slice__u8){(u8*)"    dprintf(2, (u8 *)\"error: %llu\\n\", (unsigned long long)e);\012", 62}), items__5340[8] = ((slice__u8){(u8*)"    return;\012", 12}), items__5340[9] = ((slice__u8){(u8*)"  }\012", 4}), items__5340[10] = ((slice__u8){(u8*)"  for (isize i = 0; i < t->variants.len; i++)\012", 46}), items__5340[11] = ((slice__u8){(u8*)"    if (t->variants.ptr[i].value == v) {\012", 41}), items__5340[12] = ((slice__u8){(u8*)"      dprintf(2, (u8 *)\"error: %.*s.%.*s\\n\", (int)t->name.len, t->name.ptr,\012", 76}), items__5340[13] = ((slice__u8){(u8*)"              (int)t->variants.ptr[i].name.len, t->variants.ptr[i].name.ptr);\012", 78}), items__5340[14] = ((slice__u8){(u8*)"      return;\012", 14}), items__5340[15] = ((slice__u8){(u8*)"    }\012", 6}), items__5340[16] = ((slice__u8){(u8*)"  dprintf(2, (u8 *)\"error: %.*s(%lld)\\n\", (int)t->name.len, t->name.ptr, (long long)v);\012", 88}), items__5340[17] = ((slice__u8){(u8*)"}\012", 2}), items__5340), 18})); str__append_string(ctx, v__5339, v__5341); });
+  ({ grow__u8* v__5343 = (&out); slice__u8 v__5345 = codegen__cat(ctx, ((slice__string){(items__5344[0] = ((slice__u8){(u8*)"static void rt_report_error(u64 e) {\012", 37}), items__5344[1] = ((slice__u8){(u8*)"  ", 2}), items__5344[2] = info, items__5344[3] = ((slice__u8){(u8*)" *t = sabk_error_type((u32)(e >> 32));\012", 39}), items__5344[4] = ((slice__u8){(u8*)"  i64 v = (i64)(u32)e;\012", 23}), items__5344[5] = ((slice__u8){(u8*)"  fflush(NULL);\012", 16}), items__5344[6] = ((slice__u8){(u8*)"  if (!t) {\012", 12}), items__5344[7] = ((slice__u8){(u8*)"    dprintf(2, (u8 *)\"error: %llu\\n\", (unsigned long long)e);\012", 62}), items__5344[8] = ((slice__u8){(u8*)"    return;\012", 12}), items__5344[9] = ((slice__u8){(u8*)"  }\012", 4}), items__5344[10] = ((slice__u8){(u8*)"  for (isize i = 0; i < t->variants.len; i++)\012", 46}), items__5344[11] = ((slice__u8){(u8*)"    if (t->variants.ptr[i].value == v) {\012", 41}), items__5344[12] = ((slice__u8){(u8*)"      dprintf(2, (u8 *)\"error: %.*s.%.*s\\n\", (int)t->name.len, t->name.ptr,\012", 76}), items__5344[13] = ((slice__u8){(u8*)"              (int)t->variants.ptr[i].name.len, t->variants.ptr[i].name.ptr);\012", 78}), items__5344[14] = ((slice__u8){(u8*)"      return;\012", 14}), items__5344[15] = ((slice__u8){(u8*)"    }\012", 6}), items__5344[16] = ((slice__u8){(u8*)"  dprintf(2, (u8 *)\"error: %.*s(%lld)\\n\", (int)t->name.len, t->name.ptr, (long long)v);\012", 88}), items__5344[17] = ((slice__u8){(u8*)"}\012", 2}), items__5344), 18})); str__append_string(ctx, v__5343, v__5345); });
   return grow__u8__view(out);
 }
 
 static slice__u8 codegen__type_info_ref(prelude__Context *ctx, codegen__CodeGen* g, types__Type* t) {
-  prelude__Any items__5344[1];
-  slice__u8 items__5345[3];
+  prelude__Any items__5348[1];
+  slice__u8 items__5349[3];
   slice__u8 name = ({
-    tuple__1 result__5342 = map__map_get__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1985:27"))->type_info_names), t);
-    slice__u8 value__5343;
-    if (!result__5342._1)
-      value__5343 = ((slice__u8){(u8*)"", 0});
+    tuple__1 result__5346 = map__map_get__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1985:27"))->type_info_names), t);
+    slice__u8 value__5347;
+    if (!result__5346._1)
+      value__5347 = ((slice__u8){(u8*)"", 0});
     else
-      value__5343 = result__5342._0;
-    value__5343;
+      value__5347 = result__5346._0;
+    value__5347;
   });
   if (((name).len == ((isize)0LL))) {
-    name = fmt__format(ctx, ((slice__u8){(u8*)"ti__%", 5}), ((slice__prelude__Any){(items__5344[0] = ((prelude__Any){.value = (isize[1]){((isize)((((rt_nonnull(g, "src/codegen.sabk:1987:34"))->type_info_names).entries).len + ((isize)1LL)))}, .info = (&ti__3)}), items__5344), 1}));
+    name = fmt__format(ctx, ((slice__u8){(u8*)"ti__%", 5}), ((slice__prelude__Any){(items__5348[0] = ((prelude__Any){.value = (isize[1]){((isize)((((rt_nonnull(g, "src/codegen.sabk:1987:34"))->type_info_names).entries).len + ((isize)1LL)))}, .info = (&ti__3)}), items__5348), 1}));
     map__map_put__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1988:20"))->type_info_names), t, name);
     array__array_add__ptr_types__Type(ctx, (&(rt_nonnull(g, "src/codegen.sabk:1989:22"))->type_info_queue), t);
   }
-  return codegen__cat(ctx, ((slice__string){(items__5345[0] = ((slice__u8){(u8*)"(&", 2}), items__5345[1] = name, items__5345[2] = ((slice__u8){(u8*)")", 1}), items__5345), 3}));
+  return codegen__cat(ctx, ((slice__string){(items__5349[0] = ((slice__u8){(u8*)"(&", 2}), items__5349[1] = name, items__5349[2] = ((slice__u8){(u8*)")", 1}), items__5349), 3}));
 }
 
 static slice__u8 codegen__text_value(prelude__Context *ctx, slice__u8 s) {
-  slice__u8 items__5346[5];
-  return codegen__cat(ctx, ((slice__string){(items__5346[0] = ((slice__u8){(u8*)"{(u8*)", 6}), items__5346[1] = codegen__c_string(ctx, s), items__5346[2] = ((slice__u8){(u8*)", ", 2}), items__5346[3] = codegen__num(ctx, ((i64)((s).len))), items__5346[4] = ((slice__u8){(u8*)"}", 1}), items__5346), 5}));
+  slice__u8 items__5350[5];
+  return codegen__cat(ctx, ((slice__string){(items__5350[0] = ((slice__u8){(u8*)"{(u8*)", 6}), items__5350[1] = codegen__c_string(ctx, s), items__5350[2] = ((slice__u8){(u8*)", ", 2}), items__5350[3] = codegen__num(ctx, ((i64)((s).len))), items__5350[4] = ((slice__u8){(u8*)"}", 1}), items__5350), 5}));
 }
 
 static void codegen__define_type_infos(prelude__Context *ctx, codegen__CodeGen* g) {
-  slice__u8 items__5356[7];
-  prelude__Any items__5359[3];
-  prelude__Any items__5361[2];
-  slice__u8 items__5365[7];
-  prelude__Any items__5368[3];
-  prelude__Any items__5370[2];
-  prelude__Any items__5371[2];
-  slice__u8 items__5373[23];
-  types__Type* field_type = ({ check__Checker* v__5347 = (rt_nonnull(g, "src/codegen.sabk:1999:34"))->c; ast__Node* v__5348 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"TypeField", 9})); check__decl_type(ctx, v__5347, v__5348); });
-  types__Type* variant_type = ({ check__Checker* v__5349 = (rt_nonnull(g, "src/codegen.sabk:2000:36"))->c; ast__Node* v__5350 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"TypeVariant", 11})); check__decl_type(ctx, v__5349, v__5350); });
+  slice__u8 items__5360[7];
+  prelude__Any items__5363[3];
+  prelude__Any items__5365[2];
+  slice__u8 items__5369[7];
+  prelude__Any items__5372[3];
+  prelude__Any items__5374[2];
+  prelude__Any items__5375[2];
+  slice__u8 items__5377[23];
+  types__Type* field_type = ({ check__Checker* v__5351 = (rt_nonnull(g, "src/codegen.sabk:1999:34"))->c; ast__Node* v__5352 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"TypeField", 9})); check__decl_type(ctx, v__5351, v__5352); });
+  types__Type* variant_type = ({ check__Checker* v__5353 = (rt_nonnull(g, "src/codegen.sabk:2000:36"))->c; ast__Node* v__5354 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"TypeVariant", 11})); check__decl_type(ctx, v__5353, v__5354); });
   grow__u8 decls = {0};
   grow__u8 data = {0};
   isize i = ((isize)0LL);
@@ -36137,13 +36246,13 @@ static void codegen__define_type_infos(prelude__Context *ctx, codegen__CodeGen* 
     types__Type* t = (*slice__ptr_types__Type__at(grow__ptr_types__Type__view((rt_nonnull(g, "src/codegen.sabk:2006:19"))->type_info_queue), i, "src/codegen.sabk:2006:34"));
     i++;
     slice__u8 name = ({
-      tuple__1 result__5351 = map__map_get__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:2008:31"))->type_info_names), t);
-      slice__u8 value__5352;
-      if (!result__5351._1)
-        value__5352 = ((slice__u8){(u8*)"", 0});
+      tuple__1 result__5355 = map__map_get__ptr_types__Type__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:2008:31"))->type_info_names), t);
+      slice__u8 value__5356;
+      if (!result__5355._1)
+        value__5356 = ((slice__u8){(u8*)"", 0});
       else
-        value__5352 = result__5351._0;
-      value__5352;
+        value__5356 = result__5355._0;
+      value__5356;
     });
     comptime__TypeShape shape = comptime__shape_of(ctx, (rt_nonnull(g, "src/codegen.sabk:2009:32"))->c, t);
     slice__u8 fields = ((slice__u8){(u8*)"{0}", 3});
@@ -36151,30 +36260,30 @@ static void codegen__define_type_infos(prelude__Context *ctx, codegen__CodeGen* 
     if ((((shape).fields).len > ((isize)0LL))) {
       grow__u8 items = {0};
       {
-        grow__comptime__FieldShape seq__5353 = (shape).fields;
-        for (isize i__5354 = 0; i__5354 < seq__5353.len; i__5354++) {
-          comptime__FieldShape f = seq__5353.ptr[i__5354];
-          ({ grow__u8* v__5355 = (&items); slice__u8 v__5357 = codegen__cat(ctx, ((slice__string){(items__5356[0] = ((slice__u8){(u8*)"  {.name = ", 11}), items__5356[1] = codegen__text_value(ctx, (f).name), items__5356[2] = ((slice__u8){(u8*)", .info = ", 10}), items__5356[3] = codegen__type_info_ref(ctx, g, (f).ty), items__5356[4] = ((slice__u8){(u8*)", .offset = ", 12}), items__5356[5] = codegen__unum(ctx, (f).offset), items__5356[6] = ((slice__u8){(u8*)"},\012", 3}), items__5356), 7})); str__append_string(ctx, v__5355, v__5357); });
+        grow__comptime__FieldShape seq__5357 = (shape).fields;
+        for (isize i__5358 = 0; i__5358 < seq__5357.len; i__5358++) {
+          comptime__FieldShape f = seq__5357.ptr[i__5358];
+          ({ grow__u8* v__5359 = (&items); slice__u8 v__5361 = codegen__cat(ctx, ((slice__string){(items__5360[0] = ((slice__u8){(u8*)"  {.name = ", 11}), items__5360[1] = codegen__text_value(ctx, (f).name), items__5360[2] = ((slice__u8){(u8*)", .info = ", 10}), items__5360[3] = codegen__type_info_ref(ctx, g, (f).ty), items__5360[4] = ((slice__u8){(u8*)", .offset = ", 12}), items__5360[5] = codegen__unum(ctx, (f).offset), items__5360[6] = ((slice__u8){(u8*)"},\012", 3}), items__5360), 7})); str__append_string(ctx, v__5359, v__5361); });
         }
       }
-      ({ grow__u8* v__5358 = (&data); slice__prelude__Any v__5360 = ((slice__prelude__Any){(items__5359[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, field_type)}, .info = (&ti__1)}), items__5359[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5359[2] = ((prelude__Any){.value = (slice__u8[1]){grow__u8__view(items)}, .info = (&ti__1)}), items__5359), 3}); fmt__print_to(ctx, v__5358, ((slice__u8){(u8*)"static % %__fields[] = {\012%};\012", 29}), v__5360); });
-      fields = fmt__tformat(ctx, ((slice__u8){(u8*)"{%__fields, %}", 14}), ((slice__prelude__Any){(items__5361[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5361[1] = ((prelude__Any){.value = (isize[1]){((shape).fields).len}, .info = (&ti__3)}), items__5361), 2}));
+      ({ grow__u8* v__5362 = (&data); slice__prelude__Any v__5364 = ((slice__prelude__Any){(items__5363[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, field_type)}, .info = (&ti__1)}), items__5363[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5363[2] = ((prelude__Any){.value = (slice__u8[1]){grow__u8__view(items)}, .info = (&ti__1)}), items__5363), 3}); fmt__print_to(ctx, v__5362, ((slice__u8){(u8*)"static % %__fields[] = {\012%};\012", 29}), v__5364); });
+      fields = fmt__tformat(ctx, ((slice__u8){(u8*)"{%__fields, %}", 14}), ((slice__prelude__Any){(items__5365[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5365[1] = ((prelude__Any){.value = (isize[1]){((shape).fields).len}, .info = (&ti__3)}), items__5365), 2}));
     }
     if ((((shape).variants).len > ((isize)0LL))) {
       grow__u8 items = {0};
       {
-        grow__comptime__VariantShape seq__5362 = (shape).variants;
-        for (isize i__5363 = 0; i__5363 < seq__5362.len; i__5363++) {
-          comptime__VariantShape v = seq__5362.ptr[i__5363];
-          ({ grow__u8* v__5364 = (&items); slice__u8 v__5366 = codegen__cat(ctx, ((slice__string){(items__5365[0] = ((slice__u8){(u8*)"  {.name = ", 11}), items__5365[1] = codegen__text_value(ctx, (v).name), items__5365[2] = ((slice__u8){(u8*)", .value = (i64)", 16}), items__5365[3] = codegen__unum(ctx, ((u64)((v).value))), items__5365[4] = ((slice__u8){(u8*)"ULL, .payload = ", 16}), items__5365[5] = (((v).payload != ((types__Type*)0)) ? codegen__type_info_ref(ctx, g, (v).payload) : ((slice__u8){(u8*)"0", 1})), items__5365[6] = ((slice__u8){(u8*)"},\012", 3}), items__5365), 7})); str__append_string(ctx, v__5364, v__5366); });
+        grow__comptime__VariantShape seq__5366 = (shape).variants;
+        for (isize i__5367 = 0; i__5367 < seq__5366.len; i__5367++) {
+          comptime__VariantShape v = seq__5366.ptr[i__5367];
+          ({ grow__u8* v__5368 = (&items); slice__u8 v__5370 = codegen__cat(ctx, ((slice__string){(items__5369[0] = ((slice__u8){(u8*)"  {.name = ", 11}), items__5369[1] = codegen__text_value(ctx, (v).name), items__5369[2] = ((slice__u8){(u8*)", .value = (i64)", 16}), items__5369[3] = codegen__unum(ctx, ((u64)((v).value))), items__5369[4] = ((slice__u8){(u8*)"ULL, .payload = ", 16}), items__5369[5] = (((v).payload != ((types__Type*)0)) ? codegen__type_info_ref(ctx, g, (v).payload) : ((slice__u8){(u8*)"0", 1})), items__5369[6] = ((slice__u8){(u8*)"},\012", 3}), items__5369), 7})); str__append_string(ctx, v__5368, v__5370); });
         }
       }
-      ({ grow__u8* v__5367 = (&data); slice__prelude__Any v__5369 = ((slice__prelude__Any){(items__5368[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, variant_type)}, .info = (&ti__1)}), items__5368[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5368[2] = ((prelude__Any){.value = (slice__u8[1]){grow__u8__view(items)}, .info = (&ti__1)}), items__5368), 3}); fmt__print_to(ctx, v__5367, ((slice__u8){(u8*)"static % %__variants[] = {\012%};\012", 31}), v__5369); });
-      variants = fmt__tformat(ctx, ((slice__u8){(u8*)"{%__variants, %}", 16}), ((slice__prelude__Any){(items__5370[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5370[1] = ((prelude__Any){.value = (isize[1]){((shape).variants).len}, .info = (&ti__3)}), items__5370), 2}));
+      ({ grow__u8* v__5371 = (&data); slice__prelude__Any v__5373 = ((slice__prelude__Any){(items__5372[0] = ((prelude__Any){.value = (slice__u8[1]){codegen__c_type(ctx, g, variant_type)}, .info = (&ti__1)}), items__5372[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5372[2] = ((prelude__Any){.value = (slice__u8[1]){grow__u8__view(items)}, .info = (&ti__1)}), items__5372), 3}); fmt__print_to(ctx, v__5371, ((slice__u8){(u8*)"static % %__variants[] = {\012%};\012", 31}), v__5373); });
+      variants = fmt__tformat(ctx, ((slice__u8){(u8*)"{%__variants, %}", 16}), ((slice__prelude__Any){(items__5374[0] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5374[1] = ((prelude__Any){.value = (isize[1]){((shape).variants).len}, .info = (&ti__3)}), items__5374), 2}));
     }
     slice__u8 info = codegen__c_type(ctx, g, (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:2029:32"))->c, "src/codegen.sabk:2029:34"))->type_info_type);
-    fmt__print_to(ctx, (&decls), ((slice__u8){(u8*)"static % %;\012", 12}), ((slice__prelude__Any){(items__5371[0] = ((prelude__Any){.value = (slice__u8[1]){info}, .info = (&ti__1)}), items__5371[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5371), 2}));
-    ({ grow__u8* v__5372 = (&data); slice__u8 v__5374 = codegen__cat(ctx, ((slice__string){(items__5373[0] = ((slice__u8){(u8*)"static ", 7}), items__5373[1] = info, items__5373[2] = ((slice__u8){(u8*)" ", 1}), items__5373[3] = name, items__5373[4] = ((slice__u8){(u8*)" = {.kind = ", 12}), items__5373[5] = codegen__num(ctx, comptime__type_kind_value(ctx, (rt_nonnull(g, "src/codegen.sabk:2031:100"))->c, (shape).kind)), items__5373[6] = ((slice__u8){(u8*)", .name = ", 10}), items__5373[7] = codegen__text_value(ctx, types__type_name(ctx, t)), items__5373[8] = ((slice__u8){(u8*)", .size = ", 10}), items__5373[9] = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:2032:95"))->size), items__5373[10] = ((slice__u8){(u8*)", .align = ", 11}), items__5373[11] = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:2033:56"))->align), items__5373[12] = ((slice__u8){(u8*)", .is_signed = ", 15}), items__5373[13] = ((((rt_nonnull(t, "src/codegen.sabk:2034:40"))->kind == ((types__TypeKind)3LL)) && (rt_nonnull(t, "src/codegen.sabk:2034:58"))->is_signed) ? ((slice__u8){(u8*)"1", 1}) : ((slice__u8){(u8*)"0", 1})), items__5373[14] = ((slice__u8){(u8*)", .elem = ", 10}), items__5373[15] = (((shape).elem != ((types__Type*)0)) ? codegen__type_info_ref(ctx, g, (shape).elem) : ((slice__u8){(u8*)"0", 1})), items__5373[16] = ((slice__u8){(u8*)", .count = ", 11}), items__5373[17] = codegen__unum(ctx, (shape).count), items__5373[18] = ((slice__u8){(u8*)", .fields = ", 12}), items__5373[19] = fields, items__5373[20] = ((slice__u8){(u8*)", .variants = ", 14}), items__5373[21] = variants, items__5373[22] = ((slice__u8){(u8*)"};\012", 3}), items__5373), 23})); str__append_string(ctx, v__5372, v__5374); });
+    fmt__print_to(ctx, (&decls), ((slice__u8){(u8*)"static % %;\012", 12}), ((slice__prelude__Any){(items__5375[0] = ((prelude__Any){.value = (slice__u8[1]){info}, .info = (&ti__1)}), items__5375[1] = ((prelude__Any){.value = (slice__u8[1]){name}, .info = (&ti__1)}), items__5375), 2}));
+    ({ grow__u8* v__5376 = (&data); slice__u8 v__5378 = codegen__cat(ctx, ((slice__string){(items__5377[0] = ((slice__u8){(u8*)"static ", 7}), items__5377[1] = info, items__5377[2] = ((slice__u8){(u8*)" ", 1}), items__5377[3] = name, items__5377[4] = ((slice__u8){(u8*)" = {.kind = ", 12}), items__5377[5] = codegen__num(ctx, comptime__type_kind_value(ctx, (rt_nonnull(g, "src/codegen.sabk:2031:100"))->c, (shape).kind)), items__5377[6] = ((slice__u8){(u8*)", .name = ", 10}), items__5377[7] = codegen__text_value(ctx, types__type_name(ctx, t)), items__5377[8] = ((slice__u8){(u8*)", .size = ", 10}), items__5377[9] = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:2032:95"))->size), items__5377[10] = ((slice__u8){(u8*)", .align = ", 11}), items__5377[11] = codegen__unum(ctx, (rt_nonnull(t, "src/codegen.sabk:2033:56"))->align), items__5377[12] = ((slice__u8){(u8*)", .is_signed = ", 15}), items__5377[13] = ((((rt_nonnull(t, "src/codegen.sabk:2034:40"))->kind == ((types__TypeKind)3LL)) && (rt_nonnull(t, "src/codegen.sabk:2034:58"))->is_signed) ? ((slice__u8){(u8*)"1", 1}) : ((slice__u8){(u8*)"0", 1})), items__5377[14] = ((slice__u8){(u8*)", .elem = ", 10}), items__5377[15] = (((shape).elem != ((types__Type*)0)) ? codegen__type_info_ref(ctx, g, (shape).elem) : ((slice__u8){(u8*)"0", 1})), items__5377[16] = ((slice__u8){(u8*)", .count = ", 11}), items__5377[17] = codegen__unum(ctx, (shape).count), items__5377[18] = ((slice__u8){(u8*)", .fields = ", 12}), items__5377[19] = fields, items__5377[20] = ((slice__u8){(u8*)", .variants = ", 14}), items__5377[21] = variants, items__5377[22] = ((slice__u8){(u8*)"};\012", 3}), items__5377), 23})); str__append_string(ctx, v__5376, v__5378); });
   }
   str__append_string(ctx, (&decls), grow__u8__view(data));
   (rt_nonnull(g, "src/codegen.sabk:2039:7"))->type_infos = grow__u8__view(decls);
@@ -36191,18 +36300,18 @@ static void codegen__reach(prelude__Context *ctx, codegen__CodeGen* g, ast__Node
 
 static void codegen__find_reachable(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* main_fn) {
   codegen__reach(ctx, g, main_fn, ((ast__Node*)0));
-  ({ codegen__CodeGen* v__5375 = g; ast__Node* v__5376 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"default_context", 15})); codegen__reach(ctx, v__5375, v__5376, ((ast__Node*)0)); });
+  ({ codegen__CodeGen* v__5379 = g; ast__Node* v__5380 = codegen__prelude_decl(ctx, g, ((slice__u8){(u8*)"default_context", 15})); codegen__reach(ctx, v__5379, v__5380, ((ast__Node*)0)); });
   {
-    grow__ptr_module__Module seq__5377 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:2059:17"))->res, "src/codegen.sabk:2059:21"))->modules;
-    for (isize i__5378 = 0; i__5378 < seq__5377.len; i__5378++) {
-      module__Module* m = seq__5377.ptr[i__5378];
+    grow__ptr_module__Module seq__5381 = (rt_nonnull((rt_nonnull(g, "src/codegen.sabk:2059:17"))->res, "src/codegen.sabk:2059:21"))->modules;
+    for (isize i__5382 = 0; i__5382 < seq__5381.len; i__5382++) {
+      module__Module* m = seq__5381.ptr[i__5382];
       {
-        slice__ptr_ast__Node seq__5379 = check__root_list(ctx, m);
-        for (isize i__5380 = 0; i__5380 < seq__5379.len; i__5380++) {
-          ast__Node* d = seq__5379.ptr[i__5380];
+        slice__ptr_ast__Node seq__5383 = check__root_list(ctx, m);
+        for (isize i__5384 = 0; i__5384 < seq__5383.len; i__5384++) {
+          ast__Node* d = seq__5383.ptr[i__5384];
           {
             ast__Node* body;
-            if ((({ ast__NodeKind is__5381 = (rt_nonnull(d, "src/codegen.sabk:2061:19"))->kind; (is__5381.tag == ((ast__NodeKind__Tag)2LL) && (is__5381.payload.Fn.is_extern == true)) ? (body = is__5381.payload.Fn.body, 1) : 0; }) && (body != ((ast__Node*)0)))) {
+            if ((({ ast__NodeKind is__5385 = (rt_nonnull(d, "src/codegen.sabk:2061:19"))->kind; (is__5385.tag == ((ast__NodeKind__Tag)2LL) && (is__5385.payload.Fn.is_extern == true)) ? (body = is__5385.payload.Fn.body, 1) : 0; }) && (body != ((ast__Node*)0)))) {
               codegen__reach(ctx, g, d, ((ast__Node*)0));
             }
           }
@@ -36215,9 +36324,9 @@ static void codegen__find_reachable(prelude__Context *ctx, codegen__CodeGen* g, 
     ((rt_nonnull(g, "src/codegen.sabk:2065:11"))->to_scan).len--;
     (rt_nonnull(g, "src/codegen.sabk:2066:11"))->scanning = d;
     if ((((rt_nonnull(d, "src/codegen.sabk:2067:15"))->kind).tag == ((ast__NodeKind__Tag)2LL))) {
-      ({ codegen__CodeGen* v__5382 = g; ast__Node* v__5383 = check__fn_body(ctx, d); codegen__scan(ctx, v__5382, v__5383); });
+      ({ codegen__CodeGen* v__5386 = g; ast__Node* v__5387 = check__fn_body(ctx, d); codegen__scan(ctx, v__5386, v__5387); });
     } else {
-      ({ codegen__CodeGen* v__5384 = g; ast__Node* v__5385 = check__value_of(ctx, d); codegen__scan(ctx, v__5384, v__5385); });
+      ({ codegen__CodeGen* v__5388 = g; ast__Node* v__5389 = check__value_of(ctx, d); codegen__scan(ctx, v__5388, v__5389); });
     }
   }
 }
@@ -36227,8 +36336,8 @@ static void codegen__scan(prelude__Context *ctx, codegen__CodeGen* g, ast__Node*
     return;
   }
   {
-    ast__NodeKind switch__5386 = (rt_nonnull(n, "src/codegen.sabk:2077:15"))->kind;
-    switch (switch__5386.tag) {
+    ast__NodeKind switch__5390 = (rt_nonnull(n, "src/codegen.sabk:2077:15"))->kind;
+    switch (switch__5390.tag) {
     case ((ast__NodeKind__Tag)34LL):
     case ((ast__NodeKind__Tag)47LL):
     {
@@ -36246,8 +36355,8 @@ static void codegen__scan(prelude__Context *ctx, codegen__CodeGen* g, ast__Node*
     break;
     case ((ast__NodeKind__Tag)46LL):
     {
-      ast__Node* callee = switch__5386.payload.Call.callee;
-      slice__ptr_ast__Node args = switch__5386.payload.Call.args;
+      ast__Node* callee = switch__5390.payload.Call.callee;
+      slice__ptr_ast__Node args = switch__5390.payload.Call.args;
       ast__Node* fun = (((rt_nonnull(n, "src/codegen.sabk:2087:32"))->decl != ((ast__Node*)0)) ? (rt_nonnull(n, "src/codegen.sabk:2087:48"))->decl : ((((rt_nonnull(callee, "src/codegen.sabk:2088:42"))->decl != ((ast__Node*)0)) && (((rt_nonnull((rt_nonnull(callee, "src/codegen.sabk:2088:65"))->decl, "src/codegen.sabk:2088:70"))->kind).tag == ((ast__NodeKind__Tag)2LL))) ? (rt_nonnull(callee, "src/codegen.sabk:2088:94"))->decl : ((ast__Node*)0)));
       if (((rt_nonnull(n, "src/codegen.sabk:2090:15"))->decl != ((ast__Node*)0))) {
         codegen__reach(ctx, g, (rt_nonnull(n, "src/codegen.sabk:2091:24"))->decl, n);
@@ -36255,9 +36364,9 @@ static void codegen__scan(prelude__Context *ctx, codegen__CodeGen* g, ast__Node*
       if ((fun != ((ast__Node*)0))) {
         slice__ptr_ast__Node params = check__fn_params(ctx, fun);
         {
-          isize end__5387 = (params).len;
-          for (isize i = (args).len; i < end__5387; i++) {
-            ({ codegen__CodeGen* v__5388 = g; ast__Node* v__5389 = check__value_of(ctx, (*slice__ptr_ast__Node__at(params, i, "src/codegen.sabk:2096:40"))); codegen__scan(ctx, v__5388, v__5389); });
+          isize end__5391 = (params).len;
+          for (isize i = (args).len; i < end__5391; i++) {
+            ({ codegen__CodeGen* v__5392 = g; ast__Node* v__5393 = check__value_of(ctx, (*slice__ptr_ast__Node__at(params, i, "src/codegen.sabk:2096:40"))); codegen__scan(ctx, v__5392, v__5393); });
           }
         }
       }
@@ -36267,11 +36376,11 @@ static void codegen__scan(prelude__Context *ctx, codegen__CodeGen* g, ast__Node*
     {
       if ((((rt_nonnull(n, "src/codegen.sabk:2100:15"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(n, "src/codegen.sabk:2100:31"))->ty, "src/codegen.sabk:2100:34"))->kind == ((types__TypeKind)11LL)))) {
         {
-          grow__types__Field seq__5390 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:2101:25"))->ty, "src/codegen.sabk:2101:28"))->fields;
-          for (isize i__5391 = 0; i__5391 < seq__5390.len; i__5391++) {
-            types__Field f = seq__5390.ptr[i__5391];
+          grow__types__Field seq__5394 = (rt_nonnull((rt_nonnull(n, "src/codegen.sabk:2101:25"))->ty, "src/codegen.sabk:2101:28"))->fields;
+          for (isize i__5395 = 0; i__5395 < seq__5394.len; i__5395++) {
+            types__Field f = seq__5394.ptr[i__5395];
             if (((f).decl != ((ast__Node*)0))) {
-              ({ codegen__CodeGen* v__5392 = g; ast__Node* v__5393 = check__value_of(ctx, (f).decl); codegen__scan(ctx, v__5392, v__5393); });
+              ({ codegen__CodeGen* v__5396 = g; ast__Node* v__5397 = check__value_of(ctx, (f).decl); codegen__scan(ctx, v__5396, v__5397); });
             }
           }
         }
@@ -36280,13 +36389,13 @@ static void codegen__scan(prelude__Context *ctx, codegen__CodeGen* g, ast__Node*
     break;
     case ((ast__NodeKind__Tag)24LL):
     {
-      ({ codegen__CodeGen* v__5394 = g; ast__Node* v__5395 = check__static_if_branch(ctx, n); codegen__scan(ctx, v__5394, v__5395); });
+      ({ codegen__CodeGen* v__5398 = g; ast__Node* v__5399 = check__static_if_branch(ctx, n); codegen__scan(ctx, v__5398, v__5399); });
       return;
     }
     break;
     case ((ast__NodeKind__Tag)15LL):
     {
-      ast__Node* value = switch__5386.payload.ExprStmt.value;
+      ast__Node* value = switch__5390.payload.ExprStmt.value;
       if ((((rt_nonnull(value, "src/codegen.sabk:2108:19"))->kind).tag == ((ast__NodeKind__Tag)12LL))) {
         return;
       }
@@ -36299,33 +36408,33 @@ static void codegen__scan(prelude__Context *ctx, codegen__CodeGen* g, ast__Node*
     }
   }
   {
-    grow__ptr_ast__Node seq__5396 = ast__code_children(ctx, n);
-    for (isize i__5397 = 0; i__5397 < seq__5396.len; i__5397++) {
-      ast__Node* child = seq__5396.ptr[i__5397];
+    grow__ptr_ast__Node seq__5400 = ast__code_children(ctx, n);
+    for (isize i__5401 = 0; i__5401 < seq__5400.len; i__5401++) {
+      ast__Node* child = seq__5400.ptr[i__5401];
       codegen__scan(ctx, g, child);
     }
   }
 }
 
 static slice__u8 codegen__default_value(prelude__Context *ctx, codegen__CodeGen* g, types__Type* t) {
-  slice__u8 items__5400[5];
-  slice__u8 items__5406[6];
+  slice__u8 items__5404[5];
   slice__u8 items__5410[6];
+  slice__u8 items__5414[6];
   if ((!comptime__has_defaults(ctx, (rt_nonnull(g, "src/codegen.sabk:2121:25"))->c, t))) {
     return codegen__zero_value(ctx, t);
   }
   if (((rt_nonnull(t, "src/codegen.sabk:2123:11"))->kind == ((types__TypeKind)7LL))) {
-    return ({ codegen__CodeGen* v__5398 = g; types__Type* v__5399 = t; slice__u8 v__5401 = codegen__cat(ctx, ((slice__string){(items__5400[0] = ((slice__u8){(u8*)".data = { [0 ... ", 17}), items__5400[1] = codegen__unum(ctx, ((u64)((rt_nonnull(t, "src/codegen.sabk:2124:63"))->len - ((u64)1LL)))), items__5400[2] = ((slice__u8){(u8*)"] = ", 4}), items__5400[3] = codegen__default_value(ctx, g, (rt_nonnull(t, "src/codegen.sabk:2124:100"))->elem), items__5400[4] = ((slice__u8){(u8*)" }", 2}), items__5400), 5})); codegen__compound(ctx, v__5398, v__5399, v__5401); });
+    return ({ codegen__CodeGen* v__5402 = g; types__Type* v__5403 = t; slice__u8 v__5405 = codegen__cat(ctx, ((slice__string){(items__5404[0] = ((slice__u8){(u8*)".data = { [0 ... ", 17}), items__5404[1] = codegen__unum(ctx, ((u64)((rt_nonnull(t, "src/codegen.sabk:2124:63"))->len - ((u64)1LL)))), items__5404[2] = ((slice__u8){(u8*)"] = ", 4}), items__5404[3] = codegen__default_value(ctx, g, (rt_nonnull(t, "src/codegen.sabk:2124:100"))->elem), items__5404[4] = ((slice__u8){(u8*)" }", 2}), items__5404), 5})); codegen__compound(ctx, v__5402, v__5403, v__5405); });
   }
   if ((rt_nonnull(t, "src/codegen.sabk:2125:11"))->is_tagged) {
     ast__Node* first = (*slice__ptr_ast__Node__at(check__enum_variants(ctx, (rt_nonnull(t, "src/codegen.sabk:2126:37"))->decl), ((isize)0LL), "src/codegen.sabk:2126:42"));
-    return ({ codegen__CodeGen* v__5402 = g; types__Type* v__5403 = t; slice__u8 v__5407 = codegen__cat(ctx, ((slice__string){(items__5406[0] = ((slice__u8){(u8*)".tag = ", 7}), items__5406[1] = codegen__constant(ctx, g, (rt_nonnull(first, "src/codegen.sabk:2127:64"))->cval, ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:2127:72"))->fields), ((isize)0LL), "src/codegen.sabk:2127:78"))).ty), items__5406[2] = ((slice__u8){(u8*)", .payload.", 11}), items__5406[3] = codegen__local_name(ctx, ((rt_nonnull(first, "src/codegen.sabk:2128:52"))->tok).text), items__5406[4] = ((slice__u8){(u8*)" = ", 3}), items__5406[5] = ({ codegen__CodeGen* v__5404 = g; types__Type* v__5405 = check__payload_of(ctx, t, first); codegen__default_value(ctx, v__5404, v__5405); }), items__5406), 6})); codegen__compound(ctx, v__5402, v__5403, v__5407); });
+    return ({ codegen__CodeGen* v__5406 = g; types__Type* v__5407 = t; slice__u8 v__5411 = codegen__cat(ctx, ((slice__string){(items__5410[0] = ((slice__u8){(u8*)".tag = ", 7}), items__5410[1] = codegen__constant(ctx, g, (rt_nonnull(first, "src/codegen.sabk:2127:64"))->cval, ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:2127:72"))->fields), ((isize)0LL), "src/codegen.sabk:2127:78"))).ty), items__5410[2] = ((slice__u8){(u8*)", .payload.", 11}), items__5410[3] = codegen__local_name(ctx, ((rt_nonnull(first, "src/codegen.sabk:2128:52"))->tok).text), items__5410[4] = ((slice__u8){(u8*)" = ", 3}), items__5410[5] = ({ codegen__CodeGen* v__5408 = g; types__Type* v__5409 = check__payload_of(ctx, t, first); codegen__default_value(ctx, v__5408, v__5409); }), items__5410), 6})); codegen__compound(ctx, v__5406, v__5407, v__5411); });
   }
   slice__u8 body = ((slice__u8){(u8*)"", 0});
   {
-    grow__types__Field seq__5408 = (rt_nonnull(t, "src/codegen.sabk:2131:17"))->fields;
-    for (isize i__5409 = 0; i__5409 < seq__5408.len; i__5409++) {
-      types__Field f = seq__5408.ptr[i__5409];
+    grow__types__Field seq__5412 = (rt_nonnull(t, "src/codegen.sabk:2131:17"))->fields;
+    for (isize i__5413 = 0; i__5413 < seq__5412.len; i__5413++) {
+      types__Field f = seq__5412.ptr[i__5413];
       slice__u8 value = ((slice__u8){(u8*)"", 0});
       ast__Node* written = (((f).decl != ((ast__Node*)0)) ? check__value_of(ctx, (f).decl) : ((ast__Node*)0));
       if ((written != ((ast__Node*)0))) {
@@ -36336,7 +36445,7 @@ static slice__u8 codegen__default_value(prelude__Context *ctx, codegen__CodeGen*
         }
       }
       if (((value).len > ((isize)0LL))) {
-        body = codegen__cat(ctx, ((slice__string){(items__5410[0] = body, items__5410[1] = (((body).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5410[2] = ((slice__u8){(u8*)".", 1}), items__5410[3] = codegen__local_name(ctx, (f).name), items__5410[4] = ((slice__u8){(u8*)" = ", 3}), items__5410[5] = value, items__5410), 6}));
+        body = codegen__cat(ctx, ((slice__string){(items__5414[0] = body, items__5414[1] = (((body).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)", ", 2})), items__5414[2] = ((slice__u8){(u8*)".", 1}), items__5414[3] = codegen__local_name(ctx, (f).name), items__5414[4] = ((slice__u8){(u8*)" = ", 3}), items__5414[5] = value, items__5414), 6}));
       }
     }
   }
@@ -36344,42 +36453,42 @@ static slice__u8 codegen__default_value(prelude__Context *ctx, codegen__CodeGen*
 }
 
 static slice__u8 codegen__string_equal(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 a, slice__u8 b) {
-  slice__u8 items__5413[19];
-  slice__u8 t = ({ codegen__CodeGen* v__5411 = g; types__Type* v__5412 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:2146:29"))->string_; codegen__c_type(ctx, v__5411, v__5412); });
+  slice__u8 items__5417[19];
+  slice__u8 t = ({ codegen__CodeGen* v__5415 = g; types__Type* v__5416 = (rt_nonnull(codegen__ts(ctx, g), "src/codegen.sabk:2146:29"))->string_; codegen__c_type(ctx, v__5415, v__5416); });
   slice__u8 x = codegen__tmp(ctx, g, ((slice__u8){(u8*)"a", 1}));
   slice__u8 y = codegen__tmp(ctx, g, ((slice__u8){(u8*)"b", 1}));
-  return codegen__cat(ctx, ((slice__string){(items__5413[0] = ((slice__u8){(u8*)"({ ", 3}), items__5413[1] = t, items__5413[2] = ((slice__u8){(u8*)" ", 1}), items__5413[3] = x, items__5413[4] = ((slice__u8){(u8*)" = ", 3}), items__5413[5] = a, items__5413[6] = ((slice__u8){(u8*)", ", 2}), items__5413[7] = y, items__5413[8] = ((slice__u8){(u8*)" = ", 3}), items__5413[9] = b, items__5413[10] = ((slice__u8){(u8*)"; rt_bytes_equal(", 17}), items__5413[11] = x, items__5413[12] = ((slice__u8){(u8*)".ptr, ", 6}), items__5413[13] = x, items__5413[14] = ((slice__u8){(u8*)".len, ", 6}), items__5413[15] = y, items__5413[16] = ((slice__u8){(u8*)".ptr, ", 6}), items__5413[17] = y, items__5413[18] = ((slice__u8){(u8*)".len); })", 9}), items__5413), 19}));
+  return codegen__cat(ctx, ((slice__string){(items__5417[0] = ((slice__u8){(u8*)"({ ", 3}), items__5417[1] = t, items__5417[2] = ((slice__u8){(u8*)" ", 1}), items__5417[3] = x, items__5417[4] = ((slice__u8){(u8*)" = ", 3}), items__5417[5] = a, items__5417[6] = ((slice__u8){(u8*)", ", 2}), items__5417[7] = y, items__5417[8] = ((slice__u8){(u8*)" = ", 3}), items__5417[9] = b, items__5417[10] = ((slice__u8){(u8*)"; rt_bytes_equal(", 17}), items__5417[11] = x, items__5417[12] = ((slice__u8){(u8*)".ptr, ", 6}), items__5417[13] = x, items__5417[14] = ((slice__u8){(u8*)".len, ", 6}), items__5417[15] = y, items__5417[16] = ((slice__u8){(u8*)".ptr, ", 6}), items__5417[17] = y, items__5417[18] = ((slice__u8){(u8*)".len); })", 9}), items__5417), 19}));
 }
 
 static slice__u8 codegen__divide(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* at, types__Type* t, bool remainder, slice__u8 a, slice__u8 b, ast__Node* divisor) {
-  slice__u8 items__5416[7];
-  slice__u8 items__5417[5];
-  slice__u8 items__5418[3];
-  slice__u8 items__5419[5];
   slice__u8 items__5420[7];
-  slice__u8 items__5421[19];
+  slice__u8 items__5421[5];
+  slice__u8 items__5422[3];
+  slice__u8 items__5423[5];
+  slice__u8 items__5424[7];
+  slice__u8 items__5425[19];
   slice__u8 op = (remainder ? ((slice__u8){(u8*)" % ", 3}) : ((slice__u8){(u8*)" / ", 3}));
   const__Const k = (rt_nonnull(divisor, "src/codegen.sabk:2159:21"))->cval;
-  if (((((k).kind == ((const__ConstKind)1LL)) && (!const__i128_is_zero(ctx, (k).i))) && (!({ const__I128 v__5414 = (k).i; const__I128 v__5415 = const__i128(ctx, ((i64)-1LL)); const__i128_eq(ctx, v__5414, v__5415); })))) {
-    return codegen__cat(ctx, ((slice__string){(items__5416[0] = ((slice__u8){(u8*)"((", 2}), items__5416[1] = codegen__c_type(ctx, g, t), items__5416[2] = ((slice__u8){(u8*)")(", 2}), items__5416[3] = a, items__5416[4] = op, items__5416[5] = b, items__5416[6] = ((slice__u8){(u8*)"))", 2}), items__5416), 7}));
+  if (((((k).kind == ((const__ConstKind)1LL)) && (!const__i128_is_zero(ctx, (k).i))) && (!({ const__I128 v__5418 = (k).i; const__I128 v__5419 = const__i128(ctx, ((i64)-1LL)); const__i128_eq(ctx, v__5418, v__5419); })))) {
+    return codegen__cat(ctx, ((slice__string){(items__5420[0] = ((slice__u8){(u8*)"((", 2}), items__5420[1] = codegen__c_type(ctx, g, t), items__5420[2] = ((slice__u8){(u8*)")(", 2}), items__5420[3] = a, items__5420[4] = op, items__5420[5] = b, items__5420[6] = ((slice__u8){(u8*)"))", 2}), items__5420), 7}));
   }
   slice__u8 c_name = codegen__c_type(ctx, g, t);
   slice__u8 x = codegen__tmp(ctx, g, ((slice__u8){(u8*)"a", 1}));
   slice__u8 y = codegen__tmp(ctx, g, ((slice__u8){(u8*)"b", 1}));
-  slice__u8 result = codegen__cat(ctx, ((slice__string){(items__5417[0] = ((slice__u8){(u8*)"(", 1}), items__5417[1] = x, items__5417[2] = op, items__5417[3] = y, items__5417[4] = ((slice__u8){(u8*)")", 1}), items__5417), 5}));
+  slice__u8 result = codegen__cat(ctx, ((slice__string){(items__5421[0] = ((slice__u8){(u8*)"(", 1}), items__5421[1] = x, items__5421[2] = op, items__5421[3] = y, items__5421[4] = ((slice__u8){(u8*)")", 1}), items__5421), 5}));
   if ((rt_nonnull(t, "src/codegen.sabk:2166:11"))->is_signed) {
-    result = codegen__cat(ctx, ((slice__string){(items__5420[0] = ((slice__u8){(u8*)"(", 1}), items__5420[1] = y, items__5420[2] = ((slice__u8){(u8*)" == -1 \? ", 9}), items__5420[3] = (remainder ? codegen__cat(ctx, ((slice__string){(items__5418[0] = ((slice__u8){(u8*)"(", 1}), items__5418[1] = c_name, items__5418[2] = ((slice__u8){(u8*)")0", 2}), items__5418), 3})) : codegen__cat(ctx, ((slice__string){(items__5419[0] = ((slice__u8){(u8*)"(", 1}), items__5419[1] = c_name, items__5419[2] = ((slice__u8){(u8*)")(0ULL - (u64)", 14}), items__5419[3] = x, items__5419[4] = ((slice__u8){(u8*)")", 1}), items__5419), 5}))), items__5420[4] = ((slice__u8){(u8*)" : ", 3}), items__5420[5] = result, items__5420[6] = ((slice__u8){(u8*)")", 1}), items__5420), 7}));
+    result = codegen__cat(ctx, ((slice__string){(items__5424[0] = ((slice__u8){(u8*)"(", 1}), items__5424[1] = y, items__5424[2] = ((slice__u8){(u8*)" == -1 \? ", 9}), items__5424[3] = (remainder ? codegen__cat(ctx, ((slice__string){(items__5422[0] = ((slice__u8){(u8*)"(", 1}), items__5422[1] = c_name, items__5422[2] = ((slice__u8){(u8*)")0", 2}), items__5422), 3})) : codegen__cat(ctx, ((slice__string){(items__5423[0] = ((slice__u8){(u8*)"(", 1}), items__5423[1] = c_name, items__5423[2] = ((slice__u8){(u8*)")(0ULL - (u64)", 14}), items__5423[3] = x, items__5423[4] = ((slice__u8){(u8*)")", 1}), items__5423), 5}))), items__5424[4] = ((slice__u8){(u8*)" : ", 3}), items__5424[5] = result, items__5424[6] = ((slice__u8){(u8*)")", 1}), items__5424), 7}));
   }
-  return codegen__cat(ctx, ((slice__string){(items__5421[0] = ((slice__u8){(u8*)"({ ", 3}), items__5421[1] = c_name, items__5421[2] = ((slice__u8){(u8*)" ", 1}), items__5421[3] = x, items__5421[4] = ((slice__u8){(u8*)" = ", 3}), items__5421[5] = a, items__5421[6] = ((slice__u8){(u8*)", ", 2}), items__5421[7] = y, items__5421[8] = ((slice__u8){(u8*)" = ", 3}), items__5421[9] = b, items__5421[10] = ((slice__u8){(u8*)"; if (", 6}), items__5421[11] = y, items__5421[12] = ((slice__u8){(u8*)" == 0) rt_panic(", 16}), items__5421[13] = codegen__location(ctx, g, (rt_nonnull(at, "src/codegen.sabk:2170:116"))->tok), items__5421[14] = ((slice__u8){(u8*)", \"division by zero\"); (", 24}), items__5421[15] = c_name, items__5421[16] = ((slice__u8){(u8*)")", 1}), items__5421[17] = result, items__5421[18] = ((slice__u8){(u8*)"; })", 4}), items__5421), 19}));
+  return codegen__cat(ctx, ((slice__string){(items__5425[0] = ((slice__u8){(u8*)"({ ", 3}), items__5425[1] = c_name, items__5425[2] = ((slice__u8){(u8*)" ", 1}), items__5425[3] = x, items__5425[4] = ((slice__u8){(u8*)" = ", 3}), items__5425[5] = a, items__5425[6] = ((slice__u8){(u8*)", ", 2}), items__5425[7] = y, items__5425[8] = ((slice__u8){(u8*)" = ", 3}), items__5425[9] = b, items__5425[10] = ((slice__u8){(u8*)"; if (", 6}), items__5425[11] = y, items__5425[12] = ((slice__u8){(u8*)" == 0) rt_panic(", 16}), items__5425[13] = codegen__location(ctx, g, (rt_nonnull(at, "src/codegen.sabk:2170:116"))->tok), items__5425[14] = ((slice__u8){(u8*)", \"division by zero\"); (", 24}), items__5425[15] = c_name, items__5425[16] = ((slice__u8){(u8*)")", 1}), items__5425[17] = result, items__5425[18] = ((slice__u8){(u8*)"; })", 4}), items__5425), 19}));
 }
 
 static bool codegen__is_plain_place(prelude__Context *ctx, ast__Node* n) {
   {
-    ast__NodeKind switch__5422 = (rt_nonnull(n, "src/codegen.sabk:2178:15"))->kind;
-    switch (switch__5422.tag) {
+    ast__NodeKind switch__5426 = (rt_nonnull(n, "src/codegen.sabk:2178:15"))->kind;
+    switch (switch__5426.tag) {
     case ((ast__NodeKind__Tag)45LL):
     {
-      ast__Node* inner = switch__5422.payload.Grouped.inner;
+      ast__Node* inner = switch__5426.payload.Grouped.inner;
       return codegen__is_plain_place(ctx, inner);
     }
     break;
@@ -36391,7 +36500,7 @@ static bool codegen__is_plain_place(prelude__Context *ctx, ast__Node* n) {
     break;
     case ((ast__NodeKind__Tag)47LL):
     {
-      ast__Node* object = switch__5422.payload.Member.object;
+      ast__Node* object = switch__5426.payload.Member.object;
       return (((rt_nonnull(n, "src/codegen.sabk:2182:18"))->decl != ((ast__Node*)0)) || (((((rt_nonnull(object, "src/codegen.sabk:2182:42"))->ty != ((types__Type*)0)) && ((rt_nonnull((rt_nonnull(object, "src/codegen.sabk:2182:63"))->ty, "src/codegen.sabk:2182:66"))->kind != ((types__TypeKind)6LL))) && codegen__is_plain_place(ctx, object))));
     }
     break;
@@ -36405,14 +36514,14 @@ static bool codegen__is_plain_place(prelude__Context *ctx, ast__Node* n) {
 }
 
 static codegen__Ordered codegen__ordered(prelude__Context *ctx, codegen__CodeGen* g, slice__ptr_ast__Node parts) {
-  slice__u8 items__5429[7];
+  slice__u8 items__5433[7];
   codegen__Ordered o = {0};
   isize changing = ((isize)0LL);
   bool calls = false;
   {
-    slice__ptr_ast__Node seq__5423 = parts;
-    for (isize i__5424 = 0; i__5424 < seq__5423.len; i__5424++) {
-      ast__Node* p = seq__5423.ptr[i__5424];
+    slice__ptr_ast__Node seq__5427 = parts;
+    for (isize i__5428 = 0; i__5428 < seq__5427.len; i__5428++) {
+      ast__Node* p = seq__5427.ptr[i__5428];
       if ((!lower__is_fixed(ctx, p))) {
         changing++;
       }
@@ -36421,13 +36530,13 @@ static codegen__Ordered codegen__ordered(prelude__Context *ctx, codegen__CodeGen
   }
   bool hoist = (((!(rt_nonnull(g, "src/codegen.sabk:2196:20"))->static_init) && (changing >= ((isize)2LL))) && calls);
   {
-    slice__ptr_ast__Node seq__5425 = parts;
-    for (isize i__5426 = 0; i__5426 < seq__5425.len; i__5426++) {
-      ast__Node* p = seq__5425.ptr[i__5426];
+    slice__ptr_ast__Node seq__5429 = parts;
+    for (isize i__5430 = 0; i__5430 < seq__5429.len; i__5430++) {
+      ast__Node* p = seq__5429.ptr[i__5430];
       slice__u8 value = codegen__expr(ctx, g, p);
       if ((hoist && (!lower__is_fixed(ctx, p)))) {
         slice__u8 name = codegen__tmp(ctx, g, ((slice__u8){(u8*)"v", 1}));
-        (o).prefix = codegen__cat(ctx, ((slice__string){(items__5429[0] = (o).prefix, items__5429[1] = ({ codegen__CodeGen* v__5427 = g; types__Type* v__5428 = codegen__conv_or_ty(ctx, p); codegen__c_type(ctx, v__5427, v__5428); }), items__5429[2] = ((slice__u8){(u8*)" ", 1}), items__5429[3] = name, items__5429[4] = ((slice__u8){(u8*)" = ", 3}), items__5429[5] = value, items__5429[6] = ((slice__u8){(u8*)"; ", 2}), items__5429), 7}));
+        (o).prefix = codegen__cat(ctx, ((slice__string){(items__5433[0] = (o).prefix, items__5433[1] = ({ codegen__CodeGen* v__5431 = g; types__Type* v__5432 = codegen__conv_or_ty(ctx, p); codegen__c_type(ctx, v__5431, v__5432); }), items__5433[2] = ((slice__u8){(u8*)" ", 1}), items__5433[3] = name, items__5433[4] = ((slice__u8){(u8*)" = ", 3}), items__5433[5] = value, items__5433[6] = ((slice__u8){(u8*)"; ", 2}), items__5433), 7}));
         value = name;
       }
       array__array_add__string(ctx, (&(o).values), value);
@@ -36437,11 +36546,11 @@ static codegen__Ordered codegen__ordered(prelude__Context *ctx, codegen__CodeGen
 }
 
 static slice__u8 codegen__in_order(prelude__Context *ctx, codegen__Ordered o, slice__u8 result) {
-  slice__u8 items__5430[4];
+  slice__u8 items__5434[4];
   if ((((o).prefix).len == ((isize)0LL))) {
     return result;
   }
-  return codegen__cat(ctx, ((slice__string){(items__5430[0] = ((slice__u8){(u8*)"({ ", 3}), items__5430[1] = (o).prefix, items__5430[2] = result, items__5430[3] = ((slice__u8){(u8*)"; })", 4}), items__5430), 4}));
+  return codegen__cat(ctx, ((slice__string){(items__5434[0] = ((slice__u8){(u8*)"({ ", 3}), items__5434[1] = (o).prefix, items__5434[2] = result, items__5434[3] = ((slice__u8){(u8*)"; })", 4}), items__5434), 4}));
 }
 
 static bool codegen__targets_in_order(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* target, ast__Node* value) {
@@ -36453,19 +36562,19 @@ static bool codegen__targets_in_order(prelude__Context *ctx, codegen__CodeGen* g
 
 static tuple__14 codegen__clause_parts(prelude__Context *ctx, ast__Node* clause) {
   {
-    ast__NodeKind switch__5431 = (rt_nonnull(clause, "src/codegen.sabk:2227:20"))->kind;
-    switch (switch__5431.tag) {
+    ast__NodeKind switch__5435 = (rt_nonnull(clause, "src/codegen.sabk:2227:20"))->kind;
+    switch (switch__5435.tag) {
     case ((ast__NodeKind__Tag)31LL):
     {
-      slice__ptr_ast__Node patterns = switch__5431.payload.Case.patterns;
-      ast__Node* guard = switch__5431.payload.Case.guard;
-      ast__Node* body = switch__5431.payload.Case.body;
+      slice__ptr_ast__Node patterns = switch__5435.payload.Case.patterns;
+      ast__Node* guard = switch__5435.payload.Case.guard;
+      ast__Node* body = switch__5435.payload.Case.body;
       return ((tuple__14){._0 = patterns, ._1 = guard, ._2 = body});
     }
     break;
     case ((ast__NodeKind__Tag)32LL):
     {
-      ast__Node* body = switch__5431.payload.DefaultCase.body;
+      ast__Node* body = switch__5435.payload.DefaultCase.body;
       return ((tuple__14){._0 = ((slice__ptr_ast__Node){0}), ._1 = ((ast__Node*)0), ._2 = body});
     }
     break;
@@ -36479,27 +36588,27 @@ static tuple__14 codegen__clause_parts(prelude__Context *ctx, ast__Node* clause)
 }
 
 static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n, slice__u8 result) {
-  slice__u8 items__5439[6];
-  slice__u8 items__5441[3];
   slice__u8 items__5443[6];
-  slice__u8 items__5446[2];
-  slice__u8 items__5448[2];
-  slice__u8 items__5450[3];
-  slice__u8 items__5460[8];
-  slice__u8 items__5463[3];
-  slice__u8 items__5468[3];
-  slice__u8 items__5473[3];
-  slice__u8 items__5475[5];
-  slice__u8 items__5479[3];
-  slice__u8 items__5488[3];
-  slice__u8 items__5489[3];
-  slice__u8 items__5492[7];
-  slice__u8 items__5495[4];
-  slice__u8 items__5498[3];
+  slice__u8 items__5445[3];
+  slice__u8 items__5447[6];
+  slice__u8 items__5450[2];
+  slice__u8 items__5452[2];
+  slice__u8 items__5454[3];
+  slice__u8 items__5464[8];
+  slice__u8 items__5467[3];
+  slice__u8 items__5472[3];
+  slice__u8 items__5477[3];
+  slice__u8 items__5479[5];
+  slice__u8 items__5483[3];
+  slice__u8 items__5492[3];
+  slice__u8 items__5493[3];
+  slice__u8 items__5496[7];
+  slice__u8 items__5499[4];
+  slice__u8 items__5502[3];
   codegen__NodeSwitch s = {0};
   {
     ast__NodeKind__variant_Switch sw;
-    if (({ ast__NodeKind is__5432 = (rt_nonnull(n, "src/codegen.sabk:2241:11"))->kind; is__5432.tag == ((ast__NodeKind__Tag)30LL) ? (sw = is__5432.payload.Switch, 1) : 0; })) {
+    if (({ ast__NodeKind is__5436 = (rt_nonnull(n, "src/codegen.sabk:2241:11"))->kind; is__5436.tag == ((ast__NodeKind__Tag)30LL) ? (sw = is__5436.payload.Switch, 1) : 0; })) {
       s = ((codegen__NodeSwitch){.value = (sw).value, .cases = (sw).cases, .label = (sw).label, .continued = (sw).continued, .complete = (sw).complete, .in_order = (sw).in_order});
     }
   }
@@ -36507,15 +36616,15 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
   types__Type* tag_type = ((rt_nonnull(t, "src/codegen.sabk:2245:26"))->is_tagged ? ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:2245:39"))->fields), ((isize)0LL), "src/codegen.sabk:2245:45"))).ty : t);
   bool by_ref = false;
   {
-    slice__ptr_ast__Node seq__5433 = (s).cases;
-    for (isize i__5434 = 0; i__5434 < seq__5433.len; i__5434++) {
-      ast__Node* clause = seq__5433.ptr[i__5434];
-      tuple__14 values__5435 = codegen__clause_parts(ctx, clause);
-      slice__ptr_ast__Node patterns = values__5435._0;
+    slice__ptr_ast__Node seq__5437 = (s).cases;
+    for (isize i__5438 = 0; i__5438 < seq__5437.len; i__5438++) {
+      ast__Node* clause = seq__5437.ptr[i__5438];
+      tuple__14 values__5439 = codegen__clause_parts(ctx, clause);
+      slice__ptr_ast__Node patterns = values__5439._0;
       {
-        slice__ptr_ast__Node seq__5436 = patterns;
-        for (isize i__5437 = 0; i__5437 < seq__5436.len; i__5437++) {
-          ast__Node* p = seq__5436.ptr[i__5437];
+        slice__ptr_ast__Node seq__5440 = patterns;
+        for (isize i__5441 = 0; i__5441 < seq__5440.len; i__5441++) {
+          ast__Node* p = seq__5440.ptr[i__5441];
           by_ref = (by_ref || lower__binds_by_ref(ctx, p));
         }
       }
@@ -36526,16 +36635,16 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
   (rt_nonnull(g, "src/codegen.sabk:2254:7"))->indent++;
   slice__u8 value = ((slice__u8){(u8*)"", 0});
   if (by_ref) {
-    ({ codegen__CodeGen* v__5438 = g; slice__u8 v__5440 = codegen__cat(ctx, ((slice__string){(items__5439[0] = codegen__c_type(ctx, g, t), items__5439[1] = ((slice__u8){(u8*)" *", 2}), items__5439[2] = name, items__5439[3] = ((slice__u8){(u8*)" = &", 4}), items__5439[4] = codegen__expr(ctx, g, (s).value), items__5439[5] = ((slice__u8){(u8*)";", 1}), items__5439), 6})); codegen__line(ctx, v__5438, v__5440); });
-    value = codegen__cat(ctx, ((slice__string){(items__5441[0] = ((slice__u8){(u8*)"(*", 2}), items__5441[1] = name, items__5441[2] = ((slice__u8){(u8*)")", 1}), items__5441), 3}));
+    ({ codegen__CodeGen* v__5442 = g; slice__u8 v__5444 = codegen__cat(ctx, ((slice__string){(items__5443[0] = codegen__c_type(ctx, g, t), items__5443[1] = ((slice__u8){(u8*)" *", 2}), items__5443[2] = name, items__5443[3] = ((slice__u8){(u8*)" = &", 4}), items__5443[4] = codegen__expr(ctx, g, (s).value), items__5443[5] = ((slice__u8){(u8*)";", 1}), items__5443), 6})); codegen__line(ctx, v__5442, v__5444); });
+    value = codegen__cat(ctx, ((slice__string){(items__5445[0] = ((slice__u8){(u8*)"(*", 2}), items__5445[1] = name, items__5445[2] = ((slice__u8){(u8*)")", 1}), items__5445), 3}));
   } else {
-    ({ codegen__CodeGen* v__5442 = g; slice__u8 v__5444 = codegen__cat(ctx, ((slice__string){(items__5443[0] = codegen__c_type(ctx, g, t), items__5443[1] = ((slice__u8){(u8*)" ", 1}), items__5443[2] = name, items__5443[3] = ((slice__u8){(u8*)" = ", 3}), items__5443[4] = codegen__expr(ctx, g, (s).value), items__5443[5] = ((slice__u8){(u8*)";", 1}), items__5443), 6})); codegen__line(ctx, v__5442, v__5444); });
+    ({ codegen__CodeGen* v__5446 = g; slice__u8 v__5448 = codegen__cat(ctx, ((slice__string){(items__5447[0] = codegen__c_type(ctx, g, t), items__5447[1] = ((slice__u8){(u8*)" ", 1}), items__5447[2] = name, items__5447[3] = ((slice__u8){(u8*)" = ", 3}), items__5447[4] = codegen__expr(ctx, g, (s).value), items__5447[5] = ((slice__u8){(u8*)";", 1}), items__5447), 6})); codegen__line(ctx, v__5446, v__5448); });
     value = name;
   }
   if (((s).label != ((ast__Node*)0))) {
     map__map_put__ptr_ast__Node__string(ctx, (&(rt_nonnull(g, "src/codegen.sabk:2264:20"))->switch_values), n, name);
     if ((s).continued) {
-      ({ codegen__CodeGen* v__5445 = g; slice__u8 v__5447 = codegen__cat(ctx, ((slice__string){(items__5446[0] = codegen__label_of(ctx, g, n), items__5446[1] = ((slice__u8){(u8*)"_top:;", 6}), items__5446), 2})); codegen__line(ctx, v__5445, v__5447); });
+      ({ codegen__CodeGen* v__5449 = g; slice__u8 v__5451 = codegen__cat(ctx, ((slice__string){(items__5450[0] = codegen__label_of(ctx, g, n), items__5450[1] = ((slice__u8){(u8*)"_top:;", 6}), items__5450), 2})); codegen__line(ctx, v__5449, v__5451); });
     }
   }
   if ((s).in_order) {
@@ -36547,21 +36656,21 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
     codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
     return;
   }
-  slice__u8 dispatch = ((rt_nonnull(t, "src/codegen.sabk:2277:26"))->is_tagged ? codegen__cat(ctx, ((slice__string){(items__5448[0] = value, items__5448[1] = ((slice__u8){(u8*)".tag", 4}), items__5448), 2})) : value);
+  slice__u8 dispatch = ((rt_nonnull(t, "src/codegen.sabk:2277:26"))->is_tagged ? codegen__cat(ctx, ((slice__string){(items__5452[0] = value, items__5452[1] = ((slice__u8){(u8*)".tag", 4}), items__5452), 2})) : value);
   if ((rt_nonnull(t, "src/codegen.sabk:2278:11"))->is_string) {
     slice__u8 which = codegen__tmp(ctx, g, ((slice__u8){(u8*)"case", 4}));
-    ({ codegen__CodeGen* v__5449 = g; slice__u8 v__5451 = codegen__cat(ctx, ((slice__string){(items__5450[0] = ((slice__u8){(u8*)"int ", 4}), items__5450[1] = which, items__5450[2] = ((slice__u8){(u8*)" = -1;", 6}), items__5450), 3})); codegen__line(ctx, v__5449, v__5451); });
+    ({ codegen__CodeGen* v__5453 = g; slice__u8 v__5455 = codegen__cat(ctx, ((slice__string){(items__5454[0] = ((slice__u8){(u8*)"int ", 4}), items__5454[1] = which, items__5454[2] = ((slice__u8){(u8*)" = -1;", 6}), items__5454), 3})); codegen__line(ctx, v__5453, v__5455); });
     slice__u8 test = ((slice__u8){(u8*)"if", 2});
     {
-      isize end__5452 = ((s).cases).len;
-      for (isize k = ((isize)0LL); k < end__5452; k++) {
-        tuple__14 values__5453 = codegen__clause_parts(ctx, (*slice__ptr_ast__Node__at((s).cases, k, "src/codegen.sabk:2283:54")));
-        slice__ptr_ast__Node patterns = values__5453._0;
+      isize end__5456 = ((s).cases).len;
+      for (isize k = ((isize)0LL); k < end__5456; k++) {
+        tuple__14 values__5457 = codegen__clause_parts(ctx, (*slice__ptr_ast__Node__at((s).cases, k, "src/codegen.sabk:2283:54")));
+        slice__ptr_ast__Node patterns = values__5457._0;
         {
-          slice__ptr_ast__Node seq__5454 = patterns;
-          for (isize i__5455 = 0; i__5455 < seq__5454.len; i__5455++) {
-            ast__Node* p = seq__5454.ptr[i__5455];
-            ({ codegen__CodeGen* v__5456 = g; slice__u8 v__5461 = codegen__cat(ctx, ((slice__string){(items__5460[0] = test, items__5460[1] = ((slice__u8){(u8*)" (", 2}), items__5460[2] = ({ codegen__CodeGen* v__5457 = g; slice__u8 v__5458 = value; slice__u8 v__5459 = codegen__expr(ctx, g, p); codegen__string_equal(ctx, v__5457, v__5458, v__5459); }), items__5460[3] = ((slice__u8){(u8*)") ", 2}), items__5460[4] = which, items__5460[5] = ((slice__u8){(u8*)" = ", 3}), items__5460[6] = codegen__num(ctx, ((i64)(k))), items__5460[7] = ((slice__u8){(u8*)";", 1}), items__5460), 8})); codegen__line(ctx, v__5456, v__5461); });
+          slice__ptr_ast__Node seq__5458 = patterns;
+          for (isize i__5459 = 0; i__5459 < seq__5458.len; i__5459++) {
+            ast__Node* p = seq__5458.ptr[i__5459];
+            ({ codegen__CodeGen* v__5460 = g; slice__u8 v__5465 = codegen__cat(ctx, ((slice__string){(items__5464[0] = test, items__5464[1] = ((slice__u8){(u8*)" (", 2}), items__5464[2] = ({ codegen__CodeGen* v__5461 = g; slice__u8 v__5462 = value; slice__u8 v__5463 = codegen__expr(ctx, g, p); codegen__string_equal(ctx, v__5461, v__5462, v__5463); }), items__5464[3] = ((slice__u8){(u8*)") ", 2}), items__5464[4] = which, items__5464[5] = ((slice__u8){(u8*)" = ", 3}), items__5464[6] = codegen__num(ctx, ((i64)(k))), items__5464[7] = ((slice__u8){(u8*)";", 1}), items__5464), 8})); codegen__line(ctx, v__5460, v__5465); });
             test = ((slice__u8){(u8*)"else if", 7});
           }
         }
@@ -36569,26 +36678,26 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
     }
     dispatch = which;
   }
-  ({ codegen__CodeGen* v__5462 = g; slice__u8 v__5464 = codegen__cat(ctx, ((slice__string){(items__5463[0] = ((slice__u8){(u8*)"switch (", 8}), items__5463[1] = dispatch, items__5463[2] = ((slice__u8){(u8*)") {", 3}), items__5463), 3})); codegen__line(ctx, v__5462, v__5464); });
+  ({ codegen__CodeGen* v__5466 = g; slice__u8 v__5468 = codegen__cat(ctx, ((slice__string){(items__5467[0] = ((slice__u8){(u8*)"switch (", 8}), items__5467[1] = dispatch, items__5467[2] = ((slice__u8){(u8*)") {", 3}), items__5467), 3})); codegen__line(ctx, v__5466, v__5468); });
   {
-    isize end__5465 = ((s).cases).len;
-    for (isize k = ((isize)0LL); k < end__5465; k++) {
+    isize end__5469 = ((s).cases).len;
+    for (isize k = ((isize)0LL); k < end__5469; k++) {
       ast__Node* clause = (*slice__ptr_ast__Node__at((s).cases, k, "src/codegen.sabk:2293:29"));
-      tuple__14 values__5466 = codegen__clause_parts(ctx, clause);
-      slice__ptr_ast__Node patterns = values__5466._0;
-      ast__Node* body = values__5466._2;
+      tuple__14 values__5470 = codegen__clause_parts(ctx, clause);
+      slice__ptr_ast__Node patterns = values__5470._0;
+      ast__Node* body = values__5470._2;
       (rt_nonnull(g, "src/codegen.sabk:2295:11"))->here = (rt_nonnull(clause, "src/codegen.sabk:2295:25"))->tok;
       if ((((rt_nonnull(clause, "src/codegen.sabk:2296:20"))->kind).tag == ((ast__NodeKind__Tag)32LL))) {
         codegen__line(ctx, g, ((slice__u8){(u8*)"default:", 8}));
       } else {
         if ((rt_nonnull(t, "src/codegen.sabk:2298:20"))->is_string) {
-          ({ codegen__CodeGen* v__5467 = g; slice__u8 v__5469 = codegen__cat(ctx, ((slice__string){(items__5468[0] = ((slice__u8){(u8*)"case ", 5}), items__5468[1] = codegen__num(ctx, ((i64)(k))), items__5468[2] = ((slice__u8){(u8*)":", 1}), items__5468), 3})); codegen__line(ctx, v__5467, v__5469); });
+          ({ codegen__CodeGen* v__5471 = g; slice__u8 v__5473 = codegen__cat(ctx, ((slice__string){(items__5472[0] = ((slice__u8){(u8*)"case ", 5}), items__5472[1] = codegen__num(ctx, ((i64)(k))), items__5472[2] = ((slice__u8){(u8*)":", 1}), items__5472), 3})); codegen__line(ctx, v__5471, v__5473); });
         }
       }
       {
-        slice__ptr_ast__Node seq__5470 = patterns;
-        for (isize i__5471 = 0; i__5471 < seq__5470.len; i__5471++) {
-          ast__Node* p = seq__5470.ptr[i__5471];
+        slice__ptr_ast__Node seq__5474 = patterns;
+        for (isize i__5475 = 0; i__5475 < seq__5474.len; i__5475++) {
+          ast__Node* p = seq__5474.ptr[i__5475];
           if ((rt_nonnull(t, "src/codegen.sabk:2301:19"))->is_string) {
             break;
           }
@@ -36596,13 +36705,13 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
             ast__Node* lo;
             ast__Node* hi;
             bool inclusive;
-            if (({ ast__NodeKind is__5472 = (rt_nonnull(p, "src/codegen.sabk:2303:19"))->kind; is__5472.tag == ((ast__NodeKind__Tag)70LL) ? (lo = is__5472.payload.Range.lo, hi = is__5472.payload.Range.hi, inclusive = is__5472.payload.Range.inclusive, 1) : 0; })) {
-              slice__u8 end = (inclusive ? codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2304:57"))->cval, tag_type) : codegen__cat(ctx, ((slice__string){(items__5473[0] = ((slice__u8){(u8*)"(", 1}), items__5473[1] = codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2304:102"))->cval, tag_type), items__5473[2] = ((slice__u8){(u8*)" - 1)", 5}), items__5473), 3})));
-              ({ codegen__CodeGen* v__5474 = g; slice__u8 v__5476 = codegen__cat(ctx, ((slice__string){(items__5475[0] = ((slice__u8){(u8*)"case ", 5}), items__5475[1] = codegen__constant(ctx, g, (rt_nonnull(lo, "src/codegen.sabk:2305:53"))->cval, tag_type), items__5475[2] = ((slice__u8){(u8*)" ... ", 5}), items__5475[3] = end, items__5475[4] = ((slice__u8){(u8*)":", 1}), items__5475), 5})); codegen__line(ctx, v__5474, v__5476); });
+            if (({ ast__NodeKind is__5476 = (rt_nonnull(p, "src/codegen.sabk:2303:19"))->kind; is__5476.tag == ((ast__NodeKind__Tag)70LL) ? (lo = is__5476.payload.Range.lo, hi = is__5476.payload.Range.hi, inclusive = is__5476.payload.Range.inclusive, 1) : 0; })) {
+              slice__u8 end = (inclusive ? codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2304:57"))->cval, tag_type) : codegen__cat(ctx, ((slice__string){(items__5477[0] = ((slice__u8){(u8*)"(", 1}), items__5477[1] = codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2304:102"))->cval, tag_type), items__5477[2] = ((slice__u8){(u8*)" - 1)", 5}), items__5477), 3})));
+              ({ codegen__CodeGen* v__5478 = g; slice__u8 v__5480 = codegen__cat(ctx, ((slice__string){(items__5479[0] = ((slice__u8){(u8*)"case ", 5}), items__5479[1] = codegen__constant(ctx, g, (rt_nonnull(lo, "src/codegen.sabk:2305:53"))->cval, tag_type), items__5479[2] = ((slice__u8){(u8*)" ... ", 5}), items__5479[3] = end, items__5479[4] = ((slice__u8){(u8*)":", 1}), items__5479), 5})); codegen__line(ctx, v__5478, v__5480); });
             } else {
-              tuple__19 values__5477 = lower__pattern_parts(ctx, p);
-              ast__Node* variant = values__5477._0;
-              ({ codegen__CodeGen* v__5478 = g; slice__u8 v__5480 = codegen__cat(ctx, ((slice__string){(items__5479[0] = ((slice__u8){(u8*)"case ", 5}), items__5479[1] = codegen__expr(ctx, g, ((variant != ((ast__Node*)0)) ? variant : p)), items__5479[2] = ((slice__u8){(u8*)":", 1}), items__5479), 3})); codegen__line(ctx, v__5478, v__5480); });
+              tuple__19 values__5481 = lower__pattern_parts(ctx, p);
+              ast__Node* variant = values__5481._0;
+              ({ codegen__CodeGen* v__5482 = g; slice__u8 v__5484 = codegen__cat(ctx, ((slice__string){(items__5483[0] = ((slice__u8){(u8*)"case ", 5}), items__5483[1] = codegen__expr(ctx, g, ((variant != ((ast__Node*)0)) ? variant : p)), items__5483[2] = ((slice__u8){(u8*)":", 1}), items__5483), 3})); codegen__line(ctx, v__5482, v__5484); });
             }
           }
         }
@@ -36610,28 +36719,28 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
       codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
       (rt_nonnull(g, "src/codegen.sabk:2312:11"))->indent++;
       {
-        slice__ptr_ast__Node seq__5481 = patterns;
-        for (isize i__5482 = 0; i__5482 < seq__5481.len; i__5482++) {
-          ast__Node* p = seq__5481.ptr[i__5482];
-          tuple__19 values__5483 = lower__pattern_parts(ctx, p);
-          ast__Node* variant = values__5483._0;
-          slice__ptr_ast__Node bindings = values__5483._1;
-          bool by_fields = values__5483._2;
+        slice__ptr_ast__Node seq__5485 = patterns;
+        for (isize i__5486 = 0; i__5486 < seq__5485.len; i__5486++) {
+          ast__Node* p = seq__5485.ptr[i__5486];
+          tuple__19 values__5487 = lower__pattern_parts(ctx, p);
+          ast__Node* variant = values__5487._0;
+          slice__ptr_ast__Node bindings = values__5487._1;
+          bool by_fields = values__5487._2;
           if ((variant == ((ast__Node*)0))) {
             continue;
           }
           {
-            slice__ptr_ast__Node seq__5484 = bindings;
-            for (isize i__5485 = 0; i__5485 < seq__5484.len; i__5485++) {
-              ast__Node* b = seq__5484.ptr[i__5485];
-              if (({ slice__u8 a__5486 = ((rt_nonnull(b, "src/codegen.sabk:2318:23"))->tok).text, b__5487 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5486.ptr, a__5486.len, b__5487.ptr, b__5487.len); })) {
+            slice__ptr_ast__Node seq__5488 = bindings;
+            for (isize i__5489 = 0; i__5489 < seq__5488.len; i__5489++) {
+              ast__Node* b = seq__5488.ptr[i__5489];
+              if (({ slice__u8 a__5490 = ((rt_nonnull(b, "src/codegen.sabk:2318:23"))->tok).text, b__5491 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5490.ptr, a__5490.len, b__5491.ptr, b__5491.len); })) {
                 continue;
               }
-              slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5488[0] = value, items__5488[1] = ((slice__u8){(u8*)".payload.", 9}), items__5488[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2320:74"))->decl, "src/codegen.sabk:2320:79"))->tok).text), items__5488), 3}));
+              slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5492[0] = value, items__5492[1] = ((slice__u8){(u8*)".payload.", 9}), items__5492[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2320:74"))->decl, "src/codegen.sabk:2320:79"))->tok).text), items__5492), 3}));
               if (by_fields) {
-                payload = codegen__cat(ctx, ((slice__string){(items__5489[0] = payload, items__5489[1] = ((slice__u8){(u8*)".", 1}), items__5489[2] = codegen__local_name(ctx, lower__item_field_name(ctx, b)), items__5489), 3}));
+                payload = codegen__cat(ctx, ((slice__string){(items__5493[0] = payload, items__5493[1] = ((slice__u8){(u8*)".", 1}), items__5493[2] = codegen__local_name(ctx, lower__item_field_name(ctx, b)), items__5493), 3}));
               }
-              ({ codegen__CodeGen* v__5490 = g; slice__u8 v__5493 = codegen__cat(ctx, ((slice__string){(items__5492[0] = codegen__c_type(ctx, g, (rt_nonnull(b, "src/codegen.sabk:2323:41"))->ty), items__5492[1] = ((slice__u8){(u8*)" ", 1}), items__5492[2] = codegen__var_name(ctx, g, b), items__5492[3] = ((slice__u8){(u8*)" = ", 3}), items__5492[4] = (({ ast__NodeKind is__5491 = (rt_nonnull(b, "src/codegen.sabk:2323:80"))->kind; (is__5491.tag == ((ast__NodeKind__Tag)73LL) && (is__5491.payload.Binding.by_ref == true)) ? (1) : 0; }) ? ((slice__u8){(u8*)"&", 1}) : ((slice__u8){(u8*)"", 0})), items__5492[5] = payload, items__5492[6] = ((slice__u8){(u8*)";", 1}), items__5492), 7})); codegen__line(ctx, v__5490, v__5493); });
+              ({ codegen__CodeGen* v__5494 = g; slice__u8 v__5497 = codegen__cat(ctx, ((slice__string){(items__5496[0] = codegen__c_type(ctx, g, (rt_nonnull(b, "src/codegen.sabk:2323:41"))->ty), items__5496[1] = ((slice__u8){(u8*)" ", 1}), items__5496[2] = codegen__var_name(ctx, g, b), items__5496[3] = ((slice__u8){(u8*)" = ", 3}), items__5496[4] = (({ ast__NodeKind is__5495 = (rt_nonnull(b, "src/codegen.sabk:2323:80"))->kind; (is__5495.tag == ((ast__NodeKind__Tag)73LL) && (is__5495.payload.Binding.by_ref == true)) ? (1) : 0; }) ? ((slice__u8){(u8*)"&", 1}) : ((slice__u8){(u8*)"", 0})), items__5496[5] = payload, items__5496[6] = ((slice__u8){(u8*)";", 1}), items__5496), 7})); codegen__line(ctx, v__5494, v__5497); });
             }
           }
         }
@@ -36639,7 +36748,7 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
       if ((((result).len == ((isize)0LL)) || (((rt_nonnull(body, "src/codegen.sabk:2327:37"))->kind).tag == ((ast__NodeKind__Tag)14LL)))) {
         codegen__emit_body(ctx, g, body, ((codegen__ScopeKind)3LL), n);
       } else {
-        ({ codegen__CodeGen* v__5494 = g; slice__u8 v__5496 = codegen__cat(ctx, ((slice__string){(items__5495[0] = result, items__5495[1] = ((slice__u8){(u8*)" = ", 3}), items__5495[2] = codegen__expr(ctx, g, body), items__5495[3] = ((slice__u8){(u8*)";", 1}), items__5495), 4})); codegen__line(ctx, v__5494, v__5496); });
+        ({ codegen__CodeGen* v__5498 = g; slice__u8 v__5500 = codegen__cat(ctx, ((slice__string){(items__5499[0] = result, items__5499[1] = ((slice__u8){(u8*)" = ", 3}), items__5499[2] = codegen__expr(ctx, g, body), items__5499[3] = ((slice__u8){(u8*)";", 1}), items__5499), 4})); codegen__line(ctx, v__5498, v__5500); });
       }
       (rt_nonnull(g, "src/codegen.sabk:2331:11"))->indent--;
       codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
@@ -36647,7 +36756,7 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
     }
   }
   if ((s).complete) {
-    ({ codegen__CodeGen* v__5497 = g; slice__u8 v__5499 = codegen__cat(ctx, ((slice__string){(items__5498[0] = ((slice__u8){(u8*)"default: rt_panic(", 18}), items__5498[1] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:2337:57"))->tok), items__5498[2] = ((slice__u8){(u8*)", \"the switch value isn't one of its enum's variants\");", 55}), items__5498), 3})); codegen__line(ctx, v__5497, v__5499); });
+    ({ codegen__CodeGen* v__5501 = g; slice__u8 v__5503 = codegen__cat(ctx, ((slice__string){(items__5502[0] = ((slice__u8){(u8*)"default: rt_panic(", 18}), items__5502[1] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:2337:57"))->tok), items__5502[2] = ((slice__u8){(u8*)", \"the switch value isn't one of its enum's variants\");", 55}), items__5502), 3})); codegen__line(ctx, v__5501, v__5503); });
   }
   codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
   if (((s).label != ((ast__Node*)0))) {
@@ -36658,61 +36767,61 @@ static void codegen__emit_switch(prelude__Context *ctx, codegen__CodeGen* g, ast
 }
 
 static void codegen__emit_switch_in_order(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n, codegen__NodeSwitch s, slice__u8 result, types__Type* t, slice__u8 value) {
-  slice__u8 items__5505[3];
-  slice__u8 items__5507[3];
-  slice__u8 items__5514[6];
-  slice__u8 items__5517[3];
-  slice__u8 items__5520[4];
+  slice__u8 items__5509[3];
+  slice__u8 items__5511[3];
+  slice__u8 items__5518[6];
+  slice__u8 items__5521[3];
   slice__u8 items__5524[4];
-  slice__u8 items__5527[3];
+  slice__u8 items__5528[4];
+  slice__u8 items__5531[3];
   codegen__line(ctx, g, ((slice__u8){(u8*)"switch (0) { default:", 21}));
   ast__Node* default_case = ((ast__Node*)0);
   {
-    slice__ptr_ast__Node seq__5500 = (s).cases;
-    for (isize i__5501 = 0; i__5501 < seq__5500.len; i__5501++) {
-      ast__Node* clause = seq__5500.ptr[i__5501];
+    slice__ptr_ast__Node seq__5504 = (s).cases;
+    for (isize i__5505 = 0; i__5505 < seq__5504.len; i__5505++) {
+      ast__Node* clause = seq__5504.ptr[i__5505];
       if ((((rt_nonnull(clause, "src/codegen.sabk:2360:20"))->kind).tag == ((ast__NodeKind__Tag)32LL))) {
         default_case = clause;
         continue;
       }
-      tuple__14 values__5502 = codegen__clause_parts(ctx, clause);
-      slice__ptr_ast__Node patterns = values__5502._0;
-      ast__Node* guard = values__5502._1;
-      ast__Node* body = values__5502._2;
+      tuple__14 values__5506 = codegen__clause_parts(ctx, clause);
+      slice__ptr_ast__Node patterns = values__5506._0;
+      ast__Node* guard = values__5506._1;
+      ast__Node* body = values__5506._2;
       (rt_nonnull(g, "src/codegen.sabk:2365:11"))->here = (rt_nonnull(clause, "src/codegen.sabk:2365:25"))->tok;
       slice__u8 test = ((slice__u8){(u8*)"", 0});
       {
-        slice__ptr_ast__Node seq__5503 = patterns;
-        for (isize i__5504 = 0; i__5504 < seq__5503.len; i__5504++) {
-          ast__Node* p = seq__5503.ptr[i__5504];
-          test = codegen__cat(ctx, ((slice__string){(items__5505[0] = test, items__5505[1] = (((test).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)" || ", 4})), items__5505[2] = codegen__match_test(ctx, g, p, value, t), items__5505), 3}));
+        slice__ptr_ast__Node seq__5507 = patterns;
+        for (isize i__5508 = 0; i__5508 < seq__5507.len; i__5508++) {
+          ast__Node* p = seq__5507.ptr[i__5508];
+          test = codegen__cat(ctx, ((slice__string){(items__5509[0] = test, items__5509[1] = (((test).len == ((isize)0LL)) ? ((slice__u8){(u8*)"", 0}) : ((slice__u8){(u8*)" || ", 4})), items__5509[2] = codegen__match_test(ctx, g, p, value, t), items__5509), 3}));
         }
       }
-      ({ codegen__CodeGen* v__5506 = g; slice__u8 v__5508 = codegen__cat(ctx, ((slice__string){(items__5507[0] = ((slice__u8){(u8*)"if (", 4}), items__5507[1] = test, items__5507[2] = ((slice__u8){(u8*)") {", 3}), items__5507), 3})); codegen__line(ctx, v__5506, v__5508); });
+      ({ codegen__CodeGen* v__5510 = g; slice__u8 v__5512 = codegen__cat(ctx, ((slice__string){(items__5511[0] = ((slice__u8){(u8*)"if (", 4}), items__5511[1] = test, items__5511[2] = ((slice__u8){(u8*)") {", 3}), items__5511), 3})); codegen__line(ctx, v__5510, v__5512); });
       (rt_nonnull(g, "src/codegen.sabk:2370:11"))->indent++;
       grow__codegen__Bind binds = {0};
       {
-        slice__ptr_ast__Node seq__5509 = patterns;
-        for (isize i__5510 = 0; i__5510 < seq__5509.len; i__5510++) {
-          ast__Node* p = seq__5509.ptr[i__5510];
+        slice__ptr_ast__Node seq__5513 = patterns;
+        for (isize i__5514 = 0; i__5514 < seq__5513.len; i__5514++) {
+          ast__Node* p = seq__5513.ptr[i__5514];
           codegen__match_binds(ctx, g, p, value, (&binds));
         }
       }
       {
-        grow__codegen__Bind seq__5511 = binds;
-        for (isize i__5512 = 0; i__5512 < seq__5511.len; i__5512++) {
-          codegen__Bind b = seq__5511.ptr[i__5512];
-          ({ codegen__CodeGen* v__5513 = g; slice__u8 v__5515 = codegen__cat(ctx, ((slice__string){(items__5514[0] = codegen__c_type(ctx, g, (rt_nonnull((b).node, "src/codegen.sabk:2375:42"))->ty), items__5514[1] = ((slice__u8){(u8*)" ", 1}), items__5514[2] = codegen__var_name(ctx, g, (b).node), items__5514[3] = ((slice__u8){(u8*)" = ", 3}), items__5514[4] = (b).from, items__5514[5] = ((slice__u8){(u8*)";", 1}), items__5514), 6})); codegen__line(ctx, v__5513, v__5515); });
+        grow__codegen__Bind seq__5515 = binds;
+        for (isize i__5516 = 0; i__5516 < seq__5515.len; i__5516++) {
+          codegen__Bind b = seq__5515.ptr[i__5516];
+          ({ codegen__CodeGen* v__5517 = g; slice__u8 v__5519 = codegen__cat(ctx, ((slice__string){(items__5518[0] = codegen__c_type(ctx, g, (rt_nonnull((b).node, "src/codegen.sabk:2375:42"))->ty), items__5518[1] = ((slice__u8){(u8*)" ", 1}), items__5518[2] = codegen__var_name(ctx, g, (b).node), items__5518[3] = ((slice__u8){(u8*)" = ", 3}), items__5518[4] = (b).from, items__5518[5] = ((slice__u8){(u8*)";", 1}), items__5518), 6})); codegen__line(ctx, v__5517, v__5519); });
         }
       }
       if ((guard != ((ast__Node*)0))) {
-        ({ codegen__CodeGen* v__5516 = g; slice__u8 v__5518 = codegen__cat(ctx, ((slice__string){(items__5517[0] = ((slice__u8){(u8*)"if (", 4}), items__5517[1] = codegen__expr(ctx, g, guard), items__5517[2] = ((slice__u8){(u8*)") {", 3}), items__5517), 3})); codegen__line(ctx, v__5516, v__5518); });
+        ({ codegen__CodeGen* v__5520 = g; slice__u8 v__5522 = codegen__cat(ctx, ((slice__string){(items__5521[0] = ((slice__u8){(u8*)"if (", 4}), items__5521[1] = codegen__expr(ctx, g, guard), items__5521[2] = ((slice__u8){(u8*)") {", 3}), items__5521), 3})); codegen__line(ctx, v__5520, v__5522); });
         (rt_nonnull(g, "src/codegen.sabk:2378:15"))->indent++;
       }
       if ((((result).len == ((isize)0LL)) || (((rt_nonnull(body, "src/codegen.sabk:2380:37"))->kind).tag == ((ast__NodeKind__Tag)14LL)))) {
         codegen__emit_body(ctx, g, body, ((codegen__ScopeKind)3LL), n);
       } else {
-        ({ codegen__CodeGen* v__5519 = g; slice__u8 v__5521 = codegen__cat(ctx, ((slice__string){(items__5520[0] = result, items__5520[1] = ((slice__u8){(u8*)" = ", 3}), items__5520[2] = codegen__expr(ctx, g, body), items__5520[3] = ((slice__u8){(u8*)";", 1}), items__5520), 4})); codegen__line(ctx, v__5519, v__5521); });
+        ({ codegen__CodeGen* v__5523 = g; slice__u8 v__5525 = codegen__cat(ctx, ((slice__string){(items__5524[0] = result, items__5524[1] = ((slice__u8){(u8*)" = ", 3}), items__5524[2] = codegen__expr(ctx, g, body), items__5524[3] = ((slice__u8){(u8*)";", 1}), items__5524), 4})); codegen__line(ctx, v__5523, v__5525); });
       }
       codegen__line(ctx, g, ((slice__u8){(u8*)"break;", 6}));
       if ((guard != ((ast__Node*)0))) {
@@ -36724,147 +36833,147 @@ static void codegen__emit_switch_in_order(prelude__Context *ctx, codegen__CodeGe
     }
   }
   if ((default_case != ((ast__Node*)0))) {
-    tuple__14 values__5522 = codegen__clause_parts(ctx, default_case);
-    ast__Node* body = values__5522._2;
+    tuple__14 values__5526 = codegen__clause_parts(ctx, default_case);
+    ast__Node* body = values__5526._2;
     (rt_nonnull(g, "src/codegen.sabk:2394:11"))->here = (rt_nonnull(default_case, "src/codegen.sabk:2394:31"))->tok;
     codegen__line(ctx, g, ((slice__u8){(u8*)"{", 1}));
     (rt_nonnull(g, "src/codegen.sabk:2396:11"))->indent++;
     if ((((result).len == ((isize)0LL)) || (((rt_nonnull(body, "src/codegen.sabk:2397:37"))->kind).tag == ((ast__NodeKind__Tag)14LL)))) {
       codegen__emit_body(ctx, g, body, ((codegen__ScopeKind)3LL), n);
     } else {
-      ({ codegen__CodeGen* v__5523 = g; slice__u8 v__5525 = codegen__cat(ctx, ((slice__string){(items__5524[0] = result, items__5524[1] = ((slice__u8){(u8*)" = ", 3}), items__5524[2] = codegen__expr(ctx, g, body), items__5524[3] = ((slice__u8){(u8*)";", 1}), items__5524), 4})); codegen__line(ctx, v__5523, v__5525); });
+      ({ codegen__CodeGen* v__5527 = g; slice__u8 v__5529 = codegen__cat(ctx, ((slice__string){(items__5528[0] = result, items__5528[1] = ((slice__u8){(u8*)" = ", 3}), items__5528[2] = codegen__expr(ctx, g, body), items__5528[3] = ((slice__u8){(u8*)";", 1}), items__5528), 4})); codegen__line(ctx, v__5527, v__5529); });
     }
     (rt_nonnull(g, "src/codegen.sabk:2401:11"))->indent--;
     codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
   } else {
     if ((s).complete) {
-      ({ codegen__CodeGen* v__5526 = g; slice__u8 v__5528 = codegen__cat(ctx, ((slice__string){(items__5527[0] = ((slice__u8){(u8*)"rt_panic(", 9}), items__5527[1] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:2405:48"))->tok), items__5527[2] = ((slice__u8){(u8*)", \"no case of the switch matched its value (a null pointer inside it\?)\");", 73}), items__5527), 3})); codegen__line(ctx, v__5526, v__5528); });
+      ({ codegen__CodeGen* v__5530 = g; slice__u8 v__5532 = codegen__cat(ctx, ((slice__string){(items__5531[0] = ((slice__u8){(u8*)"rt_panic(", 9}), items__5531[1] = codegen__location(ctx, g, (rt_nonnull(n, "src/codegen.sabk:2405:48"))->tok), items__5531[2] = ((slice__u8){(u8*)", \"no case of the switch matched its value (a null pointer inside it\?)\");", 73}), items__5531), 3})); codegen__line(ctx, v__5530, v__5532); });
     }
   }
   codegen__line(ctx, g, ((slice__u8){(u8*)"}", 1}));
 }
 
 static slice__u8 codegen__match_test(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* p, slice__u8 value, types__Type* t) {
-  slice__u8 items__5531[4];
-  slice__u8 items__5539[3];
-  slice__u8 items__5540[3];
-  slice__u8 items__5542[3];
+  slice__u8 items__5535[4];
   slice__u8 items__5543[3];
   slice__u8 items__5544[3];
+  slice__u8 items__5546[3];
   slice__u8 items__5547[3];
-  slice__u8 items__5550[3];
-  slice__u8 items__5553[5];
-  slice__u8 items__5558[3];
-  slice__u8 items__5559[3];
-  slice__u8 items__5564[9];
-  slice__u8 items__5565[5];
+  slice__u8 items__5548[3];
+  slice__u8 items__5551[3];
+  slice__u8 items__5554[3];
+  slice__u8 items__5557[5];
+  slice__u8 items__5562[3];
+  slice__u8 items__5563[3];
+  slice__u8 items__5568[9];
+  slice__u8 items__5569[5];
   if (patterns__is_type_pattern(ctx, p)) {
     types__Type* et = patterns__type_pattern_enum(ctx, p);
     u32 id = ({
-      tuple__30 result__5529 = map__map_get__ptr_types__Type__u32(ctx, (&(rt_nonnull((rt_nonnull(g, "src/codegen.sabk:2420:29"))->c, "src/codegen.sabk:2420:31"))->error_ids), et);
-      u32 value__5530;
-      if (!result__5529._1)
-        value__5530 = ((u32)0LL);
+      tuple__30 result__5533 = map__map_get__ptr_types__Type__u32(ctx, (&(rt_nonnull((rt_nonnull(g, "src/codegen.sabk:2420:29"))->c, "src/codegen.sabk:2420:31"))->error_ids), et);
+      u32 value__5534;
+      if (!result__5533._1)
+        value__5534 = ((u32)0LL);
       else
-        value__5530 = result__5529._0;
-      value__5530;
+        value__5534 = result__5533._0;
+      value__5534;
     });
-    slice__u8 test = codegen__cat(ctx, ((slice__string){(items__5531[0] = ((slice__u8){(u8*)"((u64)(", 7}), items__5531[1] = value, items__5531[2] = ((slice__u8){(u8*)") >> 32) == ", 12}), items__5531[3] = codegen__unum(ctx, ((u64)(id))), items__5531), 4}));
-    tuple__19 values__5532 = lower__pattern_parts(ctx, p);
-    slice__ptr_ast__Node items = values__5532._1;
+    slice__u8 test = codegen__cat(ctx, ((slice__string){(items__5535[0] = ((slice__u8){(u8*)"((u64)(", 7}), items__5535[1] = value, items__5535[2] = ((slice__u8){(u8*)") >> 32) == ", 12}), items__5535[3] = codegen__unum(ctx, ((u64)(id))), items__5535), 4}));
+    tuple__19 values__5536 = lower__pattern_parts(ctx, p);
+    slice__ptr_ast__Node items = values__5536._1;
     {
-      slice__ptr_ast__Node seq__5533 = items;
-      for (isize i__5534 = 0; i__5534 < seq__5533.len; i__5534++) {
-        ast__Node* item = seq__5533.ptr[i__5534];
+      slice__ptr_ast__Node seq__5537 = items;
+      for (isize i__5538 = 0; i__5538 < seq__5537.len; i__5538++) {
+        ast__Node* item = seq__5537.ptr[i__5538];
         if ((((rt_nonnull(item, "src/codegen.sabk:2424:22"))->kind).tag == ((ast__NodeKind__Tag)72LL))) {
-          test = codegen__cat(ctx, ((slice__string){(items__5539[0] = test, items__5539[1] = ((slice__u8){(u8*)" && ", 4}), items__5539[2] = ({ codegen__CodeGen* v__5535 = g; ast__Node* v__5536 = lower__pattern_of(ctx, item); slice__u8 v__5537 = codegen__error_as(ctx, g, value, et); types__Type* v__5538 = et; codegen__match_test(ctx, v__5535, v__5536, v__5537, v__5538); }), items__5539), 3}));
+          test = codegen__cat(ctx, ((slice__string){(items__5543[0] = test, items__5543[1] = ((slice__u8){(u8*)" && ", 4}), items__5543[2] = ({ codegen__CodeGen* v__5539 = g; ast__Node* v__5540 = lower__pattern_of(ctx, item); slice__u8 v__5541 = codegen__error_as(ctx, g, value, et); types__Type* v__5542 = et; codegen__match_test(ctx, v__5539, v__5540, v__5541, v__5542); }), items__5543), 3}));
         }
       }
     }
-    return codegen__cat(ctx, ((slice__string){(items__5540[0] = ((slice__u8){(u8*)"(", 1}), items__5540[1] = test, items__5540[2] = ((slice__u8){(u8*)")", 1}), items__5540), 3}));
+    return codegen__cat(ctx, ((slice__string){(items__5544[0] = ((slice__u8){(u8*)"(", 1}), items__5544[1] = test, items__5544[2] = ((slice__u8){(u8*)")", 1}), items__5544), 3}));
   }
   if ((rt_nonnull(t, "src/codegen.sabk:2428:11"))->is_tagged) {
-    tuple__19 values__5541 = lower__pattern_parts(ctx, p);
-    ast__Node* variant = values__5541._0;
-    slice__ptr_ast__Node items = values__5541._1;
-    bool by_fields = values__5541._2;
+    tuple__19 values__5545 = lower__pattern_parts(ctx, p);
+    ast__Node* variant = values__5545._0;
+    slice__ptr_ast__Node items = values__5545._1;
+    bool by_fields = values__5545._2;
     ast__Node* head = ((variant != ((ast__Node*)0)) ? variant : p);
-    slice__u8 test = codegen__cat(ctx, ((slice__string){(items__5542[0] = value, items__5542[1] = ((slice__u8){(u8*)".tag == ", 8}), items__5542[2] = codegen__expr(ctx, g, head), items__5542), 3}));
+    slice__u8 test = codegen__cat(ctx, ((slice__string){(items__5546[0] = value, items__5546[1] = ((slice__u8){(u8*)".tag == ", 8}), items__5546[2] = codegen__expr(ctx, g, head), items__5546), 3}));
     if ((variant == ((ast__Node*)0))) {
-      return codegen__cat(ctx, ((slice__string){(items__5543[0] = ((slice__u8){(u8*)"(", 1}), items__5543[1] = test, items__5543[2] = ((slice__u8){(u8*)")", 1}), items__5543), 3}));
+      return codegen__cat(ctx, ((slice__string){(items__5547[0] = ((slice__u8){(u8*)"(", 1}), items__5547[1] = test, items__5547[2] = ((slice__u8){(u8*)")", 1}), items__5547), 3}));
     }
-    slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5544[0] = value, items__5544[1] = ((slice__u8){(u8*)".payload.", 9}), items__5544[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2434:66"))->decl, "src/codegen.sabk:2434:71"))->tok).text), items__5544), 3}));
+    slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5548[0] = value, items__5548[1] = ((slice__u8){(u8*)".payload.", 9}), items__5548[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2434:66"))->decl, "src/codegen.sabk:2434:71"))->tok).text), items__5548), 3}));
     {
-      slice__ptr_ast__Node seq__5545 = items;
-      for (isize i__5546 = 0; i__5546 < seq__5545.len; i__5546++) {
-        ast__Node* item = seq__5545.ptr[i__5546];
+      slice__ptr_ast__Node seq__5549 = items;
+      for (isize i__5550 = 0; i__5550 < seq__5549.len; i__5550++) {
+        ast__Node* item = seq__5549.ptr[i__5550];
         if ((((rt_nonnull(item, "src/codegen.sabk:2436:22"))->kind).tag != ((ast__NodeKind__Tag)72LL))) {
           continue;
         }
-        slice__u8 at = (by_fields ? codegen__cat(ctx, ((slice__string){(items__5547[0] = payload, items__5547[1] = ((slice__u8){(u8*)".", 1}), items__5547[2] = codegen__local_name(ctx, lower__item_field_name(ctx, item)), items__5547), 3})) : payload);
+        slice__u8 at = (by_fields ? codegen__cat(ctx, ((slice__string){(items__5551[0] = payload, items__5551[1] = ((slice__u8){(u8*)".", 1}), items__5551[2] = codegen__local_name(ctx, lower__item_field_name(ctx, item)), items__5551), 3})) : payload);
         if (((rt_nonnull((rt_nonnull(item, "src/codegen.sabk:2439:22"))->ty, "src/codegen.sabk:2439:25"))->kind == ((types__TypeKind)6LL))) {
-          test = codegen__cat(ctx, ((slice__string){(items__5553[0] = test, items__5553[1] = ((slice__u8){(u8*)" && ", 4}), items__5553[2] = at, items__5553[3] = ((slice__u8){(u8*)" != 0 && ", 9}), items__5553[4] = ({ codegen__CodeGen* v__5548 = g; ast__Node* v__5549 = lower__pattern_of(ctx, item); slice__u8 v__5551 = codegen__cat(ctx, ((slice__string){(items__5550[0] = ((slice__u8){(u8*)"(*", 2}), items__5550[1] = at, items__5550[2] = ((slice__u8){(u8*)")", 1}), items__5550), 3})); types__Type* v__5552 = (rt_nonnull((rt_nonnull(item, "src/codegen.sabk:2440:116"))->ty, "src/codegen.sabk:2440:119"))->elem; codegen__match_test(ctx, v__5548, v__5549, v__5551, v__5552); }), items__5553), 5}));
+          test = codegen__cat(ctx, ((slice__string){(items__5557[0] = test, items__5557[1] = ((slice__u8){(u8*)" && ", 4}), items__5557[2] = at, items__5557[3] = ((slice__u8){(u8*)" != 0 && ", 9}), items__5557[4] = ({ codegen__CodeGen* v__5552 = g; ast__Node* v__5553 = lower__pattern_of(ctx, item); slice__u8 v__5555 = codegen__cat(ctx, ((slice__string){(items__5554[0] = ((slice__u8){(u8*)"(*", 2}), items__5554[1] = at, items__5554[2] = ((slice__u8){(u8*)")", 1}), items__5554), 3})); types__Type* v__5556 = (rt_nonnull((rt_nonnull(item, "src/codegen.sabk:2440:116"))->ty, "src/codegen.sabk:2440:119"))->elem; codegen__match_test(ctx, v__5552, v__5553, v__5555, v__5556); }), items__5557), 5}));
         } else {
-          test = codegen__cat(ctx, ((slice__string){(items__5558[0] = test, items__5558[1] = ((slice__u8){(u8*)" && ", 4}), items__5558[2] = ({ codegen__CodeGen* v__5554 = g; ast__Node* v__5555 = lower__pattern_of(ctx, item); slice__u8 v__5556 = at; types__Type* v__5557 = (rt_nonnull(item, "src/codegen.sabk:2442:83"))->ty; codegen__match_test(ctx, v__5554, v__5555, v__5556, v__5557); }), items__5558), 3}));
+          test = codegen__cat(ctx, ((slice__string){(items__5562[0] = test, items__5562[1] = ((slice__u8){(u8*)" && ", 4}), items__5562[2] = ({ codegen__CodeGen* v__5558 = g; ast__Node* v__5559 = lower__pattern_of(ctx, item); slice__u8 v__5560 = at; types__Type* v__5561 = (rt_nonnull(item, "src/codegen.sabk:2442:83"))->ty; codegen__match_test(ctx, v__5558, v__5559, v__5560, v__5561); }), items__5562), 3}));
         }
       }
     }
-    return codegen__cat(ctx, ((slice__string){(items__5559[0] = ((slice__u8){(u8*)"(", 1}), items__5559[1] = test, items__5559[2] = ((slice__u8){(u8*)")", 1}), items__5559), 3}));
+    return codegen__cat(ctx, ((slice__string){(items__5563[0] = ((slice__u8){(u8*)"(", 1}), items__5563[1] = test, items__5563[2] = ((slice__u8){(u8*)")", 1}), items__5563), 3}));
   }
   if ((rt_nonnull(t, "src/codegen.sabk:2446:11"))->is_string) {
-    return ({ codegen__CodeGen* v__5560 = g; slice__u8 v__5561 = value; slice__u8 v__5562 = codegen__expr(ctx, g, p); codegen__string_equal(ctx, v__5560, v__5561, v__5562); });
+    return ({ codegen__CodeGen* v__5564 = g; slice__u8 v__5565 = value; slice__u8 v__5566 = codegen__expr(ctx, g, p); codegen__string_equal(ctx, v__5564, v__5565, v__5566); });
   }
   {
     ast__Node* lo;
     ast__Node* hi;
     bool inclusive;
-    if (({ ast__NodeKind is__5563 = (rt_nonnull(p, "src/codegen.sabk:2448:11"))->kind; is__5563.tag == ((ast__NodeKind__Tag)70LL) ? (lo = is__5563.payload.Range.lo, hi = is__5563.payload.Range.hi, inclusive = is__5563.payload.Range.inclusive, 1) : 0; })) {
-      return codegen__cat(ctx, ((slice__string){(items__5564[0] = ((slice__u8){(u8*)"(", 1}), items__5564[1] = value, items__5564[2] = ((slice__u8){(u8*)" >= ", 4}), items__5564[3] = codegen__constant(ctx, g, (rt_nonnull(lo, "src/codegen.sabk:2449:55"))->cval, t), items__5564[4] = ((slice__u8){(u8*)" && ", 4}), items__5564[5] = value, items__5564[6] = (inclusive ? ((slice__u8){(u8*)" <= ", 4}) : ((slice__u8){(u8*)" < ", 3})), items__5564[7] = codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2450:35"))->cval, t), items__5564[8] = ((slice__u8){(u8*)")", 1}), items__5564), 9}));
+    if (({ ast__NodeKind is__5567 = (rt_nonnull(p, "src/codegen.sabk:2448:11"))->kind; is__5567.tag == ((ast__NodeKind__Tag)70LL) ? (lo = is__5567.payload.Range.lo, hi = is__5567.payload.Range.hi, inclusive = is__5567.payload.Range.inclusive, 1) : 0; })) {
+      return codegen__cat(ctx, ((slice__string){(items__5568[0] = ((slice__u8){(u8*)"(", 1}), items__5568[1] = value, items__5568[2] = ((slice__u8){(u8*)" >= ", 4}), items__5568[3] = codegen__constant(ctx, g, (rt_nonnull(lo, "src/codegen.sabk:2449:55"))->cval, t), items__5568[4] = ((slice__u8){(u8*)" && ", 4}), items__5568[5] = value, items__5568[6] = (inclusive ? ((slice__u8){(u8*)" <= ", 4}) : ((slice__u8){(u8*)" < ", 3})), items__5568[7] = codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2450:35"))->cval, t), items__5568[8] = ((slice__u8){(u8*)")", 1}), items__5568), 9}));
     }
   }
-  return codegen__cat(ctx, ((slice__string){(items__5565[0] = ((slice__u8){(u8*)"(", 1}), items__5565[1] = value, items__5565[2] = ((slice__u8){(u8*)" == ", 4}), items__5565[3] = codegen__expr(ctx, g, p), items__5565[4] = ((slice__u8){(u8*)")", 1}), items__5565), 5}));
+  return codegen__cat(ctx, ((slice__string){(items__5569[0] = ((slice__u8){(u8*)"(", 1}), items__5569[1] = value, items__5569[2] = ((slice__u8){(u8*)" == ", 4}), items__5569[3] = codegen__expr(ctx, g, p), items__5569[4] = ((slice__u8){(u8*)")", 1}), items__5569), 5}));
 }
 
 static void codegen__match_binds(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* p, slice__u8 value, grow__codegen__Bind* binds) {
-  slice__u8 items__5579[3];
-  slice__u8 items__5582[3];
-  slice__u8 items__5585[3];
-  slice__u8 items__5593[2];
-  tuple__19 values__5566 = lower__pattern_parts(ctx, p);
-  ast__Node* variant = values__5566._0;
-  slice__ptr_ast__Node items = values__5566._1;
-  bool by_fields = values__5566._2;
+  slice__u8 items__5583[3];
+  slice__u8 items__5586[3];
+  slice__u8 items__5589[3];
+  slice__u8 items__5597[2];
+  tuple__19 values__5570 = lower__pattern_parts(ctx, p);
+  ast__Node* variant = values__5570._0;
+  slice__ptr_ast__Node items = values__5570._1;
+  bool by_fields = values__5570._2;
   if ((variant == ((ast__Node*)0))) {
     return;
   }
   if (patterns__is_type_pattern(ctx, p)) {
     types__Type* et = patterns__type_pattern_enum(ctx, p);
     {
-      slice__ptr_ast__Node seq__5567 = items;
-      for (isize i__5568 = 0; i__5568 < seq__5567.len; i__5568++) {
-        ast__Node* item = seq__5567.ptr[i__5568];
+      slice__ptr_ast__Node seq__5571 = items;
+      for (isize i__5572 = 0; i__5572 < seq__5571.len; i__5572++) {
+        ast__Node* item = seq__5571.ptr[i__5572];
         if ((((rt_nonnull(item, "src/codegen.sabk:2462:22"))->kind).tag == ((ast__NodeKind__Tag)72LL))) {
-          ({ codegen__CodeGen* v__5569 = g; ast__Node* v__5570 = lower__pattern_of(ctx, item); slice__u8 v__5571 = codegen__error_as(ctx, g, value, et); grow__codegen__Bind* v__5572 = binds; codegen__match_binds(ctx, v__5569, v__5570, v__5571, v__5572); });
+          ({ codegen__CodeGen* v__5573 = g; ast__Node* v__5574 = lower__pattern_of(ctx, item); slice__u8 v__5575 = codegen__error_as(ctx, g, value, et); grow__codegen__Bind* v__5576 = binds; codegen__match_binds(ctx, v__5573, v__5574, v__5575, v__5576); });
         } else {
-          if (!({ slice__u8 a__5573 = ((rt_nonnull(item, "src/codegen.sabk:2464:27"))->tok).text, b__5574 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5573.ptr, a__5573.len, b__5574.ptr, b__5574.len); })) {
-            ({ grow__codegen__Bind* v__5575 = binds; codegen__Bind v__5578 = ({ ast__Node* v__5576 = item; slice__u8 v__5577 = codegen__error_as(ctx, g, value, et); ((codegen__Bind){.node = v__5576, .from = v__5577}); }); array__array_add__codegen__Bind(ctx, v__5575, v__5578); });
+          if (!({ slice__u8 a__5577 = ((rt_nonnull(item, "src/codegen.sabk:2464:27"))->tok).text, b__5578 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5577.ptr, a__5577.len, b__5578.ptr, b__5578.len); })) {
+            ({ grow__codegen__Bind* v__5579 = binds; codegen__Bind v__5582 = ({ ast__Node* v__5580 = item; slice__u8 v__5581 = codegen__error_as(ctx, g, value, et); ((codegen__Bind){.node = v__5580, .from = v__5581}); }); array__array_add__codegen__Bind(ctx, v__5579, v__5582); });
           }
         }
       }
     }
     return;
   }
-  slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5579[0] = value, items__5579[1] = ((slice__u8){(u8*)".payload.", 9}), items__5579[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2469:62"))->decl, "src/codegen.sabk:2469:67"))->tok).text), items__5579), 3}));
+  slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5583[0] = value, items__5583[1] = ((slice__u8){(u8*)".payload.", 9}), items__5583[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2469:62"))->decl, "src/codegen.sabk:2469:67"))->tok).text), items__5583), 3}));
   {
-    slice__ptr_ast__Node seq__5580 = items;
-    for (isize i__5581 = 0; i__5581 < seq__5580.len; i__5581++) {
-      ast__Node* item = seq__5580.ptr[i__5581];
-      slice__u8 at = (by_fields ? codegen__cat(ctx, ((slice__string){(items__5582[0] = payload, items__5582[1] = ((slice__u8){(u8*)".", 1}), items__5582[2] = codegen__local_name(ctx, lower__item_field_name(ctx, item)), items__5582), 3})) : payload);
+    slice__ptr_ast__Node seq__5584 = items;
+    for (isize i__5585 = 0; i__5585 < seq__5584.len; i__5585++) {
+      ast__Node* item = seq__5584.ptr[i__5585];
+      slice__u8 at = (by_fields ? codegen__cat(ctx, ((slice__string){(items__5586[0] = payload, items__5586[1] = ((slice__u8){(u8*)".", 1}), items__5586[2] = codegen__local_name(ctx, lower__item_field_name(ctx, item)), items__5586), 3})) : payload);
       if ((((rt_nonnull(item, "src/codegen.sabk:2472:18"))->kind).tag == ((ast__NodeKind__Tag)72LL))) {
-        ({ codegen__CodeGen* v__5583 = g; ast__Node* v__5584 = lower__pattern_of(ctx, item); slice__u8 v__5586 = (((rt_nonnull((rt_nonnull(item, "src/codegen.sabk:2473:55"))->ty, "src/codegen.sabk:2473:58"))->kind == ((types__TypeKind)6LL)) ? codegen__cat(ctx, ((slice__string){(items__5585[0] = ((slice__u8){(u8*)"(*", 2}), items__5585[1] = at, items__5585[2] = ((slice__u8){(u8*)")", 1}), items__5585), 3})) : at); grow__codegen__Bind* v__5587 = binds; codegen__match_binds(ctx, v__5583, v__5584, v__5586, v__5587); });
+        ({ codegen__CodeGen* v__5587 = g; ast__Node* v__5588 = lower__pattern_of(ctx, item); slice__u8 v__5590 = (((rt_nonnull((rt_nonnull(item, "src/codegen.sabk:2473:55"))->ty, "src/codegen.sabk:2473:58"))->kind == ((types__TypeKind)6LL)) ? codegen__cat(ctx, ((slice__string){(items__5589[0] = ((slice__u8){(u8*)"(*", 2}), items__5589[1] = at, items__5589[2] = ((slice__u8){(u8*)")", 1}), items__5589), 3})) : at); grow__codegen__Bind* v__5591 = binds; codegen__match_binds(ctx, v__5587, v__5588, v__5590, v__5591); });
       } else {
-        if (!({ slice__u8 a__5588 = ((rt_nonnull(item, "src/codegen.sabk:2474:23"))->tok).text, b__5589 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5588.ptr, a__5588.len, b__5589.ptr, b__5589.len); })) {
-          ({ grow__codegen__Bind* v__5590 = binds; codegen__Bind v__5595 = ({ ast__Node* v__5591 = item; slice__u8 v__5594 = codegen__cat(ctx, ((slice__string){(items__5593[0] = (({ ast__NodeKind is__5592 = (rt_nonnull(item, "src/codegen.sabk:2475:72"))->kind; (is__5592.tag == ((ast__NodeKind__Tag)73LL) && (is__5592.payload.Binding.by_ref == true)) ? (1) : 0; }) ? ((slice__u8){(u8*)"&", 1}) : ((slice__u8){(u8*)"", 0})), items__5593[1] = at, items__5593), 2})); ((codegen__Bind){.node = v__5591, .from = v__5594}); }); array__array_add__codegen__Bind(ctx, v__5590, v__5595); });
+        if (!({ slice__u8 a__5592 = ((rt_nonnull(item, "src/codegen.sabk:2474:23"))->tok).text, b__5593 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5592.ptr, a__5592.len, b__5593.ptr, b__5593.len); })) {
+          ({ grow__codegen__Bind* v__5594 = binds; codegen__Bind v__5599 = ({ ast__Node* v__5595 = item; slice__u8 v__5598 = codegen__cat(ctx, ((slice__string){(items__5597[0] = (({ ast__NodeKind is__5596 = (rt_nonnull(item, "src/codegen.sabk:2475:72"))->kind; (is__5596.tag == ((ast__NodeKind__Tag)73LL) && (is__5596.payload.Binding.by_ref == true)) ? (1) : 0; }) ? ((slice__u8){(u8*)"&", 1}) : ((slice__u8){(u8*)"", 0})), items__5597[1] = at, items__5597), 2})); ((codegen__Bind){.node = v__5595, .from = v__5598}); }); array__array_add__codegen__Bind(ctx, v__5594, v__5599); });
         }
       }
     }
@@ -36872,31 +36981,31 @@ static void codegen__match_binds(prelude__Context *ctx, codegen__CodeGen* g, ast
 }
 
 static void codegen__declare_bindings(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5600[4];
+  slice__u8 items__5604[4];
   {
-    ast__NodeKind switch__5596 = (rt_nonnull(n, "src/codegen.sabk:2482:15"))->kind;
+    ast__NodeKind switch__5600 = (rt_nonnull(n, "src/codegen.sabk:2482:15"))->kind;
     switch (0) { default:
-    if ((switch__5596.tag == ((ast__NodeKind__Tag)43LL) && (switch__5596.payload.Binary.op == ((ast__BinaryOp)11LL)))) {
-      ast__Node* lhs = switch__5596.payload.Binary.lhs;
-      ast__Node* rhs = switch__5596.payload.Binary.rhs;
+    if ((switch__5600.tag == ((ast__NodeKind__Tag)43LL) && (switch__5600.payload.Binary.op == ((ast__BinaryOp)11LL)))) {
+      ast__Node* lhs = switch__5600.payload.Binary.lhs;
+      ast__Node* rhs = switch__5600.payload.Binary.rhs;
       codegen__declare_bindings(ctx, g, lhs);
       codegen__declare_bindings(ctx, g, rhs);
       break;
     }
-    if ((switch__5596.tag == ((ast__NodeKind__Tag)45LL))) {
-      ast__Node* inner = switch__5596.payload.Grouped.inner;
+    if ((switch__5600.tag == ((ast__NodeKind__Tag)45LL))) {
+      ast__Node* inner = switch__5600.payload.Grouped.inner;
       codegen__declare_bindings(ctx, g, inner);
       break;
     }
-    if ((switch__5596.tag == ((ast__NodeKind__Tag)69LL))) {
-      ast__Node* pattern = switch__5596.payload.Is.pattern;
+    if ((switch__5600.tag == ((ast__NodeKind__Tag)69LL))) {
+      ast__Node* pattern = switch__5600.payload.Is.pattern;
       grow__codegen__Bind binds = {0};
       codegen__match_binds(ctx, g, pattern, ((slice__u8){(u8*)"", 0}), (&binds));
       {
-        grow__codegen__Bind seq__5597 = binds;
-        for (isize i__5598 = 0; i__5598 < seq__5597.len; i__5598++) {
-          codegen__Bind b = seq__5597.ptr[i__5598];
-          ({ codegen__CodeGen* v__5599 = g; slice__u8 v__5601 = codegen__cat(ctx, ((slice__string){(items__5600[0] = codegen__c_type(ctx, g, (rt_nonnull((b).node, "src/codegen.sabk:2492:42"))->ty), items__5600[1] = ((slice__u8){(u8*)" ", 1}), items__5600[2] = codegen__var_name(ctx, g, (b).node), items__5600[3] = ((slice__u8){(u8*)";", 1}), items__5600), 4})); codegen__line(ctx, v__5599, v__5601); });
+        grow__codegen__Bind seq__5601 = binds;
+        for (isize i__5602 = 0; i__5602 < seq__5601.len; i__5602++) {
+          codegen__Bind b = seq__5601.ptr[i__5602];
+          ({ codegen__CodeGen* v__5603 = g; slice__u8 v__5605 = codegen__cat(ctx, ((slice__string){(items__5604[0] = codegen__c_type(ctx, g, (rt_nonnull((b).node, "src/codegen.sabk:2492:42"))->ty), items__5604[1] = ((slice__u8){(u8*)" ", 1}), items__5604[2] = codegen__var_name(ctx, g, (b).node), items__5604[3] = ((slice__u8){(u8*)";", 1}), items__5604), 4})); codegen__line(ctx, v__5603, v__5605); });
         }
       }
       break;
@@ -36908,39 +37017,39 @@ static void codegen__declare_bindings(prelude__Context *ctx, codegen__CodeGen* g
 }
 
 static slice__u8 codegen__error_as(prelude__Context *ctx, codegen__CodeGen* g, slice__u8 value, types__Type* et) {
-  slice__u8 items__5604[3];
-  slice__u8 items__5606[5];
+  slice__u8 items__5608[3];
+  slice__u8 items__5610[5];
   if ((rt_nonnull(et, "src/codegen.sabk:2500:12"))->is_tagged) {
-    return ({ codegen__CodeGen* v__5602 = g; types__Type* v__5603 = et; slice__u8 v__5605 = codegen__cat(ctx, ((slice__string){(items__5604[0] = ((slice__u8){(u8*)".tag = (u32)(", 13}), items__5604[1] = value, items__5604[2] = ((slice__u8){(u8*)")", 1}), items__5604), 3})); codegen__compound(ctx, v__5602, v__5603, v__5605); });
+    return ({ codegen__CodeGen* v__5606 = g; types__Type* v__5607 = et; slice__u8 v__5609 = codegen__cat(ctx, ((slice__string){(items__5608[0] = ((slice__u8){(u8*)".tag = (u32)(", 13}), items__5608[1] = value, items__5608[2] = ((slice__u8){(u8*)")", 1}), items__5608), 3})); codegen__compound(ctx, v__5606, v__5607, v__5609); });
   }
-  return codegen__cat(ctx, ((slice__string){(items__5606[0] = ((slice__u8){(u8*)"((", 2}), items__5606[1] = codegen__c_type(ctx, g, et), items__5606[2] = ((slice__u8){(u8*)")(u32)(", 7}), items__5606[3] = value, items__5606[4] = ((slice__u8){(u8*)"))", 2}), items__5606), 5}));
+  return codegen__cat(ctx, ((slice__string){(items__5610[0] = ((slice__u8){(u8*)"((", 2}), items__5610[1] = codegen__c_type(ctx, g, et), items__5610[2] = ((slice__u8){(u8*)")(u32)(", 7}), items__5610[3] = value, items__5610[4] = ((slice__u8){(u8*)"))", 2}), items__5610), 5}));
 }
 
 static slice__u8 codegen__is_test(prelude__Context *ctx, codegen__CodeGen* g, ast__Node* n) {
-  slice__u8 items__5611[5];
-  slice__u8 items__5612[11];
-  slice__u8 items__5617[15];
-  slice__u8 items__5619[3];
-  slice__u8 items__5622[5];
-  slice__u8 items__5623[5];
-  slice__u8 items__5624[5];
-  slice__u8 items__5625[7];
+  slice__u8 items__5615[5];
+  slice__u8 items__5616[11];
+  slice__u8 items__5621[15];
+  slice__u8 items__5623[3];
   slice__u8 items__5626[5];
   slice__u8 items__5627[5];
-  slice__u8 items__5628[3];
-  slice__u8 items__5633[3];
-  slice__u8 items__5634[3];
-  slice__u8 items__5636[6];
-  slice__u8 items__5637[5];
-  slice__u8 items__5638[5];
-  slice__u8 items__5639[9];
+  slice__u8 items__5628[5];
+  slice__u8 items__5629[7];
+  slice__u8 items__5630[5];
+  slice__u8 items__5631[5];
+  slice__u8 items__5632[3];
+  slice__u8 items__5637[3];
+  slice__u8 items__5638[3];
+  slice__u8 items__5640[6];
+  slice__u8 items__5641[5];
+  slice__u8 items__5642[5];
+  slice__u8 items__5643[9];
   ast__Node* e = ((ast__Node*)0);
   ast__Node* p = ((ast__Node*)0);
   {
     ast__Node* value;
     ast__Node* pattern;
-    if (({ ast__NodeKind is__5607 = (rt_nonnull(n, "src/codegen.sabk:2509:11"))->kind; is__5607.tag == ((ast__NodeKind__Tag)69LL) ? (value = is__5607.payload.Is.value, pattern = is__5607.payload.Is.pattern, 1) : 0; })) {
-      ({ tuple__22 values__5608 = ((tuple__22){._0 = value, ._1 = pattern}); e = values__5608._0; p = values__5608._1; });
+    if (({ ast__NodeKind is__5611 = (rt_nonnull(n, "src/codegen.sabk:2509:11"))->kind; is__5611.tag == ((ast__NodeKind__Tag)69LL) ? (value = is__5611.payload.Is.value, pattern = is__5611.payload.Is.pattern, 1) : 0; })) {
+      ({ tuple__22 values__5612 = ((tuple__22){._0 = value, ._1 = pattern}); e = values__5612._0; p = values__5612._1; });
     }
   }
   types__Type* t = codegen__conv_or_ty(ctx, e);
@@ -36950,74 +37059,74 @@ static slice__u8 codegen__is_test(prelude__Context *ctx, codegen__CodeGen* g, as
     codegen__match_binds(ctx, g, p, s, (&binds));
     slice__u8 fill = ((slice__u8){(u8*)"", 0});
     {
-      grow__codegen__Bind seq__5609 = binds;
-      for (isize i__5610 = 0; i__5610 < seq__5609.len; i__5610++) {
-        codegen__Bind b = seq__5609.ptr[i__5610];
-        fill = codegen__cat(ctx, ((slice__string){(items__5611[0] = fill, items__5611[1] = codegen__var_name(ctx, g, (b).node), items__5611[2] = ((slice__u8){(u8*)" = ", 3}), items__5611[3] = (b).from, items__5611[4] = ((slice__u8){(u8*)", ", 2}), items__5611), 5}));
+      grow__codegen__Bind seq__5613 = binds;
+      for (isize i__5614 = 0; i__5614 < seq__5613.len; i__5614++) {
+        codegen__Bind b = seq__5613.ptr[i__5614];
+        fill = codegen__cat(ctx, ((slice__string){(items__5615[0] = fill, items__5615[1] = codegen__var_name(ctx, g, (b).node), items__5615[2] = ((slice__u8){(u8*)" = ", 3}), items__5615[3] = (b).from, items__5615[4] = ((slice__u8){(u8*)", ", 2}), items__5615), 5}));
       }
     }
-    return codegen__cat(ctx, ((slice__string){(items__5612[0] = ((slice__u8){(u8*)"({ ", 3}), items__5612[1] = codegen__c_type(ctx, g, t), items__5612[2] = ((slice__u8){(u8*)" ", 1}), items__5612[3] = s, items__5612[4] = ((slice__u8){(u8*)" = ", 3}), items__5612[5] = codegen__expr(ctx, g, e), items__5612[6] = ((slice__u8){(u8*)"; ", 2}), items__5612[7] = codegen__match_test(ctx, g, p, s, t), items__5612[8] = ((slice__u8){(u8*)" \? (", 4}), items__5612[9] = fill, items__5612[10] = ((slice__u8){(u8*)"1) : 0; })", 10}), items__5612), 11}));
+    return codegen__cat(ctx, ((slice__string){(items__5616[0] = ((slice__u8){(u8*)"({ ", 3}), items__5616[1] = codegen__c_type(ctx, g, t), items__5616[2] = ((slice__u8){(u8*)" ", 1}), items__5616[3] = s, items__5616[4] = ((slice__u8){(u8*)" = ", 3}), items__5616[5] = codegen__expr(ctx, g, e), items__5616[6] = ((slice__u8){(u8*)"; ", 2}), items__5616[7] = codegen__match_test(ctx, g, p, s, t), items__5616[8] = ((slice__u8){(u8*)" \? (", 4}), items__5616[9] = fill, items__5616[10] = ((slice__u8){(u8*)"1) : 0; })", 10}), items__5616), 11}));
   }
   types__Type* tag_type = ((rt_nonnull(t, "src/codegen.sabk:2521:26"))->is_tagged ? ((*slice__types__Field__at(grow__types__Field__view((rt_nonnull(t, "src/codegen.sabk:2521:39"))->fields), ((isize)0LL), "src/codegen.sabk:2521:45"))).ty : t);
   if ((rt_nonnull(t, "src/codegen.sabk:2522:11"))->is_string) {
-    return ({ codegen__CodeGen* v__5613 = g; slice__u8 v__5614 = codegen__expr(ctx, g, e); slice__u8 v__5615 = codegen__expr(ctx, g, p); codegen__string_equal(ctx, v__5613, v__5614, v__5615); });
+    return ({ codegen__CodeGen* v__5617 = g; slice__u8 v__5618 = codegen__expr(ctx, g, e); slice__u8 v__5619 = codegen__expr(ctx, g, p); codegen__string_equal(ctx, v__5617, v__5618, v__5619); });
   }
   slice__u8 s = codegen__tmp(ctx, g, ((slice__u8){(u8*)"is", 2}));
   {
     ast__Node* lo;
     ast__Node* hi;
     bool inclusive;
-    if (({ ast__NodeKind is__5616 = (rt_nonnull(p, "src/codegen.sabk:2525:11"))->kind; is__5616.tag == ((ast__NodeKind__Tag)70LL) ? (lo = is__5616.payload.Range.lo, hi = is__5616.payload.Range.hi, inclusive = is__5616.payload.Range.inclusive, 1) : 0; })) {
-      return codegen__cat(ctx, ((slice__string){(items__5617[0] = ((slice__u8){(u8*)"({ ", 3}), items__5617[1] = codegen__c_type(ctx, g, t), items__5617[2] = ((slice__u8){(u8*)" ", 1}), items__5617[3] = s, items__5617[4] = ((slice__u8){(u8*)" = ", 3}), items__5617[5] = codegen__expr(ctx, g, e), items__5617[6] = ((slice__u8){(u8*)"; ", 2}), items__5617[7] = s, items__5617[8] = ((slice__u8){(u8*)" >= ", 4}), items__5617[9] = codegen__constant(ctx, g, (rt_nonnull(lo, "src/codegen.sabk:2526:100"))->cval, tag_type), items__5617[10] = ((slice__u8){(u8*)" && ", 4}), items__5617[11] = s, items__5617[12] = (inclusive ? ((slice__u8){(u8*)" <= ", 4}) : ((slice__u8){(u8*)" < ", 3})), items__5617[13] = codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2527:80"))->cval, tag_type), items__5617[14] = ((slice__u8){(u8*)"; })", 4}), items__5617), 15}));
+    if (({ ast__NodeKind is__5620 = (rt_nonnull(p, "src/codegen.sabk:2525:11"))->kind; is__5620.tag == ((ast__NodeKind__Tag)70LL) ? (lo = is__5620.payload.Range.lo, hi = is__5620.payload.Range.hi, inclusive = is__5620.payload.Range.inclusive, 1) : 0; })) {
+      return codegen__cat(ctx, ((slice__string){(items__5621[0] = ((slice__u8){(u8*)"({ ", 3}), items__5621[1] = codegen__c_type(ctx, g, t), items__5621[2] = ((slice__u8){(u8*)" ", 1}), items__5621[3] = s, items__5621[4] = ((slice__u8){(u8*)" = ", 3}), items__5621[5] = codegen__expr(ctx, g, e), items__5621[6] = ((slice__u8){(u8*)"; ", 2}), items__5621[7] = s, items__5621[8] = ((slice__u8){(u8*)" >= ", 4}), items__5621[9] = codegen__constant(ctx, g, (rt_nonnull(lo, "src/codegen.sabk:2526:100"))->cval, tag_type), items__5621[10] = ((slice__u8){(u8*)" && ", 4}), items__5621[11] = s, items__5621[12] = (inclusive ? ((slice__u8){(u8*)" <= ", 4}) : ((slice__u8){(u8*)" < ", 3})), items__5621[13] = codegen__constant(ctx, g, (rt_nonnull(hi, "src/codegen.sabk:2527:80"))->cval, tag_type), items__5621[14] = ((slice__u8){(u8*)"; })", 4}), items__5621), 15}));
     }
   }
-  tuple__19 values__5618 = lower__pattern_parts(ctx, p);
-  ast__Node* variant = values__5618._0;
-  slice__ptr_ast__Node items = values__5618._1;
-  bool by_fields = values__5618._2;
+  tuple__19 values__5622 = lower__pattern_parts(ctx, p);
+  ast__Node* variant = values__5622._0;
+  slice__ptr_ast__Node items = values__5622._1;
+  bool by_fields = values__5622._2;
   if (((variant != ((ast__Node*)0)) && patterns__has_subpatterns(ctx, p))) {
     bool by_ref = lower__binds_by_ref(ctx, p);
-    slice__u8 value = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5619[0] = ((slice__u8){(u8*)"(*", 2}), items__5619[1] = s, items__5619[2] = ((slice__u8){(u8*)")", 1}), items__5619), 3})) : s);
+    slice__u8 value = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5623[0] = ((slice__u8){(u8*)"(*", 2}), items__5623[1] = s, items__5623[2] = ((slice__u8){(u8*)")", 1}), items__5623), 3})) : s);
     grow__codegen__Bind binds = {0};
     codegen__match_binds(ctx, g, p, value, (&binds));
     slice__u8 fill = ((slice__u8){(u8*)"", 0});
     {
-      grow__codegen__Bind seq__5620 = binds;
-      for (isize i__5621 = 0; i__5621 < seq__5620.len; i__5621++) {
-        codegen__Bind b = seq__5620.ptr[i__5621];
-        fill = codegen__cat(ctx, ((slice__string){(items__5622[0] = fill, items__5622[1] = codegen__var_name(ctx, g, (b).node), items__5622[2] = ((slice__u8){(u8*)" = ", 3}), items__5622[3] = (b).from, items__5622[4] = ((slice__u8){(u8*)", ", 2}), items__5622), 5}));
+      grow__codegen__Bind seq__5624 = binds;
+      for (isize i__5625 = 0; i__5625 < seq__5624.len; i__5625++) {
+        codegen__Bind b = seq__5624.ptr[i__5625];
+        fill = codegen__cat(ctx, ((slice__string){(items__5626[0] = fill, items__5626[1] = codegen__var_name(ctx, g, (b).node), items__5626[2] = ((slice__u8){(u8*)" = ", 3}), items__5626[3] = (b).from, items__5626[4] = ((slice__u8){(u8*)", ", 2}), items__5626), 5}));
       }
     }
-    slice__u8 start = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5623[0] = codegen__c_type(ctx, g, t), items__5623[1] = ((slice__u8){(u8*)" *", 2}), items__5623[2] = s, items__5623[3] = ((slice__u8){(u8*)" = &", 4}), items__5623[4] = codegen__expr(ctx, g, e), items__5623), 5})) : codegen__cat(ctx, ((slice__string){(items__5624[0] = codegen__c_type(ctx, g, t), items__5624[1] = ((slice__u8){(u8*)" ", 1}), items__5624[2] = s, items__5624[3] = ((slice__u8){(u8*)" = ", 3}), items__5624[4] = codegen__expr(ctx, g, e), items__5624), 5})));
-    return codegen__cat(ctx, ((slice__string){(items__5625[0] = ((slice__u8){(u8*)"({ ", 3}), items__5625[1] = start, items__5625[2] = ((slice__u8){(u8*)"; ", 2}), items__5625[3] = codegen__match_test(ctx, g, p, value, t), items__5625[4] = ((slice__u8){(u8*)" \? (", 4}), items__5625[5] = fill, items__5625[6] = ((slice__u8){(u8*)"1) : 0; })", 10}), items__5625), 7}));
+    slice__u8 start = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5627[0] = codegen__c_type(ctx, g, t), items__5627[1] = ((slice__u8){(u8*)" *", 2}), items__5627[2] = s, items__5627[3] = ((slice__u8){(u8*)" = &", 4}), items__5627[4] = codegen__expr(ctx, g, e), items__5627), 5})) : codegen__cat(ctx, ((slice__string){(items__5628[0] = codegen__c_type(ctx, g, t), items__5628[1] = ((slice__u8){(u8*)" ", 1}), items__5628[2] = s, items__5628[3] = ((slice__u8){(u8*)" = ", 3}), items__5628[4] = codegen__expr(ctx, g, e), items__5628), 5})));
+    return codegen__cat(ctx, ((slice__string){(items__5629[0] = ((slice__u8){(u8*)"({ ", 3}), items__5629[1] = start, items__5629[2] = ((slice__u8){(u8*)"; ", 2}), items__5629[3] = codegen__match_test(ctx, g, p, value, t), items__5629[4] = ((slice__u8){(u8*)" \? (", 4}), items__5629[5] = fill, items__5629[6] = ((slice__u8){(u8*)"1) : 0; })", 10}), items__5629), 7}));
   }
   ast__Node* head = ((variant != ((ast__Node*)0)) ? variant : p);
   if ((!(rt_nonnull(t, "src/codegen.sabk:2542:12"))->is_tagged)) {
-    return codegen__cat(ctx, ((slice__string){(items__5626[0] = ((slice__u8){(u8*)"(", 1}), items__5626[1] = codegen__expr(ctx, g, e), items__5626[2] = ((slice__u8){(u8*)" == ", 4}), items__5626[3] = codegen__expr(ctx, g, head), items__5626[4] = ((slice__u8){(u8*)")", 1}), items__5626), 5}));
+    return codegen__cat(ctx, ((slice__string){(items__5630[0] = ((slice__u8){(u8*)"(", 1}), items__5630[1] = codegen__expr(ctx, g, e), items__5630[2] = ((slice__u8){(u8*)" == ", 4}), items__5630[3] = codegen__expr(ctx, g, head), items__5630[4] = ((slice__u8){(u8*)")", 1}), items__5630), 5}));
   }
   slice__u8 tag = codegen__expr(ctx, g, head);
   if (((variant == ((ast__Node*)0)) || ((items).len == ((isize)0LL)))) {
-    return codegen__cat(ctx, ((slice__string){(items__5627[0] = ((slice__u8){(u8*)"((", 2}), items__5627[1] = codegen__expr(ctx, g, e), items__5627[2] = ((slice__u8){(u8*)").tag == ", 9}), items__5627[3] = tag, items__5627[4] = ((slice__u8){(u8*)")", 1}), items__5627), 5}));
+    return codegen__cat(ctx, ((slice__string){(items__5631[0] = ((slice__u8){(u8*)"((", 2}), items__5631[1] = codegen__expr(ctx, g, e), items__5631[2] = ((slice__u8){(u8*)").tag == ", 9}), items__5631[3] = tag, items__5631[4] = ((slice__u8){(u8*)")", 1}), items__5631), 5}));
   }
   bool by_ref = lower__binds_by_ref(ctx, p);
-  slice__u8 value = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5628[0] = ((slice__u8){(u8*)"(*", 2}), items__5628[1] = s, items__5628[2] = ((slice__u8){(u8*)")", 1}), items__5628), 3})) : s);
+  slice__u8 value = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5632[0] = ((slice__u8){(u8*)"(*", 2}), items__5632[1] = s, items__5632[2] = ((slice__u8){(u8*)")", 1}), items__5632), 3})) : s);
   slice__u8 fill = ((slice__u8){(u8*)"", 0});
   {
-    slice__ptr_ast__Node seq__5629 = items;
-    for (isize i__5630 = 0; i__5630 < seq__5629.len; i__5630++) {
-      ast__Node* b = seq__5629.ptr[i__5630];
-      if (({ slice__u8 a__5631 = ((rt_nonnull(b, "src/codegen.sabk:2551:15"))->tok).text, b__5632 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5631.ptr, a__5631.len, b__5632.ptr, b__5632.len); })) {
+    slice__ptr_ast__Node seq__5633 = items;
+    for (isize i__5634 = 0; i__5634 < seq__5633.len; i__5634++) {
+      ast__Node* b = seq__5633.ptr[i__5634];
+      if (({ slice__u8 a__5635 = ((rt_nonnull(b, "src/codegen.sabk:2551:15"))->tok).text, b__5636 = ((slice__u8){(u8*)"_", 1}); rt_bytes_equal(a__5635.ptr, a__5635.len, b__5636.ptr, b__5636.len); })) {
         continue;
       }
-      slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5633[0] = value, items__5633[1] = ((slice__u8){(u8*)".payload.", 9}), items__5633[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2553:66"))->decl, "src/codegen.sabk:2553:71"))->tok).text), items__5633), 3}));
+      slice__u8 payload = codegen__cat(ctx, ((slice__string){(items__5637[0] = value, items__5637[1] = ((slice__u8){(u8*)".payload.", 9}), items__5637[2] = codegen__local_name(ctx, ((rt_nonnull((rt_nonnull(variant, "src/codegen.sabk:2553:66"))->decl, "src/codegen.sabk:2553:71"))->tok).text), items__5637), 3}));
       if (by_fields) {
-        payload = codegen__cat(ctx, ((slice__string){(items__5634[0] = payload, items__5634[1] = ((slice__u8){(u8*)".", 1}), items__5634[2] = codegen__local_name(ctx, lower__item_field_name(ctx, b)), items__5634), 3}));
+        payload = codegen__cat(ctx, ((slice__string){(items__5638[0] = payload, items__5638[1] = ((slice__u8){(u8*)".", 1}), items__5638[2] = codegen__local_name(ctx, lower__item_field_name(ctx, b)), items__5638), 3}));
       }
-      fill = codegen__cat(ctx, ((slice__string){(items__5636[0] = fill, items__5636[1] = codegen__var_name(ctx, g, b), items__5636[2] = ((slice__u8){(u8*)" = ", 3}), items__5636[3] = (({ ast__NodeKind is__5635 = (rt_nonnull(b, "src/codegen.sabk:2556:55"))->kind; (is__5635.tag == ((ast__NodeKind__Tag)73LL) && (is__5635.payload.Binding.by_ref == true)) ? (1) : 0; }) ? ((slice__u8){(u8*)"&", 1}) : ((slice__u8){(u8*)"", 0})), items__5636[4] = payload, items__5636[5] = ((slice__u8){(u8*)", ", 2}), items__5636), 6}));
+      fill = codegen__cat(ctx, ((slice__string){(items__5640[0] = fill, items__5640[1] = codegen__var_name(ctx, g, b), items__5640[2] = ((slice__u8){(u8*)" = ", 3}), items__5640[3] = (({ ast__NodeKind is__5639 = (rt_nonnull(b, "src/codegen.sabk:2556:55"))->kind; (is__5639.tag == ((ast__NodeKind__Tag)73LL) && (is__5639.payload.Binding.by_ref == true)) ? (1) : 0; }) ? ((slice__u8){(u8*)"&", 1}) : ((slice__u8){(u8*)"", 0})), items__5640[4] = payload, items__5640[5] = ((slice__u8){(u8*)", ", 2}), items__5640), 6}));
     }
   }
-  slice__u8 start = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5637[0] = codegen__c_type(ctx, g, t), items__5637[1] = ((slice__u8){(u8*)" *", 2}), items__5637[2] = s, items__5637[3] = ((slice__u8){(u8*)" = &", 4}), items__5637[4] = codegen__expr(ctx, g, e), items__5637), 5})) : codegen__cat(ctx, ((slice__string){(items__5638[0] = codegen__c_type(ctx, g, t), items__5638[1] = ((slice__u8){(u8*)" ", 1}), items__5638[2] = s, items__5638[3] = ((slice__u8){(u8*)" = ", 3}), items__5638[4] = codegen__expr(ctx, g, e), items__5638), 5})));
-  return codegen__cat(ctx, ((slice__string){(items__5639[0] = ((slice__u8){(u8*)"({ ", 3}), items__5639[1] = start, items__5639[2] = ((slice__u8){(u8*)"; ", 2}), items__5639[3] = value, items__5639[4] = ((slice__u8){(u8*)".tag == ", 8}), items__5639[5] = tag, items__5639[6] = ((slice__u8){(u8*)" \? (", 4}), items__5639[7] = fill, items__5639[8] = ((slice__u8){(u8*)"1) : 0; })", 10}), items__5639), 9}));
+  slice__u8 start = (by_ref ? codegen__cat(ctx, ((slice__string){(items__5641[0] = codegen__c_type(ctx, g, t), items__5641[1] = ((slice__u8){(u8*)" *", 2}), items__5641[2] = s, items__5641[3] = ((slice__u8){(u8*)" = &", 4}), items__5641[4] = codegen__expr(ctx, g, e), items__5641), 5})) : codegen__cat(ctx, ((slice__string){(items__5642[0] = codegen__c_type(ctx, g, t), items__5642[1] = ((slice__u8){(u8*)" ", 1}), items__5642[2] = s, items__5642[3] = ((slice__u8){(u8*)" = ", 3}), items__5642[4] = codegen__expr(ctx, g, e), items__5642), 5})));
+  return codegen__cat(ctx, ((slice__string){(items__5643[0] = ((slice__u8){(u8*)"({ ", 3}), items__5643[1] = start, items__5643[2] = ((slice__u8){(u8*)"; ", 2}), items__5643[3] = value, items__5643[4] = ((slice__u8){(u8*)".tag == ", 8}), items__5643[5] = tag, items__5643[6] = ((slice__u8){(u8*)" \? (", 4}), items__5643[7] = fill, items__5643[8] = ((slice__u8){(u8*)"1) : 0; })", 10}), items__5643), 9}));
 }
 
 static void array__array_add__main__Phase(prelude__Context *ctx, grow__main__Phase* xs, main__Phase item) {
@@ -37088,7 +37197,7 @@ static bool map__map_remove__ptr_ast__Node__ptr_ast__Node(prelude__Context *ctx,
     return false;
   }
   bool found = false;
-  isize hole = ({ map__Map__ptr_ast__Node__ptr_ast__Node* v__5640 = m; ast__Node* v__5641 = key; u64 v__5642 = ((rt_nonnull(m, "std/map.sabk:122:36"))->hash)(ctx, key); bool* v__5643 = (&found); map__find_slot__ptr_ast__Node__ptr_ast__Node(ctx, v__5640, v__5641, v__5642, v__5643); });
+  isize hole = ({ map__Map__ptr_ast__Node__ptr_ast__Node* v__5644 = m; ast__Node* v__5645 = key; u64 v__5646 = ((rt_nonnull(m, "std/map.sabk:122:36"))->hash)(ctx, key); bool* v__5647 = (&found); map__find_slot__ptr_ast__Node__ptr_ast__Node(ctx, v__5644, v__5645, v__5646, v__5647); });
   if ((!found)) {
     return false;
   }
@@ -37229,7 +37338,7 @@ static isize map__find_in__string__token__TokenKind(prelude__Context *ctx, slice
 static tuple__10 map__static_map_get__string__token__TokenKind(prelude__Context *ctx, map__StaticMap__string__token__TokenKind m, slice__u8 key) {
   if ((((m).entries).len > ((isize)0LL))) {
     bool found = false;
-    isize slot = ({ slice__map__MapEntry__string__token__TokenKind v__5645 = (m).entries; slice__u32 v__5646 = (m).slots; slice__u8 v__5647 = key; u64 v__5648 = map__hash_key__string(ctx, key); fn__2 v__5649 = map__keys_equal__string; bool* v__5650 = (&found); map__find_in__string__token__TokenKind(ctx, v__5645, v__5646, v__5647, v__5648, v__5649, v__5650); });
+    isize slot = ({ slice__map__MapEntry__string__token__TokenKind v__5649 = (m).entries; slice__u32 v__5650 = (m).slots; slice__u8 v__5651 = key; u64 v__5652 = map__hash_key__string(ctx, key); fn__2 v__5653 = map__keys_equal__string; bool* v__5654 = (&found); map__find_in__string__token__TokenKind(ctx, v__5649, v__5650, v__5651, v__5652, v__5653, v__5654); });
     if (found) {
       return ((tuple__10){._0 = ((*slice__map__MapEntry__string__token__TokenKind__at((m).entries, ((u32)((*slice__u32__at((m).slots, slot, "std/map.sabk:206:37")) - ((u32)1LL))), "std/map.sabk:206:29"))).value, ._1 = true});
     }
@@ -37239,8 +37348,8 @@ static tuple__10 map__static_map_get__string__token__TokenKind(prelude__Context 
 }
 
 static bool map__static_map_has__string__token__TokenKind(prelude__Context *ctx, map__StaticMap__string__token__TokenKind m, slice__u8 key) {
-  tuple__10 values__5651 = map__static_map_get__string__token__TokenKind(ctx, m, key);
-  bool found = values__5651._1;
+  tuple__10 values__5655 = map__static_map_get__string__token__TokenKind(ctx, m, key);
+  bool found = values__5655._1;
   return found;
 }
 
@@ -37796,8 +37905,8 @@ static slice__ptr_ast__Node mem__clone_slice__ptr_ast__Node(prelude__Context *ct
 
 static isize array__array_find__ptr_ast__Node(prelude__Context *ctx, slice__ptr_ast__Node xs, ast__Node* item) {
   {
-    isize end__5652 = (xs).len;
-    for (isize i = ((isize)0LL); i < end__5652; i++) {
+    isize end__5656 = (xs).len;
+    for (isize i = ((isize)0LL); i < end__5656; i++) {
       if (reflect__values_equal__ptr_ast__Node(ctx, (*slice__ptr_ast__Node__at(xs, i, "std/array.sabk:124:28")), item)) {
         return i;
       }
@@ -37859,7 +37968,7 @@ static grow__generics__Candidate* map__map_find__ptr_ast__Node__grow__generics__
     return ((grow__generics__Candidate*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__grow__generics__Candidate* v__5653 = m; ast__Node* v__5654 = key; u64 v__5655 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5656 = (&found); map__find_slot__ptr_ast__Node__grow__generics__Candidate(ctx, v__5653, v__5654, v__5655, v__5656); });
+  isize slot = ({ map__Map__ptr_ast__Node__grow__generics__Candidate* v__5657 = m; ast__Node* v__5658 = key; u64 v__5659 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5660 = (&found); map__find_slot__ptr_ast__Node__grow__generics__Candidate(ctx, v__5657, v__5658, v__5659, v__5660); });
   if ((!found)) {
     return ((grow__generics__Candidate*)0);
   }
@@ -38168,7 +38277,7 @@ static grow__isize* map__map_find__i32__grow__isize(prelude__Context *ctx, map__
     return ((grow__isize*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__i32__grow__isize* v__5657 = m; i32 v__5658 = key; u64 v__5659 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5660 = (&found); map__find_slot__i32__grow__isize(ctx, v__5657, v__5658, v__5659, v__5660); });
+  isize slot = ({ map__Map__i32__grow__isize* v__5661 = m; i32 v__5662 = key; u64 v__5663 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5664 = (&found); map__find_slot__i32__grow__isize(ctx, v__5661, v__5662, v__5663, v__5664); });
   if ((!found)) {
     return ((grow__isize*)0);
   }
@@ -38180,7 +38289,7 @@ static bool map__map_remove__i32__grow__isize(prelude__Context *ctx, map__Map__i
     return false;
   }
   bool found = false;
-  isize hole = ({ map__Map__i32__grow__isize* v__5661 = m; i32 v__5662 = key; u64 v__5663 = ((rt_nonnull(m, "std/map.sabk:122:36"))->hash)(ctx, key); bool* v__5664 = (&found); map__find_slot__i32__grow__isize(ctx, v__5661, v__5662, v__5663, v__5664); });
+  isize hole = ({ map__Map__i32__grow__isize* v__5665 = m; i32 v__5666 = key; u64 v__5667 = ((rt_nonnull(m, "std/map.sabk:122:36"))->hash)(ctx, key); bool* v__5668 = (&found); map__find_slot__i32__grow__isize(ctx, v__5665, v__5666, v__5667, v__5668); });
   if ((!found)) {
     return false;
   }
@@ -38324,7 +38433,7 @@ static bool map__map_remove__ptr_ast__Node__memory__Short(prelude__Context *ctx,
     return false;
   }
   bool found = false;
-  isize hole = ({ map__Map__ptr_ast__Node__memory__Short* v__5665 = m; ast__Node* v__5666 = key; u64 v__5667 = ((rt_nonnull(m, "std/map.sabk:122:36"))->hash)(ctx, key); bool* v__5668 = (&found); map__find_slot__ptr_ast__Node__memory__Short(ctx, v__5665, v__5666, v__5667, v__5668); });
+  isize hole = ({ map__Map__ptr_ast__Node__memory__Short* v__5669 = m; ast__Node* v__5670 = key; u64 v__5671 = ((rt_nonnull(m, "std/map.sabk:122:36"))->hash)(ctx, key); bool* v__5672 = (&found); map__find_slot__ptr_ast__Node__memory__Short(ctx, v__5669, v__5670, v__5671, v__5672); });
   if ((!found)) {
     return false;
   }
@@ -38427,7 +38536,7 @@ static grow__memory__Grow* map__map_find__ptr_ast__Node__grow__memory__Grow(prel
     return ((grow__memory__Grow*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__grow__memory__Grow* v__5669 = m; ast__Node* v__5670 = key; u64 v__5671 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5672 = (&found); map__find_slot__ptr_ast__Node__grow__memory__Grow(ctx, v__5669, v__5670, v__5671, v__5672); });
+  isize slot = ({ map__Map__ptr_ast__Node__grow__memory__Grow* v__5673 = m; ast__Node* v__5674 = key; u64 v__5675 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5676 = (&found); map__find_slot__ptr_ast__Node__grow__memory__Grow(ctx, v__5673, v__5674, v__5675, v__5676); });
   if ((!found)) {
     return ((grow__memory__Grow*)0);
   }
@@ -38470,7 +38579,7 @@ static grow__i32* map__map_find__ptr_ast__Node__grow__i32(prelude__Context *ctx,
     return ((grow__i32*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__grow__i32* v__5673 = m; ast__Node* v__5674 = key; u64 v__5675 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5676 = (&found); map__find_slot__ptr_ast__Node__grow__i32(ctx, v__5673, v__5674, v__5675, v__5676); });
+  isize slot = ({ map__Map__ptr_ast__Node__grow__i32* v__5677 = m; ast__Node* v__5678 = key; u64 v__5679 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5680 = (&found); map__find_slot__ptr_ast__Node__grow__i32(ctx, v__5677, v__5678, v__5679, v__5680); });
   if ((!found)) {
     return ((grow__i32*)0);
   }
@@ -38833,7 +38942,7 @@ static ast__Node** map__map_find__ptr_ast__Node__ptr_ast__Node(prelude__Context 
     return ((ast__Node**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__ptr_ast__Node* v__5677 = m; ast__Node* v__5678 = key; u64 v__5679 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5680 = (&found); map__find_slot__ptr_ast__Node__ptr_ast__Node(ctx, v__5677, v__5678, v__5679, v__5680); });
+  isize slot = ({ map__Map__ptr_ast__Node__ptr_ast__Node* v__5681 = m; ast__Node* v__5682 = key; u64 v__5683 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5684 = (&found); map__find_slot__ptr_ast__Node__ptr_ast__Node(ctx, v__5681, v__5682, v__5683, v__5684); });
   if ((!found)) {
     return ((ast__Node**)0);
   }
@@ -38853,11 +38962,11 @@ static void map__rebuild_index__ptr_ast__Node__ptr_ast__Node(prelude__Context *c
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5681 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5681 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5685 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5685 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5682 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5682; i++) {
+    isize end__5686 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5686; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__ptr_ast__Node__at(grow__map__MapEntry__ptr_ast__Node__ptr_ast__Node__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -38876,7 +38985,7 @@ static void array__array_add__map__MapEntry__ptr_ast__Node__ptr_ast__Node(prelud
 }
 
 static bool reflect__values_equal__string(prelude__Context *ctx, slice__u8 a, slice__u8 b) {
-  return ({ slice__u8 a__5683 = a, b__5684 = b; rt_bytes_equal(a__5683.ptr, a__5683.len, b__5684.ptr, b__5684.len); });
+  return ({ slice__u8 a__5687 = a, b__5688 = b; rt_bytes_equal(a__5687.ptr, a__5687.len, b__5688.ptr, b__5688.len); });
 }
 
 static void map__rebuild_index__string__ptr_types__Type(prelude__Context *ctx, map__Map__string__ptr_types__Type* m, isize size) {
@@ -38884,11 +38993,11 @@ static void map__rebuild_index__string__ptr_types__Type(prelude__Context *ctx, m
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5685 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5685 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5689 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5689 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5686 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5686; i++) {
+    isize end__5690 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5690; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__string__ptr_types__Type__at(grow__map__MapEntry__string__ptr_types__Type__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -38915,7 +39024,7 @@ static types__Type** map__map_find__ptr_types__Type__ptr_types__Type(prelude__Co
     return ((types__Type**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_types__Type__ptr_types__Type* v__5687 = m; types__Type* v__5688 = key; u64 v__5689 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5690 = (&found); map__find_slot__ptr_types__Type__ptr_types__Type(ctx, v__5687, v__5688, v__5689, v__5690); });
+  isize slot = ({ map__Map__ptr_types__Type__ptr_types__Type* v__5691 = m; types__Type* v__5692 = key; u64 v__5693 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5694 = (&found); map__find_slot__ptr_types__Type__ptr_types__Type(ctx, v__5691, v__5692, v__5693, v__5694); });
   if ((!found)) {
     return ((types__Type**)0);
   }
@@ -38935,11 +39044,11 @@ static void map__rebuild_index__ptr_types__Type__ptr_types__Type(prelude__Contex
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5691 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5691 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5695 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5695 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5692 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5692; i++) {
+    isize end__5696 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5696; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_types__Type__ptr_types__Type__at(grow__map__MapEntry__ptr_types__Type__ptr_types__Type__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -38966,7 +39075,7 @@ static types__Type** map__map_find__types__ArrayKey__ptr_types__Type(prelude__Co
     return ((types__Type**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__types__ArrayKey__ptr_types__Type* v__5693 = m; types__ArrayKey v__5694 = key; u64 v__5695 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5696 = (&found); map__find_slot__types__ArrayKey__ptr_types__Type(ctx, v__5693, v__5694, v__5695, v__5696); });
+  isize slot = ({ map__Map__types__ArrayKey__ptr_types__Type* v__5697 = m; types__ArrayKey v__5698 = key; u64 v__5699 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5700 = (&found); map__find_slot__types__ArrayKey__ptr_types__Type(ctx, v__5697, v__5698, v__5699, v__5700); });
   if ((!found)) {
     return ((types__Type**)0);
   }
@@ -38986,11 +39095,11 @@ static void map__rebuild_index__types__ArrayKey__ptr_types__Type(prelude__Contex
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5697 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5697 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5701 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5701 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5698 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5698; i++) {
+    isize end__5702 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5702; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__types__ArrayKey__ptr_types__Type__at(grow__map__MapEntry__types__ArrayKey__ptr_types__Type__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39039,7 +39148,7 @@ static types__Type** map__map_find__slice__ptr_types__Type__ptr_types__Type(prel
     return ((types__Type**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__slice__ptr_types__Type__ptr_types__Type* v__5699 = m; slice__ptr_types__Type v__5700 = key; u64 v__5701 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5702 = (&found); map__find_slot__slice__ptr_types__Type__ptr_types__Type(ctx, v__5699, v__5700, v__5701, v__5702); });
+  isize slot = ({ map__Map__slice__ptr_types__Type__ptr_types__Type* v__5703 = m; slice__ptr_types__Type v__5704 = key; u64 v__5705 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5706 = (&found); map__find_slot__slice__ptr_types__Type__ptr_types__Type(ctx, v__5703, v__5704, v__5705, v__5706); });
   if ((!found)) {
     return ((types__Type**)0);
   }
@@ -39070,11 +39179,11 @@ static void map__rebuild_index__slice__ptr_types__Type__ptr_types__Type(prelude_
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5703 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5703 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5707 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5707 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5704 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5704; i++) {
+    isize end__5708 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5708; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__slice__ptr_types__Type__ptr_types__Type__at(grow__map__MapEntry__slice__ptr_types__Type__ptr_types__Type__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39112,7 +39221,7 @@ static ast__Node** map__map_find__module__ScopeKey__ptr_ast__Node(prelude__Conte
     return ((ast__Node**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__module__ScopeKey__ptr_ast__Node* v__5705 = m; module__ScopeKey v__5706 = key; u64 v__5707 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5708 = (&found); map__find_slot__module__ScopeKey__ptr_ast__Node(ctx, v__5705, v__5706, v__5707, v__5708); });
+  isize slot = ({ map__Map__module__ScopeKey__ptr_ast__Node* v__5709 = m; module__ScopeKey v__5710 = key; u64 v__5711 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5712 = (&found); map__find_slot__module__ScopeKey__ptr_ast__Node(ctx, v__5709, v__5710, v__5711, v__5712); });
   if ((!found)) {
     return ((ast__Node**)0);
   }
@@ -39124,7 +39233,7 @@ static token__Token* map__map_find__ptr_ast__Node__token__Token(prelude__Context
     return ((token__Token*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__token__Token* v__5709 = m; ast__Node* v__5710 = key; u64 v__5711 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5712 = (&found); map__find_slot__ptr_ast__Node__token__Token(ctx, v__5709, v__5710, v__5711, v__5712); });
+  isize slot = ({ map__Map__ptr_ast__Node__token__Token* v__5713 = m; ast__Node* v__5714 = key; u64 v__5715 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5716 = (&found); map__find_slot__ptr_ast__Node__token__Token(ctx, v__5713, v__5714, v__5715, v__5716); });
   if ((!found)) {
     return ((token__Token*)0);
   }
@@ -39136,7 +39245,7 @@ static bool* map__map_find__string__bool(prelude__Context *ctx, map__Map__string
     return ((bool*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__string__bool* v__5713 = m; slice__u8 v__5714 = key; u64 v__5715 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5716 = (&found); map__find_slot__string__bool(ctx, v__5713, v__5714, v__5715, v__5716); });
+  isize slot = ({ map__Map__string__bool* v__5717 = m; slice__u8 v__5718 = key; u64 v__5719 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5720 = (&found); map__find_slot__string__bool(ctx, v__5717, v__5718, v__5719, v__5720); });
   if ((!found)) {
     return ((bool*)0);
   }
@@ -39148,11 +39257,11 @@ static void map__rebuild_index__string__bool(prelude__Context *ctx, map__Map__st
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5717 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5717 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5721 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5721 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5718 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5718; i++) {
+    isize end__5722 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5722; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__string__bool__at(grow__map__MapEntry__string__bool__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39179,7 +39288,7 @@ static i32* map__map_find__ptr_ast__Node__i32(prelude__Context *ctx, map__Map__p
     return ((i32*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__i32* v__5719 = m; ast__Node* v__5720 = key; u64 v__5721 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5722 = (&found); map__find_slot__ptr_ast__Node__i32(ctx, v__5719, v__5720, v__5721, v__5722); });
+  isize slot = ({ map__Map__ptr_ast__Node__i32* v__5723 = m; ast__Node* v__5724 = key; u64 v__5725 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5726 = (&found); map__find_slot__ptr_ast__Node__i32(ctx, v__5723, v__5724, v__5725, v__5726); });
   if ((!found)) {
     return ((i32*)0);
   }
@@ -39191,7 +39300,7 @@ static types__Type** map__map_find__string__ptr_types__Type(prelude__Context *ct
     return ((types__Type**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__string__ptr_types__Type* v__5723 = m; slice__u8 v__5724 = key; u64 v__5725 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5726 = (&found); map__find_slot__string__ptr_types__Type(ctx, v__5723, v__5724, v__5725, v__5726); });
+  isize slot = ({ map__Map__string__ptr_types__Type* v__5727 = m; slice__u8 v__5728 = key; u64 v__5729 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5730 = (&found); map__find_slot__string__ptr_types__Type(ctx, v__5727, v__5728, v__5729, v__5730); });
   if ((!found)) {
     return ((types__Type**)0);
   }
@@ -39203,11 +39312,11 @@ static void map__rebuild_index__ptr_ast__Node__i32(prelude__Context *ctx, map__M
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5727 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5727 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5731 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5731 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5728 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5728; i++) {
+    isize end__5732 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5732; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__i32__at(grow__map__MapEntry__ptr_ast__Node__i32__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39234,11 +39343,11 @@ static void map__rebuild_index__string__ptr_ast__Node(prelude__Context *ctx, map
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5729 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5729 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5733 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5733 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5730 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5730; i++) {
+    isize end__5734 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5734; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__string__ptr_ast__Node__at(grow__map__MapEntry__string__ptr_ast__Node__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39287,7 +39396,7 @@ static module__Module** map__map_find__string__ptr_module__Module(prelude__Conte
     return ((module__Module**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__string__ptr_module__Module* v__5731 = m; slice__u8 v__5732 = key; u64 v__5733 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5734 = (&found); map__find_slot__string__ptr_module__Module(ctx, v__5731, v__5732, v__5733, v__5734); });
+  isize slot = ({ map__Map__string__ptr_module__Module* v__5735 = m; slice__u8 v__5736 = key; u64 v__5737 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5738 = (&found); map__find_slot__string__ptr_module__Module(ctx, v__5735, v__5736, v__5737, v__5738); });
   if ((!found)) {
     return ((module__Module**)0);
   }
@@ -39299,11 +39408,11 @@ static void map__rebuild_index__string__ptr_module__Module(prelude__Context *ctx
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5735 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5735 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5739 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5739 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5736 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5736; i++) {
+    isize end__5740 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5740; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__string__ptr_module__Module__at(grow__map__MapEntry__string__ptr_module__Module__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39341,7 +39450,7 @@ static ast__Node** map__map_find__string__ptr_ast__Node(prelude__Context *ctx, m
     return ((ast__Node**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__string__ptr_ast__Node* v__5737 = m; slice__u8 v__5738 = key; u64 v__5739 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5740 = (&found); map__find_slot__string__ptr_ast__Node(ctx, v__5737, v__5738, v__5739, v__5740); });
+  isize slot = ({ map__Map__string__ptr_ast__Node* v__5741 = m; slice__u8 v__5742 = key; u64 v__5743 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5744 = (&found); map__find_slot__string__ptr_ast__Node(ctx, v__5741, v__5742, v__5743, v__5744); });
   if ((!found)) {
     return ((ast__Node**)0);
   }
@@ -39361,11 +39470,11 @@ static void map__rebuild_index__module__ScopeKey__ptr_ast__Node(prelude__Context
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5741 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5741 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5745 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5745 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5742 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5742; i++) {
+    isize end__5746 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5746; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__module__ScopeKey__ptr_ast__Node__at(grow__map__MapEntry__module__ScopeKey__ptr_ast__Node__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39425,11 +39534,11 @@ static void map__rebuild_index__ptr_ast__Node__bool(prelude__Context *ctx, map__
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5743 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5743 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5747 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5747 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5744 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5744; i++) {
+    isize end__5748 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5748; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__bool__at(grow__map__MapEntry__ptr_ast__Node__bool__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39478,7 +39587,7 @@ static i32* map__map_find__ptr_types__Type__i32(prelude__Context *ctx, map__Map_
     return ((i32*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_types__Type__i32* v__5745 = m; types__Type* v__5746 = key; u64 v__5747 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5748 = (&found); map__find_slot__ptr_types__Type__i32(ctx, v__5745, v__5746, v__5747, v__5748); });
+  isize slot = ({ map__Map__ptr_types__Type__i32* v__5749 = m; types__Type* v__5750 = key; u64 v__5751 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5752 = (&found); map__find_slot__ptr_types__Type__i32(ctx, v__5749, v__5750, v__5751, v__5752); });
   if ((!found)) {
     return ((i32*)0);
   }
@@ -39490,11 +39599,11 @@ static void map__rebuild_index__ptr_types__Type__i32(prelude__Context *ctx, map_
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5749 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5749 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5753 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5753 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5750 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5750; i++) {
+    isize end__5754 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5754; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_types__Type__i32__at(grow__map__MapEntry__ptr_types__Type__i32__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39532,7 +39641,7 @@ static u32* map__map_find__ptr_types__Type__u32(prelude__Context *ctx, map__Map_
     return ((u32*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_types__Type__u32* v__5751 = m; types__Type* v__5752 = key; u64 v__5753 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5754 = (&found); map__find_slot__ptr_types__Type__u32(ctx, v__5751, v__5752, v__5753, v__5754); });
+  isize slot = ({ map__Map__ptr_types__Type__u32* v__5755 = m; types__Type* v__5756 = key; u64 v__5757 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5758 = (&found); map__find_slot__ptr_types__Type__u32(ctx, v__5755, v__5756, v__5757, v__5758); });
   if ((!found)) {
     return ((u32*)0);
   }
@@ -39544,11 +39653,11 @@ static void map__rebuild_index__ptr_types__Type__u32(prelude__Context *ctx, map_
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5755 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5755 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5759 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5759 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5756 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5756; i++) {
+    isize end__5760 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5760; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_types__Type__u32__at(grow__map__MapEntry__ptr_types__Type__u32__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39575,11 +39684,11 @@ static void map__rebuild_index__ptr_ast__Node__ptr_types__Type(prelude__Context 
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5757 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5757 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5761 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5761 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5758 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5758; i++) {
+    isize end__5762 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5762; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__ptr_types__Type__at(grow__map__MapEntry__ptr_ast__Node__ptr_types__Type__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39606,7 +39715,7 @@ static types__Type** map__map_find__ptr_ast__Node__ptr_types__Type(prelude__Cont
     return ((types__Type**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__ptr_types__Type* v__5759 = m; ast__Node* v__5760 = key; u64 v__5761 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5762 = (&found); map__find_slot__ptr_ast__Node__ptr_types__Type(ctx, v__5759, v__5760, v__5761, v__5762); });
+  isize slot = ({ map__Map__ptr_ast__Node__ptr_types__Type* v__5763 = m; ast__Node* v__5764 = key; u64 v__5765 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5766 = (&found); map__find_slot__ptr_ast__Node__ptr_types__Type(ctx, v__5763, v__5764, v__5765, v__5766); });
   if ((!found)) {
     return ((types__Type**)0);
   }
@@ -39688,11 +39797,11 @@ static void map__rebuild_index__ptr_ast__Node__grow__generics__Candidate(prelude
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5763 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5763 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5767 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5767 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5764 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5764; i++) {
+    isize end__5768 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5768; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__grow__generics__Candidate__at(grow__map__MapEntry__ptr_ast__Node__grow__generics__Candidate__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39726,7 +39835,7 @@ static ast__Node** map__map_find__check__InstanceKey__ptr_ast__Node(prelude__Con
     return ((ast__Node**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__check__InstanceKey__ptr_ast__Node* v__5765 = m; check__InstanceKey v__5766 = key; u64 v__5767 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5768 = (&found); map__find_slot__check__InstanceKey__ptr_ast__Node(ctx, v__5765, v__5766, v__5767, v__5768); });
+  isize slot = ({ map__Map__check__InstanceKey__ptr_ast__Node* v__5769 = m; check__InstanceKey v__5770 = key; u64 v__5771 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5772 = (&found); map__find_slot__check__InstanceKey__ptr_ast__Node(ctx, v__5769, v__5770, v__5771, v__5772); });
   if ((!found)) {
     return ((ast__Node**)0);
   }
@@ -39746,11 +39855,11 @@ static void map__rebuild_index__check__InstanceKey__ptr_ast__Node(prelude__Conte
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5769 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5769 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5773 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5773 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5770 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5770; i++) {
+    isize end__5774 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5774; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__check__InstanceKey__ptr_ast__Node__at(grow__map__MapEntry__check__InstanceKey__ptr_ast__Node__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39777,11 +39886,11 @@ static void map__rebuild_index__ptr_ast__Node__token__Token(prelude__Context *ct
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5771 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5771 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5775 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5775 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5772 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5772; i++) {
+    isize end__5776 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5776; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__token__Token__at(grow__map__MapEntry__ptr_ast__Node__token__Token__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39808,7 +39917,7 @@ static bool* map__map_find__ptr_ast__Node__bool(prelude__Context *ctx, map__Map_
     return ((bool*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__bool* v__5773 = m; ast__Node* v__5774 = key; u64 v__5775 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5776 = (&found); map__find_slot__ptr_ast__Node__bool(ctx, v__5773, v__5774, v__5775, v__5776); });
+  isize slot = ({ map__Map__ptr_ast__Node__bool* v__5777 = m; ast__Node* v__5778 = key; u64 v__5779 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5780 = (&found); map__find_slot__ptr_ast__Node__bool(ctx, v__5777, v__5778, v__5779, v__5780); });
   if ((!found)) {
     return ((bool*)0);
   }
@@ -39842,7 +39951,7 @@ static vm__VmFunction** map__map_find__ptr_ast__Node__ptr_vm__VmFunction(prelude
     return ((vm__VmFunction**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__ptr_vm__VmFunction* v__5777 = m; ast__Node* v__5778 = key; u64 v__5779 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5780 = (&found); map__find_slot__ptr_ast__Node__ptr_vm__VmFunction(ctx, v__5777, v__5778, v__5779, v__5780); });
+  isize slot = ({ map__Map__ptr_ast__Node__ptr_vm__VmFunction* v__5781 = m; ast__Node* v__5782 = key; u64 v__5783 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5784 = (&found); map__find_slot__ptr_ast__Node__ptr_vm__VmFunction(ctx, v__5781, v__5782, v__5783, v__5784); });
   if ((!found)) {
     return ((vm__VmFunction**)0);
   }
@@ -39854,11 +39963,11 @@ static void map__rebuild_index__ptr_ast__Node__ptr_vm__VmFunction(prelude__Conte
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5781 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5781 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5785 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5785 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5782 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5782; i++) {
+    isize end__5786 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5786; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__ptr_vm__VmFunction__at(grow__map__MapEntry__ptr_ast__Node__ptr_vm__VmFunction__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39885,7 +39994,7 @@ static u8** map__map_find__ptr_ast__Node__ptr_u8(prelude__Context *ctx, map__Map
     return ((u8**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__ptr_u8* v__5783 = m; ast__Node* v__5784 = key; u64 v__5785 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5786 = (&found); map__find_slot__ptr_ast__Node__ptr_u8(ctx, v__5783, v__5784, v__5785, v__5786); });
+  isize slot = ({ map__Map__ptr_ast__Node__ptr_u8* v__5787 = m; ast__Node* v__5788 = key; u64 v__5789 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5790 = (&found); map__find_slot__ptr_ast__Node__ptr_u8(ctx, v__5787, v__5788, v__5789, v__5790); });
   if ((!found)) {
     return ((u8**)0);
   }
@@ -39897,11 +40006,11 @@ static void map__rebuild_index__ptr_ast__Node__ptr_u8(prelude__Context *ctx, map
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5787 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5787 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5791 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5791 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5788 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5788; i++) {
+    isize end__5792 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5792; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__ptr_u8__at(grow__map__MapEntry__ptr_ast__Node__ptr_u8__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -39928,7 +40037,7 @@ static u8** map__map_find__ptr_types__Type__ptr_u8(prelude__Context *ctx, map__M
     return ((u8**)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_types__Type__ptr_u8* v__5789 = m; types__Type* v__5790 = key; u64 v__5791 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5792 = (&found); map__find_slot__ptr_types__Type__ptr_u8(ctx, v__5789, v__5790, v__5791, v__5792); });
+  isize slot = ({ map__Map__ptr_types__Type__ptr_u8* v__5793 = m; types__Type* v__5794 = key; u64 v__5795 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5796 = (&found); map__find_slot__ptr_types__Type__ptr_u8(ctx, v__5793, v__5794, v__5795, v__5796); });
   if ((!found)) {
     return ((u8**)0);
   }
@@ -39940,11 +40049,11 @@ static void map__rebuild_index__ptr_types__Type__ptr_u8(prelude__Context *ctx, m
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5793 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5793 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5797 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5797 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5794 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5794; i++) {
+    isize end__5798 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5798; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_types__Type__ptr_u8__at(grow__map__MapEntry__ptr_types__Type__ptr_u8__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40023,11 +40132,11 @@ static void map__rebuild_index__ptr_ast__Node__u32(prelude__Context *ctx, map__M
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5795 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5795 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5799 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5799 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5796 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5796; i++) {
+    isize end__5800 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5800; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__u32__at(grow__map__MapEntry__ptr_ast__Node__u32__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40088,11 +40197,11 @@ static void map__rebuild_index__i32__grow__isize(prelude__Context *ctx, map__Map
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5797 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5797 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5801 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5801 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5798 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5798; i++) {
+    isize end__5802 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5802; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__i32__grow__isize__at(grow__map__MapEntry__i32__grow__isize__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40126,7 +40235,7 @@ static u32* map__map_find__ptr_ast__Node__u32(prelude__Context *ctx, map__Map__p
     return ((u32*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__u32* v__5799 = m; ast__Node* v__5800 = key; u64 v__5801 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5802 = (&found); map__find_slot__ptr_ast__Node__u32(ctx, v__5799, v__5800, v__5801, v__5802); });
+  isize slot = ({ map__Map__ptr_ast__Node__u32* v__5803 = m; ast__Node* v__5804 = key; u64 v__5805 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5806 = (&found); map__find_slot__ptr_ast__Node__u32(ctx, v__5803, v__5804, v__5805, v__5806); });
   if ((!found)) {
     return ((u32*)0);
   }
@@ -40138,11 +40247,11 @@ static void map__rebuild_index__string__u32(prelude__Context *ctx, map__Map__str
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5803 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5803 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5807 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5807 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5804 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5804; i++) {
+    isize end__5808 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5808; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__string__u32__at(grow__map__MapEntry__string__u32__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40169,7 +40278,7 @@ static u32* map__map_find__string__u32(prelude__Context *ctx, map__Map__string__
     return ((u32*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__string__u32* v__5805 = m; slice__u8 v__5806 = key; u64 v__5807 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5808 = (&found); map__find_slot__string__u32(ctx, v__5805, v__5806, v__5807, v__5808); });
+  isize slot = ({ map__Map__string__u32* v__5809 = m; slice__u8 v__5810 = key; u64 v__5811 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5812 = (&found); map__find_slot__string__u32(ctx, v__5809, v__5810, v__5811, v__5812); });
   if ((!found)) {
     return ((u32*)0);
   }
@@ -40225,7 +40334,7 @@ static memory__Short* map__map_find__ptr_ast__Node__memory__Short(prelude__Conte
     return ((memory__Short*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__memory__Short* v__5809 = m; ast__Node* v__5810 = key; u64 v__5811 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5812 = (&found); map__find_slot__ptr_ast__Node__memory__Short(ctx, v__5809, v__5810, v__5811, v__5812); });
+  isize slot = ({ map__Map__ptr_ast__Node__memory__Short* v__5813 = m; ast__Node* v__5814 = key; u64 v__5815 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5816 = (&found); map__find_slot__ptr_ast__Node__memory__Short(ctx, v__5813, v__5814, v__5815, v__5816); });
   if ((!found)) {
     return ((memory__Short*)0);
   }
@@ -40237,7 +40346,7 @@ static bool* map__map_find__ptr_types__Type__bool(prelude__Context *ctx, map__Ma
     return ((bool*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_types__Type__bool* v__5813 = m; types__Type* v__5814 = key; u64 v__5815 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5816 = (&found); map__find_slot__ptr_types__Type__bool(ctx, v__5813, v__5814, v__5815, v__5816); });
+  isize slot = ({ map__Map__ptr_types__Type__bool* v__5817 = m; types__Type* v__5818 = key; u64 v__5819 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5820 = (&found); map__find_slot__ptr_types__Type__bool(ctx, v__5817, v__5818, v__5819, v__5820); });
   if ((!found)) {
     return ((bool*)0);
   }
@@ -40249,11 +40358,11 @@ static void map__rebuild_index__ptr_types__Type__bool(prelude__Context *ctx, map
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5817 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5817 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5821 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5821 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5818 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5818; i++) {
+    isize end__5822 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5822; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_types__Type__bool__at(grow__map__MapEntry__ptr_types__Type__bool__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40280,11 +40389,11 @@ static void map__rebuild_index__ptr_ast__Node__memory__Short(prelude__Context *c
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5819 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5819 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5823 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5823 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5820 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5820; i++) {
+    isize end__5824 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5824; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__memory__Short__at(grow__map__MapEntry__ptr_ast__Node__memory__Short__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40318,11 +40427,11 @@ static void map__rebuild_index__ptr_ast__Node__grow__memory__Grow(prelude__Conte
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5821 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5821 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5825 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5825 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5822 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5822; i++) {
+    isize end__5826 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5826; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__grow__memory__Grow__at(grow__map__MapEntry__ptr_ast__Node__grow__memory__Grow__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40360,11 +40469,11 @@ static void map__rebuild_index__ptr_ast__Node__grow__i32(prelude__Context *ctx, 
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5823 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5823 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5827 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5827 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5824 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5824; i++) {
+    isize end__5828 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5828; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__grow__i32__at(grow__map__MapEntry__ptr_ast__Node__grow__i32__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40420,7 +40529,7 @@ static slice__u8* map__map_find__ptr_module__Module__string(prelude__Context *ct
     return ((slice__u8*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_module__Module__string* v__5825 = m; module__Module* v__5826 = key; u64 v__5827 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5828 = (&found); map__find_slot__ptr_module__Module__string(ctx, v__5825, v__5826, v__5827, v__5828); });
+  isize slot = ({ map__Map__ptr_module__Module__string* v__5829 = m; module__Module* v__5830 = key; u64 v__5831 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5832 = (&found); map__find_slot__ptr_module__Module__string(ctx, v__5829, v__5830, v__5831, v__5832); });
   if ((!found)) {
     return ((slice__u8*)0);
   }
@@ -40432,7 +40541,7 @@ static slice__u8* map__map_find__ptr_types__Type__string(prelude__Context *ctx, 
     return ((slice__u8*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_types__Type__string* v__5829 = m; types__Type* v__5830 = key; u64 v__5831 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5832 = (&found); map__find_slot__ptr_types__Type__string(ctx, v__5829, v__5830, v__5831, v__5832); });
+  isize slot = ({ map__Map__ptr_types__Type__string* v__5833 = m; types__Type* v__5834 = key; u64 v__5835 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5836 = (&found); map__find_slot__ptr_types__Type__string(ctx, v__5833, v__5834, v__5835, v__5836); });
   if ((!found)) {
     return ((slice__u8*)0);
   }
@@ -40444,11 +40553,11 @@ static void map__rebuild_index__ptr_types__Type__string(prelude__Context *ctx, m
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5833 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5833 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5837 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5837 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5834 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5834; i++) {
+    isize end__5838 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5838; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_types__Type__string__at(grow__map__MapEntry__ptr_types__Type__string__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40494,11 +40603,11 @@ static void map__rebuild_index__ptr_module__Module__string(prelude__Context *ctx
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5835 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5835 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5839 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5839 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5836 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5836; i++) {
+    isize end__5840 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5840; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_module__Module__string__at(grow__map__MapEntry__ptr_module__Module__string__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40525,7 +40634,7 @@ static slice__u8* map__map_find__ptr_ast__Node__string(prelude__Context *ctx, ma
     return ((slice__u8*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__string* v__5837 = m; ast__Node* v__5838 = key; u64 v__5839 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5840 = (&found); map__find_slot__ptr_ast__Node__string(ctx, v__5837, v__5838, v__5839, v__5840); });
+  isize slot = ({ map__Map__ptr_ast__Node__string* v__5841 = m; ast__Node* v__5842 = key; u64 v__5843 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5844 = (&found); map__find_slot__ptr_ast__Node__string(ctx, v__5841, v__5842, v__5843, v__5844); });
   if ((!found)) {
     return ((slice__u8*)0);
   }
@@ -40537,11 +40646,11 @@ static void map__rebuild_index__ptr_ast__Node__string(prelude__Context *ctx, map
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5841 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5841 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5845 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5845 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5842 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5842; i++) {
+    isize end__5846 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5846; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__string__at(grow__map__MapEntry__ptr_ast__Node__string__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40579,11 +40688,11 @@ static void map__rebuild_index__string__string(prelude__Context *ctx, map__Map__
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5843 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5843 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5847 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5847 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5844 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5844; i++) {
+    isize end__5848 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5848; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__string__string__at(grow__map__MapEntry__string__string__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40610,7 +40719,7 @@ static slice__u8* map__map_find__string__string(prelude__Context *ctx, map__Map_
     return ((slice__u8*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__string__string* v__5845 = m; slice__u8 v__5846 = key; u64 v__5847 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5848 = (&found); map__find_slot__string__string(ctx, v__5845, v__5846, v__5847, v__5848); });
+  isize slot = ({ map__Map__string__string* v__5849 = m; slice__u8 v__5850 = key; u64 v__5851 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5852 = (&found); map__find_slot__string__string(ctx, v__5849, v__5850, v__5851, v__5852); });
   if ((!found)) {
     return ((slice__u8*)0);
   }
@@ -40629,7 +40738,7 @@ static i32* map__map_find__string__i32(prelude__Context *ctx, map__Map__string__
     return ((i32*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__string__i32* v__5849 = m; slice__u8 v__5850 = key; u64 v__5851 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5852 = (&found); map__find_slot__string__i32(ctx, v__5849, v__5850, v__5851, v__5852); });
+  isize slot = ({ map__Map__string__i32* v__5853 = m; slice__u8 v__5854 = key; u64 v__5855 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5856 = (&found); map__find_slot__string__i32(ctx, v__5853, v__5854, v__5855, v__5856); });
   if ((!found)) {
     return ((i32*)0);
   }
@@ -40641,11 +40750,11 @@ static void map__rebuild_index__string__i32(prelude__Context *ctx, map__Map__str
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5853 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5853 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5857 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5857 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5854 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5854; i++) {
+    isize end__5858 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5858; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__string__i32__at(grow__map__MapEntry__string__i32__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40683,7 +40792,7 @@ static codegen__Reached* map__map_find__ptr_ast__Node__codegen__Reached(prelude_
     return ((codegen__Reached*)0);
   }
   bool found = false;
-  isize slot = ({ map__Map__ptr_ast__Node__codegen__Reached* v__5855 = m; ast__Node* v__5856 = key; u64 v__5857 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5858 = (&found); map__find_slot__ptr_ast__Node__codegen__Reached(ctx, v__5855, v__5856, v__5857, v__5858); });
+  isize slot = ({ map__Map__ptr_ast__Node__codegen__Reached* v__5859 = m; ast__Node* v__5860 = key; u64 v__5861 = ((rt_nonnull(m, "std/map.sabk:98:36"))->hash)(ctx, key); bool* v__5862 = (&found); map__find_slot__ptr_ast__Node__codegen__Reached(ctx, v__5859, v__5860, v__5861, v__5862); });
   if ((!found)) {
     return ((codegen__Reached*)0);
   }
@@ -40695,11 +40804,11 @@ static void map__rebuild_index__ptr_ast__Node__codegen__Reached(prelude__Context
     size = ((isize)8LL);
   }
   mem__free(ctx, ((rawptr)(((rt_nonnull(m, "std/map.sabk:248:12"))->slots).ptr)), (rt_nonnull(m, "std/map.sabk:248:25"))->allocator);
-  ({ slice__u32 *target__5859 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5859 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
+  ({ slice__u32 *target__5863 = &(rt_nonnull(m, "std/map.sabk:249:7"))->slots; *target__5863 = slice__u32__make(ctx, (rt_nonnull(m, "std/map.sabk:249:34"))->allocator, size, "std/map.sabk:249:15"); });
   isize mask = ((isize)(size - ((isize)1LL)));
   {
-    isize end__5860 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
-    for (isize i = ((isize)0LL); i < end__5860; i++) {
+    isize end__5864 = ((rt_nonnull(m, "std/map.sabk:251:20"))->entries).len;
+    for (isize i = ((isize)0LL); i < end__5864; i++) {
       isize j = ((isize)((((isize)(((*slice__map__MapEntry__ptr_ast__Node__codegen__Reached__at(grow__map__MapEntry__ptr_ast__Node__codegen__Reached__view((rt_nonnull(m, "std/map.sabk:252:20"))->entries), i, "std/map.sabk:252:27"))).hash))) & mask));
       while (((*slice__u32__at((rt_nonnull(m, "std/map.sabk:253:18"))->slots, j, "std/map.sabk:253:23")) != ((u32)0LL))) {
         j = ((isize)((((isize)(j + ((isize)1LL)))) & mask));
@@ -40889,8 +40998,8 @@ static void array__grow__map__MapEntry__ptr_types__Type__ptr_types__Type(prelude
 
 static u64 reflect__hash_value__types__ArrayKey(prelude__Context *ctx, types__ArrayKey v) {
   u64 h = ((u64)0LL);
-  h = ({ u64 v__5864 = h; u64 v__5865 = reflect__hash_value__ptr_types__Type(ctx, (v).elem); reflect__combine_hashes(ctx, v__5864, v__5865); });
-  h = ({ u64 v__5866 = h; u64 v__5867 = reflect__hash_value__u64(ctx, (v).len); reflect__combine_hashes(ctx, v__5866, v__5867); });
+  h = ({ u64 v__5868 = h; u64 v__5869 = reflect__hash_value__ptr_types__Type(ctx, (v).elem); reflect__combine_hashes(ctx, v__5868, v__5869); });
+  h = ({ u64 v__5870 = h; u64 v__5871 = reflect__hash_value__u64(ctx, (v).len); reflect__combine_hashes(ctx, v__5870, v__5871); });
   return h;
 }
 
@@ -40960,10 +41069,10 @@ static void array__array_reserve__types__Field(prelude__Context *ctx, grow__type
 static u64 reflect__hash_value__slice__ptr_types__Type(prelude__Context *ctx, slice__ptr_types__Type v) {
   u64 h = ((u64)((v).len));
   {
-    slice__ptr_types__Type seq__5870 = v;
-    for (isize i__5871 = 0; i__5871 < seq__5870.len; i__5871++) {
-      types__Type* item = seq__5870.ptr[i__5871];
-      h = ({ u64 v__5872 = h; u64 v__5873 = reflect__hash_value__ptr_types__Type(ctx, item); reflect__combine_hashes(ctx, v__5872, v__5873); });
+    slice__ptr_types__Type seq__5874 = v;
+    for (isize i__5875 = 0; i__5875 < seq__5874.len; i__5875++) {
+      types__Type* item = seq__5874.ptr[i__5875];
+      h = ({ u64 v__5876 = h; u64 v__5877 = reflect__hash_value__ptr_types__Type(ctx, item); reflect__combine_hashes(ctx, v__5876, v__5877); });
     }
   }
   return h;
@@ -40974,8 +41083,8 @@ static bool reflect__values_equal__slice__ptr_types__Type(prelude__Context *ctx,
     return false;
   }
   {
-    isize end__5874 = (a).len;
-    for (isize i = ((isize)0LL); i < end__5874; i++) {
+    isize end__5878 = (a).len;
+    for (isize i = ((isize)0LL); i < end__5878; i++) {
       if ((!reflect__values_equal__ptr_types__Type(ctx, (*slice__ptr_types__Type__at(a, i, "std/reflect.sabk:25:5 #insert:2:40")), (*slice__ptr_types__Type__at(b, i, "std/reflect.sabk:25:5 #insert:2:46"))))) {
         return false;
       }
@@ -41176,13 +41285,13 @@ static void array__array_reserve__ptr_module__Module(prelude__Context *ctx, grow
 
 static u64 reflect__hash_value__module__ScopeKey(prelude__Context *ctx, module__ScopeKey v) {
   u64 h = ((u64)0LL);
-  h = ({ u64 v__5878 = h; u64 v__5879 = reflect__hash_value__string(ctx, (v).name); reflect__combine_hashes(ctx, v__5878, v__5879); });
-  h = ({ u64 v__5880 = h; u64 v__5881 = reflect__hash_value__i32(ctx, (v).color); reflect__combine_hashes(ctx, v__5880, v__5881); });
+  h = ({ u64 v__5882 = h; u64 v__5883 = reflect__hash_value__string(ctx, (v).name); reflect__combine_hashes(ctx, v__5882, v__5883); });
+  h = ({ u64 v__5884 = h; u64 v__5885 = reflect__hash_value__i32(ctx, (v).color); reflect__combine_hashes(ctx, v__5884, v__5885); });
   return h;
 }
 
 static bool reflect__values_equal__module__ScopeKey(prelude__Context *ctx, module__ScopeKey a, module__ScopeKey b) {
-  return ((true && ({ slice__u8 a__5882 = (a).name, b__5883 = (b).name; rt_bytes_equal(a__5882.ptr, a__5882.len, b__5883.ptr, b__5883.len); })) && ((a).color == (b).color));
+  return ((true && ({ slice__u8 a__5886 = (a).name, b__5887 = (b).name; rt_bytes_equal(a__5886.ptr, a__5886.len, b__5887.ptr, b__5887.len); })) && ((a).color == (b).color));
 }
 
 static isize map__find_in__module__ScopeKey__ptr_ast__Node(prelude__Context *ctx, slice__map__MapEntry__module__ScopeKey__ptr_ast__Node entries, slice__u32 slots, module__ScopeKey key, u64 h, fn__7 equal, bool* found) {
@@ -41511,8 +41620,8 @@ static void array__array_reserve__generics__Candidate(prelude__Context *ctx, gro
 
 static u64 reflect__hash_value__check__InstanceKey(prelude__Context *ctx, check__InstanceKey v) {
   u64 h = ((u64)0LL);
-  h = ({ u64 v__5894 = h; u64 v__5895 = reflect__hash_value__ptr_ast__Node(ctx, (v).templ); reflect__combine_hashes(ctx, v__5894, v__5895); });
-  h = ({ u64 v__5896 = h; u64 v__5897 = reflect__hash_value__slice__ptr_types__Type(ctx, (v).args); reflect__combine_hashes(ctx, v__5896, v__5897); });
+  h = ({ u64 v__5898 = h; u64 v__5899 = reflect__hash_value__ptr_ast__Node(ctx, (v).templ); reflect__combine_hashes(ctx, v__5898, v__5899); });
+  h = ({ u64 v__5900 = h; u64 v__5901 = reflect__hash_value__slice__ptr_types__Type(ctx, (v).args); reflect__combine_hashes(ctx, v__5900, v__5901); });
   return h;
 }
 

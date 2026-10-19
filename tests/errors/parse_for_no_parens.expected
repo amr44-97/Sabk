@@ -1,0 +1,3 @@
+[error]: `{` after the loop header: without parentheses, `for`'s body is a block at [tests/errors/parse_for_no_parens.sabk:2:17]
+     2 |     for x in xs total += x;
+       |                 ^

@@ -1,0 +1,73 @@
+// Conditions without parentheses take a block; with them, any statement
+import "std/io";
+
+struct Point { x: i64; y: i64; }
+
+enum Shape { Circle(r: i64), Square(side: i64), Dot }
+
+// a declaration's results don't need parentheses either
+fn divmod(a: i64, b: i64) -> i64, i64 {
+    return a / b, a % b;
+}
+
+fn sign(n: i64) -> string {
+    if n < 0 {
+        return "negative";
+    } else if n == 0 {
+        return "zero";
+    }
+    return "positive";
+}
+
+fn at_origin(p: Point) -> bool { return p.x == 0 && p.y == 0; }
+
+fn main() {
+    let q, r = divmod(17, 5);
+    println("divmod: % %", q, r);
+    println("sign: % % %", sign(-3), sign(0), sign(4));
+
+    let i = 0;
+    while i < 3 { i += 1; }
+    println("while: %", i);
+    do { i -= 1; } while i > 0;
+    println("do: %", i);
+
+    let xs = i64.[10, 20, 30];
+    for x, k in xs { println("for: % %", k, x); }
+    let total: i64 = 0;
+    for n in 1..4 { total += n; }
+    for let j = 0; j < 2; j += 1 { total += 100; }
+    println("total: %", total);
+
+    // a `(` that's only the start of the condition
+    let a = 2;
+    let b = 3;
+    if (a + b) * 2 > 9 { println("grouped: %", (a + b) * 2); }
+    // parenthesized, as before: any statement
+    if (a > b) println("no"); else println("parenthesized");
+    while (a > 0) a -= 1;
+    for (x in xs) total += x;
+    println("old forms: % %", a, total);
+    let spot = Point.{ .x = 0, .y = 0 };
+    let ps = &spot;
+    if (a == 0) (ps as *Point).x = 7;   // a statement starting with `(`
+    println("statement after (...): %", spot.x);
+
+    // literals inside a bare condition: after a dot, or inside a call
+    if at_origin(Point.{ .x = 0, .y = 0 }) { println("a literal in a call"); }
+    let p = Point.{ .x = 1, .y = 2 };
+    if p.x == Point.{ .x = 1, .y = 5 }.x { println("a literal's field"); }
+
+    let shapes = Shape.[.Circle(2), .Square(3), .Dot];
+    for s in shapes {
+        switch s {
+        case .Circle{r}: println("circle %", r);          // braces in a case: fine
+        case .Square{side}: println("square %", side);
+        case .Dot: println("dot");
+        }
+        let name = switch s { case .Circle: "round"; default: "not round"; };
+        if (s is .Square{side}) println("is: % (%)", side, name);
+        if s !is .Circle { println("!is: %", name); }
+        if (s) is .Dot { println("(s) is .Dot"); }
+    }
+}

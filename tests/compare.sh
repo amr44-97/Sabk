@@ -21,6 +21,8 @@ fi
 # they don't clash with its caller's (README.md), and the files that use
 # what the language gained since the port (Sabk-language-plan.md)
 known=" tests/resolve/macro_labels.sabk
+  tests/run/optional_parens.sabk tests/errors/parse_if_no_parens.sabk
+  tests/errors/parse_for_no_parens.sabk
   tests/errors/format_check.sabk tests/errors/format_directives.sabk
   tests/errors/log_format.sabk tests/run/format_directives.sabk
   tests/run/is_not.sabk tests/errors/is_not_bindings.sabk

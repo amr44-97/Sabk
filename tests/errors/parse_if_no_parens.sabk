@@ -1,1 +1,4 @@
-fn f() { if x {} }
+// without parentheses, the body is a block: is this `if (done) -count;`?
+fn f(done: bool, count: i64) {
+    if done -count;
+}

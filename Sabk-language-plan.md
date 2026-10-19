@@ -23,7 +23,7 @@ switch to them at the bootstrap.
 - [ ] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
 - [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
-- [ ] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
+- [x] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 
 ## 1. Formatting
