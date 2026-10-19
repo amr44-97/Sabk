@@ -1,0 +1,18 @@
+[warning]: this drops `save`'s failure (`SaveError`): look at it (`let ..., err = ...`), pass it on (`or_return`), or drop it on purpose (`_ = ...`) at [tests/warnings/strict.sabk:20:5]
+    20 |     save(3);                                   // warns: dropped
+       |     ^
+[warning]: this takes 1 of `parse_int`'s 2 results, dropping its failure (`ParseError`): take it too (`let ..., err = ...`), or drop it on purpose with `_` at [tests/warnings/strict.sabk:22:17]
+    22 |     let total = parse_int("4");                // warns: the first value only
+       |                 ^
+[warning]: this takes 1 of `parse_int`'s 2 results, dropping its failure (`ParseError`): take it too (`let ..., err = ...`), or drop it on purpose with `_` at [tests/warnings/strict.sabk:23:14]
+    23 |     total += parse_int("5");                   // warns: in an expression
+       |              ^
+[warning]: this takes 2 of `parse_prefix`'s 3 results, dropping its failure (`ParseError`): take it too (`let ..., err = ...`), or drop it on purpose with `_` at [tests/warnings/strict.sabk:24:19]
+    24 |     let n, used = parse_prefix("12");          // warns: two of three
+       |                   ^
+[warning]: `x` is used before `err`, the failure that came with it, is looked at: if `parse_int` failed, `x` holds no real value at [tests/warnings/strict.sabk:28:14]
+    28 |     total += x;                                // warns: err isn't looked at yet
+       |              ^
+[warning]: `z` is used before `err3`, the failure that came with it, is looked at: if `parse_int` failed, `z` holds no real value at [tests/warnings/strict.sabk:34:14]
+    34 |     total += z;                                // warns
+       |              ^

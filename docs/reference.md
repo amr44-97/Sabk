@@ -2199,6 +2199,34 @@ _ = save(path, data);        // fine: dropped on purpose
   A call through a function value (`let f = save; f();`) isn't checked,
   since the value's type doesn't say.
 
+**`--strict`** (or `set_strict(true)` in a build script, std/build) adds
+two warnings, for code that wants every failure handled; without it,
+dropping is Jai's: silent, and the failure is in the log.
+
+```
+parse_int(s);                    // warning: this drops `parse_int`'s failure (`ParseError`)
+let n = parse_int(s);            // warning: this takes 1 of `parse_int`'s 2 results, dropping its failure
+total += parse_int(s);           // the same
+let x, err = parse_int(s);
+total += x;                      // warning: `x` is used before `err`, the failure that
+                                 //   came with it, is looked at
+let y, err2 = parse_int(s);
+if (err2 != .None) return;
+total += y;                      // fine: err2 was looked at first
+_ = parse_int(s);                // fine: dropped on purpose
+```
+
+- Only failures of an error enum or `Error` count, not a `bool`
+  (`let key, value = cut(line, "=");` is fine).
+- The second warning goes by the order of the source, not by every path
+  through it: `err` read anywhere before `x` counts. Assigning to `err`
+  (`err = g();`) makes it a failure to look at again.
+- Only the program's own code is warned about, not std's.
+- **`--werror`** (or `set_werror(true)`) makes the build fail when there
+  are warnings, these or any other: they're printed as warnings, then
+  `[error]: 2 warnings, and --werror makes warnings errors`.
+- The command line and a build script add up: either one turns them on.
+
 ### Bugs: `panic` and `assert`
 
 `panic(message)` and `assert(condition)` (std/os) stop the program with
@@ -2854,6 +2882,9 @@ inspect types the same way, and produces the same text.
 ./sabk --run prog.sabk -- a b   run it with the arguments a and b
 ./sabk --emit-c prog.sabk   print the generated C (--lines: with #line)
 ./sabk --check prog.sabk    only check for errors
+./sabk --strict prog.sabk   also warn about failures dropped and values used
+                            before their failure is looked at (see Handling errors)
+./sabk --werror prog.sabk   warnings fail the build
 ./sabk --stats ...         also print phase times and generic instances
 ```
 
@@ -3299,6 +3330,10 @@ fn configure() {
   - `set_release(on)`, `is_release()`: whether this is a `--release` build
   - `set_bounds_checks(.On | .Off | .Always)`: index and slice checks (see
     "Turning the checks off" in [Compiling and running](#compiling-and-running))
+  - `set_strict(on)`, `set_werror(on)`: the strict warnings, and
+    warnings failing the build, as `--strict` and `--werror` (see
+    [Handling errors](#handling-errors)); either the script or the command
+    line turns them on
   - `add_c_flags(flags)`: passed to the C compiler as written
   - `link_library(name)`: `-l<name>`; each library once
   - `add_c_file(path)`: a C file compiled and linked with the program

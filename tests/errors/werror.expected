@@ -1,0 +1,4 @@
+[warning]: this is kept in `saved`, which outlives it: this slice literal's elements are written again on every pass of the loop, so each slice kept from it shows the last pass's values; keep a copy: `clone_slice(...)` (std/mem) at [tests/errors/werror.sabk:8:32]
+     8 |     for (i in 0..3) saved[i] = .[i, i];   // a memory trap's warning
+       |                                ^
+[error]: 1 warning, and the build script's set_werror(true) makes warnings errors

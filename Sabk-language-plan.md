@@ -23,7 +23,7 @@ switch to them at the bootstrap.
 - [x] **Logged failures:** std's I/O, path and process functions log why; `context.log_level` (section 5)
 - [x] **Parse failures logged** as warnings (section 5)
 - [ ] **`or_return .Replacement`** (section 5)
-- [ ] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
+- [x] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
 - [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
 - [x] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
@@ -509,12 +509,49 @@ The default is Jai's: no warning for a dropped failure. For the strict:
     `or_return`, `_ =`);
   - a value used where its failure was never checked:
     `let n, err = parse_int(s); total += n;` with `err` unread.
-- **`--werror`** makes every warning an error.
+- **`--werror`** makes the build fail when there are warnings.
 - A build script sets them with `set_strict(true)` and `set_werror(true)`;
-  the command line wins. Flags change diagnostics, never meaning, and
-  apply to the program's own modules; std stays clean under both.
+  either one turns them on. Flags change diagnostics, never meaning, and
+  apply to the program's own modules.
 - Not decided: in debug builds, a dropped failure that isn't `None`
   logging `debug: dropped ParseError.Invalid at main.sabk:12`.
+
+#### Edge cases met building them (built Oct 20, 2026; to review)
+
+1. **Build scripts run at the end of checking**, so a script's
+   `set_strict(true)` comes after the code is checked. The strict
+   warnings are a pass after checking: dropped failures are noted while
+   checking (Checker.dropped_failures) and given after, with the "used
+   before its failure is looked at" pass (src/strict.sabk). Both kinds
+   are sorted by module and place, so they read in the source's order.
+2. **`--werror` doesn't turn each warning into an error.** The warnings
+   are printed as warnings while checking, before a script's
+   `set_werror(true)` is known, so the build fails at the end with one
+   line: `[error]: 1 warning, and the build script's set_werror(true)
+   makes warnings errors` (or `--werror`).
+3. **Only error enums and `Error` count as failures**, not a `bool`:
+   `let key, value = cut(line, "=");` is fine.
+4. **"Used before it's looked at" goes by the order of the source**, not
+   by every path: `err` read anywhere before `x` counts, even on another
+   branch. Assigning to `err` makes it a failure to look at again:
+
+   ```
+   let z, err3 = parse_int("8");
+   err3 = .None;                 // written, not read
+   total += z;                   // warns
+   ```
+
+5. **"The program's own code" is by path**: a module under the std
+   directory, or the prelude, is skipped. So std isn't shown to be clean,
+   only left out.
+6. **The compiler's own source had five**, all fair: four cleanups that
+   drop failures on purpose (now `_ = delete_file(...)`) and one value
+   used before its failure was read (now read first). It's clean under
+   `--strict --werror`.
+7. **The flags add up**: the command line or a script turns them on;
+   there's no `--no-strict` (yet).
+8. **The bootstrap**, again: the VM's build functions went into the seed
+   before std/build used them.
 
 ### Stacking, and what `Error` keeps
 

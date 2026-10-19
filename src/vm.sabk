@@ -304,6 +304,9 @@ pub struct BuildOptions {
     output: string;        // the executable's path
     release: bool;
     bounds_checks: BoundsChecks;
+    strict: bool;          // the strict warnings: dropped failures, values
+                           // used before their failure is checked
+    werror: bool;          // warnings fail the build
     c_flags: [..]string;   // passed to the C compiler as written
     libraries: [..]string; // -l<name>
     c_files: [..]string;   // compiled and linked with the program
@@ -333,6 +336,8 @@ extern fn host_set_output(p: *u8, len: isize) { building().output = host_path(p,
 extern fn host_set_release(on: bool) { building().release = on; }
 extern fn host_is_release() -> bool { return building().release; }
 extern fn host_set_bounds_checks(mode: i32) { building().bounds_checks = mode as BoundsChecks; }
+extern fn host_set_strict(on: bool) { building().strict = on; }
+extern fn host_set_werror(on: bool) { building().werror = on; }
 extern fn host_add_c_flags(p: *u8, len: isize) {
     array_add(&building().c_flags, copy_string(from_parts(p, len)));
 }
@@ -375,6 +380,8 @@ fn host_function(name: string) -> *void {
     case "sabk_build_set_release": host_set_release;
     case "sabk_build_is_release": host_is_release;
     case "sabk_build_set_bounds_checks": host_set_bounds_checks;
+    case "sabk_build_set_strict": host_set_strict;
+    case "sabk_build_set_werror": host_set_werror;
     case "sabk_build_add_c_flags": host_add_c_flags;
     case "sabk_build_link_library": host_link_library;
     case "sabk_build_add_c_file": host_add_c_file;

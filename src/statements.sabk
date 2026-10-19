@@ -431,8 +431,10 @@ pub fn check_dropped(c: *Checker, call: *Node, t: *Type, taken: isize = 0) {
         name = fun.tok.text;
     default:
     }
-    if (fun == null || !(fun.kind is .Fn{nodiscard: true}))
+    if (fun == null || !(fun.kind is .Fn{nodiscard: true})) {
+        note_dropped_failure(c, call, t, taken);
         return;
+    }
     if (taken > 0) {
         error(c, at, tformat("% is `#nodiscard`, and this takes % of its % results, dropping the rest; take them all (with `_` for those you don't want)",
                              q(name), taken, count));
@@ -442,6 +444,26 @@ pub fn check_dropped(c: *Checker, call: *Node, t: *Type, taken: isize = 0) {
     let what = if (t.is_tuple) "its results" else tformat("its %", qt(t));
     error(c, at, tformat("% is `#nodiscard`, and this drops %; use %, or drop % on purpose with `_ = %(...);`",
                          q(name), what, it, it, name));
+}
+
+// --strict: a call's failure dropped, with all its results (`f();`) or
+// the last ones (`let n = f();`), kept to be given after checking
+fn note_dropped_failure(c: *Checker, call: *Node, t: *Type, taken: isize) {
+    let last = if (t.is_tuple) t.fields[t.fields.len - 1].ty else t;
+    let at = call_site(call);
+    if (!(last.is_failure || last.is_error_enum) || !in_program(c, at))
+        return;
+    let name = callee_name(call);
+    if (name == "this")
+        name = "the call";
+    let count: isize = if (t.is_tuple) t.fields.len else 1;
+    let message = if (taken == 0)
+        tformat("this drops %'s failure (%): look at it (`let ..., err = ...`), pass it on (`or_return`), or drop it on purpose (`_ = ...`)",
+                name, qt(last))
+    else
+        tformat("this takes % of %'s % results, dropping its failure (%): take it too (`let ..., err = ...`), or drop it on purpose with `_`",
+                taken, name, count, qt(last));
+    array_add(&c.dropped_failures, Finding.{ .at = at, .message = message });
 }
 
 // "`divide`", or "this" when the callee has no name

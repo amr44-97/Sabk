@@ -1,0 +1,143 @@
+// The strict warnings (--strict, or set_strict(true) in a build script),
+// given after checking, once the build's settings are known:
+//
+//   parse_int(s);                          a failure dropped (found while
+//   let n = parse_int(s);                  checking: Checker.dropped_failures)
+//   let n, err = parse_int(s);             a value used before the failure
+//   total += n;                            that came with it is looked at
+//
+// Only the program's own code is looked at, not std's: in_program. The
+// second is by the order of the source, not by every path through it:
+// `err` read anywhere before `n` (`if (err != .None) return;`) counts.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "ast";
+import "check";
+import "module";
+import "resolve";
+import "statements";
+import "token";
+import "types";
+
+struct Unchecked {
+    c: *Checker;
+    failure_of: Map(*Node, *Node); // a value's name: its failure's name
+    callee: Map(*Node, string);    // ... and the call they came from
+    checked: Map(*Node, bool);     // a failure's name: read since it was set
+    found: [..]Finding;
+}
+
+pub fn strict_warnings(c: *Checker) {
+    let u = Unchecked.{ .c = c };
+    array_append(&u.found, c.dropped_failures);
+    for (m in c.res.modules)
+        if (m.root != null && in_program(c, m.root.tok))
+            walk(&u, m.root);
+    for (instance in c.instances)
+        if (in_program(c, instance.tok))
+            walk(&u, instance);
+    // in the order of the source: by module, then by place
+    let found = u.found;
+    for (i in 1..found.len) {
+        let j = i;
+        while (j > 0 && comes_before(c, found[j].at, found[j - 1].at)) {
+            let t = found[j];
+            found[j] = found[j - 1];
+            found[j - 1] = t;
+            j--;
+        }
+    }
+    for (f in found)
+        warning(c, f.at, f.message);
+}
+
+fn comes_before(c: *Checker, a: Token, b: Token) -> bool {
+    let ma, mb = module_index(c, a), module_index(c, b);
+    if (ma != mb)
+        return ma < mb;
+    return (a.text.ptr as usize) < (b.text.ptr as usize);
+}
+
+fn module_index(c: *Checker, t: Token) -> isize {
+    let m = module_of(c.res, t.text.ptr);
+    for (i in 0..c.res.modules.len)
+        if (c.res.modules[i] == m)
+            return i;
+    return c.res.modules.len;
+}
+
+fn walk(u: *Unchecked, n: *Node) {
+    if (n == null)
+        return;
+    switch (n.kind) {
+    case .LetValues{names, values}:
+        if (values == null) { // let a, b = x, y: each name has its own
+            for (d in names)
+                walk(u, d);
+            return;
+        }
+        walk(u, values);
+        track(u, names, values);
+        return;
+    case .Assign{target, value}:
+        // a name assigned is written, not read: `err = g();` is a new
+        // failure to look at
+        walk(u, value);
+        let targets: []*Node = if (target.kind is .Values{items}) items else .[target];
+        for (x in targets) {
+            if (x.kind.tag == .Identifier && x.decl != null) {
+                if (map_has(&u.checked, x.decl))
+                    map_put(&u.checked, x.decl, false);
+            } else {
+                walk(u, x);
+            }
+        }
+        return;
+    case .Identifier:
+        used(u, n);
+        return;
+    default:
+    }
+    for (child in children(n))
+        walk(u, child);
+}
+
+// let n, used, err = parse_prefix(s): n and used came with err
+fn track(u: *Unchecked, names: []*Node, values: *Node) {
+    if (names.len < 2)
+        return;
+    let err = names[names.len - 1];
+    let t = err.ty;
+    if (err.tok.text == "_" || t == null || !(t.is_failure || t.is_error_enum))
+        return;
+    map_put(&u.checked, err, false);
+    for (i in 0..names.len - 1) {
+        let d = names[i];
+        if (d.tok.text == "_")
+            continue;
+        map_put(&u.failure_of, d, err);
+        map_put(&u.callee, d, callee_name(values));
+    }
+}
+
+fn used(u: *Unchecked, n: *Node) {
+    let d = n.decl;
+    if (d == null)
+        return;
+    if (map_has(&u.checked, d)) {
+        map_put(&u.checked, d, true);
+        return;
+    }
+    let err, found = map_get(&u.failure_of, d);
+    if (!found || (map_get(&u.checked, err) or_else true))
+        return;
+    map_remove(&u.failure_of, d); // once per name
+    let from = map_get(&u.callee, d) or_else "the call";
+    array_add(&u.found, Finding.{
+        .at = n.tok,
+        .message = tformat("`%` is used before `%`, the failure that came with it, is looked at: if % failed, `%` holds no real value",
+                           n.tok.text, err.tok.text, from, n.tok.text),
+    });
+}

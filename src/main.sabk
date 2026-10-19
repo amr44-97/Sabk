@@ -21,6 +21,7 @@ import "module";
 import "parser";
 import "resolve";
 import "source";
+import "strict";
 import "token";
 import "types";
 import "vm";
@@ -177,8 +178,8 @@ fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
         return false;
     }
     end_phase("C compiler");
-    delete_file(c_path);
-    remove_dir(dir);
+    _ = delete_file(c_path); // cleaning up: a failure here changes nothing
+    _ = remove_dir(dir);
     return true;
 }
 
@@ -195,6 +196,9 @@ fn print_usage(exe: string) -> i32 {
     eprint("  --bounds-checks on|off|always\n");
     eprint("               index and slice checks: as written (where\n");
     eprint("               #no_bounds_check turns them off), none, or all\n");
+    eprint("  --strict     also warn about failures dropped, and values used\n");
+    eprint("               before the failure that came with them is checked\n");
+    eprint("  --werror     warnings fail the build\n");
     eprint("  -- args...   the program's arguments (with --run), which\n");
     eprint("               args() also returns while compiling\n");
     eprint("  --emit-c     print the generated C (--lines: with #line\n");
@@ -224,6 +228,8 @@ fn main() -> i32 {
     let lines = false;            // --emit-c with #line directives
     let bounds_checks = vm.BoundsChecks.On;
     let bounds_given = false;     // --bounds-checks wins over a build script's
+    let strict = false;           // --strict and --werror add to a build script's
+    let werror = false;
 
     let i: isize = 1;
     while (i < argv.len) {
@@ -265,6 +271,10 @@ fn main() -> i32 {
             else
                 return print_usage(exe);
             bounds_given = true;
+        } else if (arg == "--strict") {
+            strict = true;
+        } else if (arg == "--werror") {
+            werror = true;
         } else if (arg == "--stats") {
             show_stats = true;
         } else if (arg == "-o" && i < argv.len) {
@@ -335,6 +345,14 @@ fn main() -> i32 {
         build.output = out_path;
     if (bounds_given)
         build.bounds_checks = bounds_checks;
+    if (strict || build.strict)
+        strict_warnings(&c);
+    if ((werror || build.werror) && c.warning_count > 0) {
+        let why = if (werror) "--werror" else "the build script's set_werror(true)";
+        eprintln("[error]: % warning%{}, and % makes warnings errors", c.warning_count,
+                 if (c.warning_count == 1) "" else "s", why);
+        return 1;
+    }
 
     if (mode == .Types) {
         for (m in r.modules) {
@@ -381,12 +399,13 @@ fn main() -> i32 {
         let exit: Exit;
         if (ok) {
             let ran, failed = run_shell(command as string);
-            exit = ran;
             if (failed != .None)
                 exit.code = -1;
+            else
+                exit = ran;
         }
-        delete_file(program);
-        remove_dir(dir);
+        _ = delete_file(program);
+        _ = remove_dir(dir);
         if (!ok)
             return 1;
         print_stats(&c);

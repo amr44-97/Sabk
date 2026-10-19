@@ -1,0 +1,9 @@
+// set_werror(true) (or --werror): a warning fails the build
+import "std/build";
+
+#run set_werror(true);
+
+fn main() {
+    let saved: [3][]i64;
+    for (i in 0..3) saved[i] = .[i, i];   // a memory trap's warning
+}

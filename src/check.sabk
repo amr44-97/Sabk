@@ -57,6 +57,12 @@ pub struct Fact {
     variant: *Node;
 }
 
+// a warning to give later: where, and what it says
+pub struct Finding {
+    at: Token;
+    message: string;
+}
+
 pub struct Checker {
     res: *Resolver;
     types: Types;
@@ -106,6 +112,10 @@ pub struct Checker {
     // `return x;` and the function's end copy (see default_copies)
     default_templates: Map(*Node, []*Node);
     warned: Map(string, bool);  // a warning is given once per place
+    warning_count: isize;
+    // --strict's dropped failures, found while checking and given after
+    // it (strict.sabk), once the build's settings are known
+    dropped_failures: [..]Finding;
 
     // narrowing: what the checker knows a place's variant to be where it
     // is (a stack, cut back as scopes end), and the variables of the
@@ -376,7 +386,17 @@ pub fn warning(c: *Checker, t: Token, message: string) {
     if (map_has(&c.warned, key))
         return;
     map_put(&c.warned, key, true);
+    c.warning_count++;
     say(c.res, .Warning, t, message);
+}
+
+// is this in the program's own code, not std's or the prelude's? What
+// --strict looks at
+pub fn in_program(c: *Checker, t: Token) -> bool {
+    let m = module_of(c.res, t.text.ptr);
+    if (m == null || m == c.res.prelude)
+        return false;
+    return !starts_with(m.path, tformat("%/", c.res.std_dir));
 }
 
 pub fn note(c: *Checker, t: Token, message: string) { say(c.res, .Note, t, message); }

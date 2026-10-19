@@ -1,0 +1,37 @@
+// --strict's warnings, turned on by the build script: failures dropped,
+// and values used before the failure that came with them is looked at
+import "std/build";
+import "std/io";
+import "std/str";
+
+#run set_strict(true);
+
+enum SaveError: Error { Full }
+
+fn save(n: i64) -> SaveError = .None {
+    if (n > 9) return .Full;
+}
+
+fn parse_prefix(s: string) -> (i64, isize, ParseError = .None) {
+    return 1, 1;
+}
+
+fn main() {
+    save(3);                                   // warns: dropped
+    _ = save(3);                               // fine: on purpose
+    let total = parse_int("4");                // warns: the first value only
+    total += parse_int("5");                   // warns: in an expression
+    let n, used = parse_prefix("12");          // warns: two of three
+    let a, _, _ = parse_prefix("12");          // fine: `_` takes them
+
+    let x, err = parse_int("6");
+    total += x;                                // warns: err isn't looked at yet
+    let y, err2 = parse_int("7");
+    if (err2 != .None) return;
+    total += y;                                // fine: err2 was looked at
+    let z, err3 = parse_int("8");
+    err3 = .None;                              // written, not read
+    total += z;                                // warns
+    let k, ok = cut("a=b", "=");               // fine: a bool isn't a failure enum
+    println("% % % % % %", total, n, used, a, k, ok);
+}

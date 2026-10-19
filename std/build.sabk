@@ -9,6 +9,8 @@
 //       add_c_file("vendor/stb.c");     compiled and linked along
 //       add_c_flags("-march=native");   passed to the C compiler as written
 //       set_bounds_checks(.Off);        no index or slice checks at all
+//       set_strict(true);               the strict warnings (--strict)
+//       set_werror(true);               warnings fail the build (--werror)
 //       if (!is_release())
 //           println("a debug build");
 //   }
@@ -39,6 +41,14 @@ pub fn set_bounds_checks(mode: BoundsChecks) {
     sabk_build_set_bounds_checks(mode as i32);
 }
 
+// the strict warnings (--strict): a failure dropped (`parse_int(s);`,
+// `let n = parse_int(s);`), and a value used before the failure that came
+// with it is looked at. Only the program's own code is warned about.
+pub fn set_strict(on: bool) { sabk_build_set_strict(on); }
+
+// warnings fail the build (--werror)
+pub fn set_werror(on: bool) { sabk_build_set_werror(on); }
+
 pub fn add_c_flags(flags: string) { sabk_build_add_c_flags(flags.ptr, flags.len); }
 
 pub fn link_library(name: string) { sabk_build_link_library(name.ptr, name.len); }
@@ -51,6 +61,8 @@ extern fn sabk_build_set_output(path: *u8, len: isize);
 extern fn sabk_build_set_release(on: bool);
 extern fn sabk_build_is_release() -> bool;
 extern fn sabk_build_set_bounds_checks(mode: i32);
+extern fn sabk_build_set_strict(on: bool);
+extern fn sabk_build_set_werror(on: bool);
 extern fn sabk_build_add_c_flags(flags: *u8, len: isize);
 extern fn sabk_build_link_library(name: *u8, len: isize);
 extern fn sabk_build_add_c_file(path: *u8, len: isize);
