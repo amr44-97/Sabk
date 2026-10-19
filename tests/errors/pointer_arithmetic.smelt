@@ -1,0 +1,18 @@
+// pointer arithmetic counts in what a typed pointer points at
+fn misuse(p: *i32, q: *i64, raw: *void, f: f64) {
+    let a = p + q;                          // two pointers
+    let b = 1 - p;                          // a number minus a pointer
+    let c = p + f;                          // not a whole number
+    let d = p - q;                          // different types
+    let e = raw + 1;                        // nothing to count in
+    let g = p * 2;
+    raw += 1;
+    raw++;
+}
+
+fn escapes() -> *i32 {
+    let xs: [4]i32;
+    return &xs[0] + 1;                      // still the local array
+}
+
+fn main() {}

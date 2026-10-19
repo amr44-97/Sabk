@@ -1,0 +1,106 @@
+// the memory traps the compiler can see (docs/reference.md, Memory traps):
+// each `// warns` line gets a warning, and the rest are fine
+import "std/io";
+import "std/array";
+import "std/mem";
+import "std/str";
+import "std/fmt";
+
+// 1: a slice literal stored from a loop
+fn stored_from_loop() {
+    let saved: [3][]i64;
+    for (i in 0..3) saved[i] = .[i, i];               // warns
+    for (i in 0..3) saved[i] = .[1, 2];               // the same values each pass
+    for (i in 0..3) {
+        let pair: []i64 = .[i, i];                    // held by `pair`...
+        saved[i] = pair;                              // warns: ...kept outside
+    }
+}
+
+// 2: a slice literal kept by a call in a loop
+fn kept_by_call() {
+    let pairs: [..][]i64;
+    let flat: [..]i64;
+    for (i in 0..3) array_add(&pairs, .[i, i]);       // warns
+    for (i in 0..3) array_append(&flat, .[i, i]);     // copies the elements
+    for (i in 0..3) println("%", .[i, i]);            // printed, not kept
+}
+
+// 3: a view of a block's array used after the block
+fn block_array() {
+    let s: []i64;
+    { let a = i64.[1, 2]; s = a[..]; }                // warns
+    { let b = i64.[3, 4]; s = b; }                    // warns: b as a slice
+    let pairs: [..][]i64;
+    for (i in 0..3) {
+        let pair = i64.[i, i];
+        array_add(&pairs, pair[..]);                  // warns
+        let keep = clone_slice(pair[..]);
+        array_add(&pairs, keep);                      // a copy: fine
+    }
+    let outer = i64.[5, 6];
+    array_add(&pairs, outer);                         // both live until it returns
+}
+
+// 4: a callee keeps the function's memory in the caller's
+fn add(out: *[..][]i64) {
+    array_add(out, .[7, 7]);                          // warns
+    let local: [..][]i64;
+    array_add(&local, .[7, 7]);                       // stays in this function
+}
+
+// 5: an Any kept past its block
+fn anys() {
+    let saved: [..]Any;
+    for (i in 0..3) {
+        let v: i64 = i * 10;
+        array_add(&saved, v);                         // warns
+    }
+    let buf: [..]u8;
+    for (i in 0..3) print_to(&buf, "% ", i);          // a ..Any isn't kept
+}
+
+// 8: copying a growable array
+fn copies() {
+    let xs: [..]i64;
+    array_add(&xs, 1);
+    let ys = xs;                                      // warns
+    for (i in 0..100) array_add(&ys, i);
+    println("%", xs);
+    let zs = xs;                                      // zs isn't grown, xs not used after
+    println("%", zs);
+}
+
+// 9: writing to a string literal
+fn literal_writes() {
+    let s = "hello";
+    s[0] = 'J';                                       // warns
+    let b = "bytes" as []u8;
+    b[0] = 'B';                                       // warns
+    let t = "hi";
+    t = copy_string("hi");
+    t[0] = 'H';                                       // may hold a copy: fine
+}
+
+// 12: growing an array while looping over it
+struct Shelf { books: [..]string; }
+fn grow_while_looping(shelf: *Shelf) {
+    let xs: [..]i64;
+    for (i in 0..8) array_add(&xs, i);
+    for (x in xs)
+        if (x == 0) array_add(&xs, 100);              // warns
+    for (b in shelf.books)
+        array_add(&shelf.books, b);                   // warns
+    let ys: [..]i64;
+    for (x in xs) array_add(&ys, x);                  // another array
+}
+
+// 13: growing a by-value copy of a growable array
+fn add_one(xs: [..]i64) { array_add(&xs, 99); }       // warns
+fn add_one_ptr(xs: *[..]i64) { array_add(xs, 99); }
+fn first(xs: [..]i64) -> i64 { return xs[0]; }
+
+fn main() {
+    let pairs: [..][]i64;
+    add(&pairs);
+}

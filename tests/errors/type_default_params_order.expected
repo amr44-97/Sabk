@@ -1,0 +1,3 @@
+[error]: parameters with default values must come after the ones without at [tests/errors/type_default_params_order.smelt:1:18]
+     1 | fn f(a: i32 = 1, b: i32) {}
+       |                  ^

@@ -1,0 +1,6 @@
+[error]: a top-level `#if` needs a condition known at compile time, such as `OS == .Windows` at [tests/errors/platform_if_condition.smelt:3:6]
+     3 | #if (flag) { fn a() {} }
+       |      ^
+[error]: `#if` needs a `bool` condition, found `untyped int` at [tests/errors/platform_if_condition.smelt:4:6]
+     4 | #if (1) { fn b() {} }
+       |      ^

@@ -1,0 +1,48 @@
+[error]: `wrong_count` returns 2 values, found 3 values at [tests/errors/several_results.smelt:6:21]
+     6 |     return 1, true, 3;                    // one too many
+       |                     ^
+[error]: `too_few` returns 2 values, `(i64, bool)`, found one value at [tests/errors/several_results.smelt:10:12]
+    10 |     return 1;                             // one value for two
+       |            ^
+[error]: `one_result` returns one value, found 2 values at [tests/errors/several_results.smelt:14:15]
+    14 |     return 1, 2;                          // returns one
+       |               ^
+[error]: `nothing` doesn't return a value, found 2 values at [tests/errors/several_results.smelt:18:15]
+    18 |     return 1, 2;                          // returns nothing
+       |               ^
+[error]: an `extern` function returns one value at most, as C functions do at [tests/errors/several_results.smelt:21:23]
+    21 | extern fn c_side() -> (i32, i32);         // C returns one value
+       |                       ^
+[error]: `void_result` returns one value, found 2 values at [tests/errors/several_results.smelt:23:45]
+    23 | fn void_result() -> (i32, void) { return 1, 2; }
+       |                                             ^
+[error]: `divide` gives 2 values, `(i64, i64)`, where one is expected; take them apart with `let a, b = ...` at [tests/errors/several_results.smelt:26:13]
+    26 |     let a = divide(7, 2);                 // two values for one name
+       |             ^
+[error]: `divide` gives 2 values, `(i64, i64)`, where one is expected; take them apart with `let a, b = ...` at [tests/errors/several_results.smelt:27:10]
+    27 |     take(divide(7, 2));                   // passed as one argument
+       |          ^
+[error]: 3 names, but `divide` gives 2 values, `(i64, i64)` at [tests/errors/several_results.smelt:28:19]
+    28 |     let q, r, s = divide(7, 2);           // three names
+       |                   ^
+[error]: 2 names but 3 values at [tests/errors/several_results.smelt:29:22]
+    29 |     let x, y = 1, 2, 3;                   // three values
+       |                      ^
+[error]: `z` is one name, but there are 2 values; declare a name for each: `let a, b = ...` at [tests/errors/several_results.smelt:30:16]
+    30 |     let z = 1, 2;                         // one name
+       |                ^
+[error]: one target, but 2 values at [tests/errors/several_results.smelt:32:12]
+    32 |     t = 1, 2;                             // one target
+       |            ^
+[error]: `divide`'s 1st value is `i64`, which can't be assigned to `u8` at [tests/errors/several_results.smelt:35:5]
+    35 |     small, ok = divide(7, 2);             // i64 is neither u8 nor bool
+       |     ^
+[error]: `divide`'s 2nd value is `i64`, which can't be assigned to `bool` at [tests/errors/several_results.smelt:35:12]
+    35 |     small, ok = divide(7, 2);             // i64 is neither u8 nor bool
+       |            ^
+[error]: can't assign to this: it's a temporary value at [tests/errors/several_results.smelt:36:8]
+    36 |     t, 5 = 1, 2;                          // not a target
+       |        ^
+[error]: `divide` gives 2 values, `(i64, i64)`, where one is expected; take them apart with `let a, b = ...` at [tests/errors/several_results.smelt:37:16]
+    37 |     let u, v = divide(7, 2) + 1;          // used as one value
+       |                ^

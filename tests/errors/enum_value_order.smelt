@@ -1,0 +1,6 @@
+// a variant used while its own enum's values are being worked out
+enum E { A = sizeof(S) as i32, B }
+struct S { e: E = .B; }
+enum F { X = sizeof(T) as i32, Y }
+struct T { f: F = F.Y; }
+fn main() {}

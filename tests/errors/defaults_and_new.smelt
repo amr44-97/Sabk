@@ -1,0 +1,13 @@
+// a global starts as its type's defaults, so they must be constants; and
+// mistakes with new(value)
+fn next_id() -> i32 { return 1; }
+struct Item { id: i32 = next_id(); name: []u8; }
+struct Box { item: Item; }
+let shared: Box;
+let fine: Box = .{ .item = .{ .id = 3 } };
+struct P { x: i32; }
+fn main() {
+    let a = new(.{ .x = 1 });
+    let b: *[]i32 = new(.[1, 2]);
+    let c = new(P.{ .x = 1 }, 5, 6);
+}

@@ -1,0 +1,15 @@
+// [..]T: its elements are allocated, so no literal or constant is one
+import "std/array";
+
+const WORDS: [..]string = .["a"];  // a constant would own heap memory
+let empty: [..]void;               // nothing to hold
+
+fn f(xs: [..]i64, p: *[..]i64) {
+    let a: [..]i64 = .[1, 2, 3];   // a literal would allocate: array_of
+    for (x in p) {}                // a pointer: p.*
+    let s: string = xs;            // not text
+    let b: []u8 = xs;              // a view keeps the element type
+    xs.cap = "big";                // the fields keep their types
+    let n = p[0];                  // whole arrays: p.*[0] for an element
+    let m: i64 = p[0];
+}

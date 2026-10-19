@@ -1,0 +1,7 @@
+struct S { v: i32; }
+fn f(s: S, p: *S, x: f32) {
+    let a = s as i32;
+    let b = "str" as i32;
+    let c = p as i32;
+    let d = x as *S;
+}

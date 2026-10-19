@@ -1,0 +1,73 @@
+// memory that's gone when a function returns can't leave it
+import "std/mem";
+
+struct Point { x: i32; y: i32; }
+struct Record { name: string; tags: []string; at: *Point; }
+
+let keep: []i32;
+
+fn literal() -> []i32 {
+    return .[1, 2, 3];                    // the elements are this function's
+}
+
+fn address() -> *Point {
+    let p = Point.{ .x = 1, .y = 2 };
+    return &p;
+}
+
+fn through_a_local() -> []string {
+    let tags: []string = .["a", "b"];
+    let same = tags;
+    return same;                          // followed through locals
+}
+
+fn inside_a_struct() -> Record {
+    let origin = Point.{};
+    return .{ .name = "r", .tags = .["x"], .at = &origin };
+}
+
+fn local_array() -> []i32 {
+    let numbers = i32.[1, 2, 3];
+    return numbers[..];
+}
+
+fn into_a_global() {
+    keep = .[4, 5];
+}
+
+fn into_the_caller(out: *Record, items: []*Point) {
+    let p = Point.{};
+    out.tags = .["y"];                    // where `out` points
+    items[0] = &p;
+}
+
+fn as_any() -> Any {
+    let n = 5;
+    return n;                             // an Any points at a copy here
+}
+
+// several results, and several targets
+fn pair() -> ([]i32, bool) {
+    return .[1, 2], true;                 // the first result
+}
+fn swap_out(out: *[]i32) {
+    let x: []i32;
+    let ok: bool;
+    x, ok = .[1], true;                   // held by x...
+    out.* = x;                            // ...and stored for the caller
+}
+
+// all fine
+fn fine(out: *Record) -> []i32 {
+    let local: []i32 = .[1, 2];
+    let total = 0;
+    for (x in local) total += x;          // used here: fine
+    let rec: Record;
+    rec.tags = .["z"];                    // a local struct: fine
+    out.name = "text";                    // literals live forever
+    out.tags = clone_slice(string.["w"]); // a copy that's kept
+    let heap = new([]i32, 2);
+    return heap;                          // allocated: fine
+}
+
+fn main() {}

@@ -1,0 +1,18 @@
+[error]: expected `[]u8`, found `string`; the same memory converts with `text as []u8` at [tests/errors/string_misuse.smelt:8:17]
+     8 |     takes_bytes(text);                   // text to bytes: convert with as
+       |                 ^
+[error]: `==` needs numbers, bools, enums, pointers or strings, found `[]u8` at [tests/errors/string_misuse.smelt:9:22]
+     9 |     let same = bytes == bytes;           // bytes have no ==
+       |                      ^
+[error]: duplicate case "a" at [tests/errors/string_misuse.smelt:13:10]
+    13 |     case "a":                            // twice
+       |          ^
+[note]: it's first handled here at [tests/errors/string_misuse.smelt:12:10]
+    12 |     case "a":
+       |          ^
+[error]: a case of a string switch must be a string known at compile time at [tests/errors/string_misuse.smelt:14:10]
+    14 |     case name:                           // not known at compile time
+       |          ^
+[error]: `<` needs numbers, enums or pointers, found `string`; order strings with compare_strings(a, b) from std/str at [tests/errors/string_misuse.smelt:16:24]
+    16 |     let ordered = text < "b";            // only == and !=
+       |                        ^

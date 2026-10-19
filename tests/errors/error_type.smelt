@@ -1,0 +1,34 @@
+// what an Error isn't
+import "std/io";
+import "std/os";
+import "std/str";
+enum Shape { Circle(f64), Dot }
+enum NoZero { A = 1, B }
+enum Big: i64 { None, Huge = 5000000000 }
+fn takes(e: IoError) {}
+
+fn misuse(e: Error, s: Shape, n: NoZero) -> (i64, Error) {
+    let back: IoError = e;                 // doesn't narrow
+    takes(e);
+    if (e == .NotFound) {}                 // which enum?
+    let home = get_env("HOME") or_return;  // a bool says nothing
+    let x: Error = s;                      // tagged
+    let y: Error = n;                      // no variant equal to 0
+    if (e < e) {}                          // no order
+    let z = e + 1;                         // not a number
+    let big: Error = Big.Huge;             // doesn't fit
+    return 0, .None;
+}
+
+fn several() -> (i64, Error) {             // only `-> Error` may fall off its end
+    if (true) return 1, .None;
+}
+
+fn other() -> ParseError {
+    let t = read_file("x") or_return;      // IoError isn't ParseError
+    return .None;
+}
+
+fn main() {
+    let t = read_file("x") or_return;      // main returns nothing
+}

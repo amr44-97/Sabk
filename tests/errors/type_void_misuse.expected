@@ -1,0 +1,24 @@
+[error]: a C function can't take `void`: C has no such parameter at [tests/errors/type_void_misuse.smelt:2:22]
+     2 | extern fn c_takes(x: void);              // C has no void parameter
+       |                      ^
+[error]: a constant can't have type `void`: its one value is `.{}`, so there's nothing to name at [tests/errors/type_void_misuse.smelt:3:16]
+     3 | const NOTHING: void = .{};               // nothing to name
+       |                ^
+[error]: a slice can't hold `void` at [tests/errors/type_void_misuse.smelt:6:14]
+     6 |     let s: []void;                       // no elements to hold
+       |              ^
+[error]: an array can't hold `void` at [tests/errors/type_void_misuse.smelt:7:15]
+     7 |     let a: [4]void;
+       |               ^
+[error]: can't allocate `void` at [tests/errors/type_void_misuse.smelt:8:17]
+     8 |     let n = new(void);
+       |                 ^
+[error]: `void` has no fields: its one value is `.{}` at [tests/errors/type_void_misuse.smelt:9:23]
+     9 |     let v: void = .{ .x = 1 };           // no fields
+       |                       ^
+[error]: `h` doesn't return a value at [tests/errors/type_void_misuse.smelt:13:12]
+    13 |     return 5;                            // h returns void
+       |            ^
+[error]: `k` doesn't return a value at [tests/errors/type_void_misuse.smelt:16:12]
+    16 |     return .Red;
+       |            ^

@@ -1,0 +1,3 @@
+[error]: mismatched types `i32` and `u64` for `+` at [tests/errors/type_binary_mismatch.smelt:1:34]
+     1 | fn f(a: i32, b: u64) { let c = a + b; }
+       |                                  ^

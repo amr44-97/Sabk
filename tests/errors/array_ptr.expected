@@ -1,0 +1,33 @@
+[error]: can't take `.ptr` of this array: `DIGITS` is a constant at [tests/errors/array_ptr.smelt:9:20]
+     9 |     let a = DIGITS.ptr;                     // a constant
+       |                    ^
+[error]: can't take `.ptr` of this array: it's a temporary value at [tests/errors/array_ptr.smelt:10:20]
+    10 |     let b = make().ptr;                     // a temporary
+       |                    ^
+[error]: can't take `.ptr` of this array: the loop variable `row` is read-only at [tests/errors/array_ptr.smelt:12:21]
+    12 |         let c = row.ptr;                    // the loop's copy
+       |                     ^
+[error]: can't assign to this: `ptr` is read-only at [tests/errors/array_ptr.smelt:15:12]
+    15 |     xs.ptr = null;                          // read-only, like a slice's
+       |            ^
+[error]: can't assign to this: `ptr` is read-only at [tests/errors/array_ptr.smelt:16:11]
+    16 |     p.ptr = null;
+       |           ^
+[error]: can't assign to this: `len` is read-only at [tests/errors/array_ptr.smelt:17:11]
+    17 |     p.len = 3;                              // through a pointer too
+       |           ^
+[error]: can't assign to this: `len` is read-only at [tests/errors/array_ptr.smelt:18:11]
+    18 |     q.len = 3;
+       |           ^
+[error]: this stores memory that's gone once `first` returns into the global `saved` at [tests/errors/array_ptr.smelt:23:16]
+    23 |     saved = xs.ptr;                         // into a global
+       |                ^
+[note]: `xs` is a local array, which only lives until `first` returns; to keep its elements, copy them: `clone_slice(...)` (std/mem) at [tests/errors/array_ptr.smelt:23:16]
+    23 |     saved = xs.ptr;                         // into a global
+       |                ^
+[error]: this returns memory that's gone once `first` returns at [tests/errors/array_ptr.smelt:25:14]
+    25 |     return p.ptr;                           // where p points
+       |              ^
+[note]: `xs` is a local, which only lives until `first` returns; to keep the value, allocate it: `new(T)` or `new(value)` at [tests/errors/array_ptr.smelt:24:13]
+    24 |     let p = &xs;
+       |             ^

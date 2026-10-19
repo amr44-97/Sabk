@@ -1,0 +1,5 @@
+fn depth(x: $T, n: i32) -> i32 {
+    if (n == 0) return 0;
+    return 1 + depth(&x, n - 1);
+}
+fn f() { let d = depth(5, 3); }

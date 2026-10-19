@@ -1,0 +1,9 @@
+const K = 1;
+fn g() -> i32 { return 1; }
+fn f(s: []u8) {
+    K = 2;
+    for (i in 0..3) { i = 5; }
+    g() = 1;
+    s.len = 0;
+    g = f;
+}

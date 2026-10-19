@@ -1,0 +1,30 @@
+[error]: can't add two pointers; `q - p` counts what's between them, and `p + n` moves a pointer at [tests/errors/pointer_arithmetic.smelt:3:15]
+     3 |     let a = p + q;                          // two pointers
+       |               ^
+[error]: can't subtract a pointer from a number; `p - n` moves the pointer back at [tests/errors/pointer_arithmetic.smelt:4:15]
+     4 |     let b = 1 - p;                          // a number minus a pointer
+       |               ^
+[error]: a pointer moves by a whole number of values, so `+` needs an integer here, found `f64` at [tests/errors/pointer_arithmetic.smelt:5:17]
+     5 |     let c = p + f;                          // not a whole number
+       |                 ^
+[error]: `-` between pointers needs them to point at the same type, found `*i32` and `*i64` at [tests/errors/pointer_arithmetic.smelt:6:15]
+     6 |     let d = p - q;                          // different types
+       |               ^
+[error]: can't move this pointer: a `*void` doesn't say what it points at, so there's nothing to count in; cast it to `*u8` to move by bytes at [tests/errors/pointer_arithmetic.smelt:7:17]
+     7 |     let e = raw + 1;                        // nothing to count in
+       |                 ^
+[error]: `*` needs numbers, found `*i32`; a pointer only moves by `+` and `-` at [tests/errors/pointer_arithmetic.smelt:8:15]
+     8 |     let g = p * 2;
+       |               ^
+[error]: can't move this pointer: a `*void` doesn't say what it points at, so there's nothing to count in; cast it to `*u8` to move by bytes at [tests/errors/pointer_arithmetic.smelt:9:9]
+     9 |     raw += 1;
+       |         ^
+[error]: can't move this pointer: a `*void` doesn't say what it points at, so there's nothing to count in; cast it to `*u8` to move by bytes at [tests/errors/pointer_arithmetic.smelt:10:8]
+    10 |     raw++;
+       |        ^
+[error]: this returns memory that's gone once `escapes` returns at [tests/errors/pointer_arithmetic.smelt:15:19]
+    15 |     return &xs[0] + 1;                      // still the local array
+       |                   ^
+[note]: `xs` is a local, which only lives until `escapes` returns; to keep the value, allocate it: `new(T)` or `new(value)` at [tests/errors/pointer_arithmetic.smelt:15:12]
+    15 |     return &xs[0] + 1;                      // still the local array
+       |            ^

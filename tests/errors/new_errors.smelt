@@ -1,0 +1,6 @@
+fn f() {
+    let a = new([]u8);
+    let b = new(i32, context.allocator, 3);
+    let c = new([]u8, "three");
+    let d = new([]u8, 3, 4);
+}

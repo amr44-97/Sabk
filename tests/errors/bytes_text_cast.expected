@@ -1,0 +1,18 @@
+[error]: expected `string`, found `[5]u8`; view it as text with `buf[..] as string` at [tests/errors/bytes_text_cast.smelt:7:11]
+     7 |     takes(buf);                             // an array of bytes
+       |           ^
+[error]: expected `string`, found `[]u8`; the same memory converts with `b as string` at [tests/errors/bytes_text_cast.smelt:9:11]
+     9 |     takes(b);
+       |           ^
+[error]: expected `[]u8`, found `untyped string`; the same memory converts with `"abc" as []u8` at [tests/errors/bytes_text_cast.smelt:10:11]
+    10 |     bytes("abc");                           // a literal's bytes too
+       |           ^
+[error]: `==` doesn't compare bytes with text; compare them as text: `b as string` at [tests/errors/bytes_text_cast.smelt:11:16]
+    11 |     let same = b == "abc";
+       |                ^
+[error]: expected `string`, found `[..]u8`; the same memory converts with `grown as string` at [tests/errors/bytes_text_cast.smelt:13:11]
+    13 |     takes(grown);                           // a growable one: `grown as string`
+       |           ^
+[error]: can't cast `[..]i32` to `string` at [tests/errors/bytes_text_cast.smelt:15:18]
+    15 |     let t = wide as string;                 // only a [..]u8 is text
+       |                  ^

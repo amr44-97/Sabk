@@ -1,0 +1,4 @@
+fn n() -> i32 { return 3; }
+let a: [n()]u8;
+let b: [-1]u8;
+let c: [2.5]u8;

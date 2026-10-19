@@ -1,0 +1,15 @@
+[error]: too many nested instances of `depth`; does it instantiate itself forever? at [tests/errors/generic_runaway.smelt:3:16]
+     3 |     return 1 + depth(&x, n - 1);
+       |                ^
+[note]: in `depth` with T = ***************************************************************isize, used here at [tests/errors/generic_runaway.smelt:3:16]
+     3 |     return 1 + depth(&x, n - 1);
+       |                ^
+[note]: in `depth` with T = **************************************************************isize, used here at [tests/errors/generic_runaway.smelt:3:16]
+     3 |     return 1 + depth(&x, n - 1);
+       |                ^
+[note]: in `depth` with T = *************************************************************isize, used here at [tests/errors/generic_runaway.smelt:3:16]
+     3 |     return 1 + depth(&x, n - 1);
+       |                ^
+[note]: in `depth` with T = isize, used here (after 60 more nested instances) at [tests/errors/generic_runaway.smelt:5:18]
+     5 | fn f() { let d = depth(5, 3); }
+       |                  ^

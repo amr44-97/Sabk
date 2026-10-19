@@ -1,0 +1,12 @@
+// a void result can be left out, but the rest still has to match
+enum E { None, Bad }
+fn note() {}
+fn flush() -> (void, E) { return .{}, .None; }
+fn f() -> (void, E) {
+    let a, b, c = flush();               // flush spells two results
+    let x: i32;
+    let err: E;
+    x, err = flush();                    // x isn't void: nothing for it
+    return note(), .None;                // a call isn't left out: it runs
+}
+fn main() {}

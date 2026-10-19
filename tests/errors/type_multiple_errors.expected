@@ -1,0 +1,12 @@
+[error]: the constant 256 doesn't fit in `u8` at [tests/errors/type_multiple_errors.smelt:2:17]
+     2 |     let a: u8 = 256;
+       |                 ^
+[error]: expected `bool`, found `untyped int` at [tests/errors/type_multiple_errors.smelt:3:19]
+     3 |     let b: bool = 1;
+       |                   ^
+[error]: a condition must be a `bool`, found `u8`, compare it explicitly: `x != 0` at [tests/errors/type_multiple_errors.smelt:4:9]
+     4 |     if (a) {}
+       |         ^
+[error]: `f` returns `i32` but can reach the end of its body without returning a value at [tests/errors/type_multiple_errors.smelt:1:4]
+     1 | fn f() -> i32 {
+       |    ^

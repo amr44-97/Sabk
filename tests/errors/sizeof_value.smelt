@@ -1,0 +1,4 @@
+// sizeof(value) checks the value, though it doesn't run it
+fn f() {
+    let b = sizeof(1 + true);               // still type-checked
+}

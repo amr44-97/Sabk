@@ -1,0 +1,6 @@
+// log() is #format: its format string is checked against its values
+import "std/logging";
+fn main() {
+    log(.Info, "% and %", 1);
+    log(.Warning, "%{x}", "text");
+}

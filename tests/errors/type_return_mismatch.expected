@@ -1,0 +1,9 @@
+[error]: `f` doesn't return a value at [tests/errors/type_return_mismatch.smelt:1:17]
+     1 | fn f() { return 1; }
+       |                 ^
+[error]: `g` must return a value of type `i32` at [tests/errors/type_return_mismatch.smelt:2:17]
+     2 | fn g() -> i32 { return; }
+       |                 ^
+[error]: expected `bool`, found `untyped int` at [tests/errors/type_return_mismatch.smelt:3:25]
+     3 | fn h() -> bool { return 1; }
+       |                         ^

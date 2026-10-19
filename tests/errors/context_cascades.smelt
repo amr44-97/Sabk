@@ -1,0 +1,21 @@
+// one error each: a broken context mustn't add "can't tell" errors
+enum Color { Red, Green }
+struct Point { x: i32; y: i32; }
+struct Inner { q: Color; }
+struct Box { p: Point; }
+type I = i32;
+let g: Box = .{ .p = .{ .x = .{ .q = .Red } } };   // .x is an i32
+fn none() { return .Red; }                         // returns nothing
+fn f() {
+    let e: i32 = 5;
+    e(.Red);                                       // not a function
+    let p: Point = .{ .x = 1 };
+    p.nope(.Green);                                // no field `nope`
+    let b: Point = .{ .z = .{} };                  // no field `z`
+    let c: Point = .{ 1, 2, .Red };                // too many values
+    let n = 3;
+    let d: [n]Color = .[.Red];                     // length not constant
+    let x = I.{ .Red };                            // not a struct
+    let k: Color = .Red;
+    k += .Green;                                   // `+=` needs a number
+}

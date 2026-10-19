@@ -1,0 +1,5 @@
+// a top-level #if needs a bool known at compile time
+let flag = true;
+#if (flag) { fn a() {} }
+#if (1) { fn b() {} }
+fn main() {}

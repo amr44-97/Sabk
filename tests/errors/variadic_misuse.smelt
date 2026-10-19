@@ -1,0 +1,18 @@
+// mistakes with `..` parameters and Any
+import "std/io";
+
+fn count(xs: ..i32) -> i32 { return 0; }
+fn plain(xs: []i32) {}
+fn nothing() {}
+fn pick(x: $T) -> T { return x; }
+
+fn main() {
+    count(1, "x");                       // each value must be an i32
+    let xs: []i32 = .[1];
+    count(..xs, 2);                      // `..xs` is the only one, last
+    plain(..xs);                         // only for a `..` parameter
+    println("%", nothing());             // no value
+    println("%", pick);                  // which pick?
+    let i: i64 = 3;
+    count(..i);                          // `..` passes a slice
+}

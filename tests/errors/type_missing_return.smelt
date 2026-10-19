@@ -1,0 +1,5 @@
+fn f(x: i32) -> i32 {
+    if (x > 0) return 1;
+}
+fn g() -> i32 { while (true) { break; } }
+fn h(x: i32) -> i32 { switch (x) { case 1: return 1; } }

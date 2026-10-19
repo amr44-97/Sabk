@@ -1,0 +1,38 @@
+// mistakes with functions that return several values
+fn divide(a: i64, b: i64) -> (i64, i64) { return a / b, a % b; }
+fn take(x: i64) {}
+
+fn wrong_count() -> (i64, bool) {
+    return 1, true, 3;                    // one too many
+}
+
+fn too_few() -> (i64, bool) {
+    return 1;                             // one value for two
+}
+
+fn one_result() -> i64 {
+    return 1, 2;                          // returns one
+}
+
+fn nothing() {
+    return 1, 2;                          // returns nothing
+}
+
+extern fn c_side() -> (i32, i32);         // C returns one value
+
+fn void_result() -> (i32, void) { return 1, 2; }
+
+fn main() {
+    let a = divide(7, 2);                 // two values for one name
+    take(divide(7, 2));                   // passed as one argument
+    let q, r, s = divide(7, 2);           // three names
+    let x, y = 1, 2, 3;                   // three values
+    let z = 1, 2;                         // one name
+    let t: i64;
+    t = 1, 2;                             // one target
+    let small: u8;
+    let ok: bool;
+    small, ok = divide(7, 2);             // i64 is neither u8 nor bool
+    t, 5 = 1, 2;                          // not a target
+    let u, v = divide(7, 2) + 1;          // used as one value
+}

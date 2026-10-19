@@ -1,0 +1,13 @@
+enum Color { Red, Green }
+struct Point { x: i32; y: i32; }
+fn id(x: $T) -> T { return x; }
+fn f() {
+    let a = .{ .x = 1 };                  // nothing says what type
+    let b = .Red;                         // nothing says which enum
+    let c: i32 = .Red;                    // not an enum
+    let d: Color = .Purple;               // no such variant
+    let e: i32 = .{ 1 };                  // not a struct or union
+    let g: [2]i32 = .{1, 2};              // arrays are written .[1, 2]
+    let h = id(.{ .x = 1 });              // T can't come from `.{ }` itself
+    let k: Point = .{ .z = 1 };           // the usual struct checks apply
+}

@@ -1,0 +1,16 @@
+// bytes and text are the same memory, but converting either way takes
+// `as`, as in Jai
+fn takes(s: string) {}
+fn bytes(b: []u8) {}
+fn main() {
+    let buf: [5]u8;
+    takes(buf);                             // an array of bytes
+    let b = "abc" as []u8;                  // fine: written
+    takes(b);
+    bytes("abc");                           // a literal's bytes too
+    let same = b == "abc";
+    let grown: [..]u8;
+    takes(grown);                           // a growable one: `grown as string`
+    let wide: [..]i32;
+    let t = wide as string;                 // only a [..]u8 is text
+}

@@ -1,0 +1,30 @@
+// mistakes in patterns and switch expressions
+enum Color { Red, Green }
+enum Shape { Circle(f64), Rect(w: f64, h: f64), Dot }
+
+fn misuse(c: Color, s: Shape, n: i32, word: string) {
+    switch (c) {
+    case .Red..=.Green:                   // ranges need integers
+    default:
+    }
+    switch (n) {
+    case 5..5:                            // empty: .. leaves 5 out
+    case 1..=10:
+    case 8..=12:                          // overlaps
+    default:
+    }
+    switch (s) {
+    case .Rect{w, depth}:                 // no such field
+    case .Circle{r}:                      // an f64 has no fields
+    default:
+    }
+    let p = switch (n) { case 1: 10; };   // needs a default
+    let q = switch (word) { case "a": 1; case "b": "two"; default: 0; };
+    if (n is 1..=3 && word is "x") {}     // fine
+    s2: switch (Shape.Dot) {
+    case .Circle(&r): continue s2 = .Dot; // a continued switch is a copy
+    default:
+    }
+}
+
+fn main() {}

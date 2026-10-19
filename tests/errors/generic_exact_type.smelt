@@ -1,0 +1,10 @@
+// a type found inside another type (T in *[..]T) can't convert, so it
+// decides T, and the other arguments must convert to it
+import "std/array";
+
+fn f() {
+    let xs: [..]i32;
+    for (i in 0..5) array_add(&xs, i);      // i is an isize
+    let small: i8 = 1;
+    array_add(&xs, small);                  // fine: an i8 widens to i32
+}

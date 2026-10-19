@@ -1,0 +1,8 @@
+fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
+fn deref(p: *$T) -> T { return p.*; }
+fn first(items: []$T) -> T { return items[0]; }
+fn f(x: i32, y: u64) {
+    let a = max(x, y);
+    let b = deref(5);
+    let c = first(null);
+}

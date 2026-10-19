@@ -1,0 +1,9 @@
+fn f(x: i32, r: *void, arr: [3]i32) {
+    let a = x.*;
+    let b = r.*;
+    let c = r[0];
+    let d = x[0];
+    let e = arr[3];
+    let g = arr[-1];
+    let h = arr[1.5];
+}

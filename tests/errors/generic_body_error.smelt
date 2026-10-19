@@ -1,0 +1,5 @@
+fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
+struct Vec2 { x: f32; y: f32; }
+fn f(v: Vec2, w: Vec2) {
+    let m = max(v, w);
+}

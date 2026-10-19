@@ -1,0 +1,18 @@
+[error]: `shared` starts as `Box`'s defaults, but the default of `id` isn't known at compile time; give `shared` a value at [tests/errors/defaults_and_new.smelt:6:5]
+     6 | let shared: Box;
+       |     ^
+[note]: that default is here at [tests/errors/defaults_and_new.smelt:4:32]
+     4 | struct Item { id: i32 = next_id(); name: []u8; }
+       |                                ^
+[error]: can't tell what `new(.{ ... })` makes here; write the type, like `new(Point.{ ... })` at [tests/errors/defaults_and_new.smelt:10:17]
+    10 |     let a = new(.{ .x = 1 });
+       |                 ^
+[error]: `new` of a slice literal would allocate only the slice; to allocate its elements use `new([]T, n)` and copy them in at [tests/errors/defaults_and_new.smelt:11:25]
+    11 |     let b: *[]i32 = new(.[1, 2]);
+       |                         ^
+[error]: expected `Allocator`, found `untyped int` at [tests/errors/defaults_and_new.smelt:12:31]
+    12 |     let c = new(P.{ .x = 1 }, 5, 6);
+       |                               ^
+[error]: `new(value)` takes one allocator at most at [tests/errors/defaults_and_new.smelt:12:34]
+    12 |     let c = new(P.{ .x = 1 }, 5, 6);
+       |                                  ^

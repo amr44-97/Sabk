@@ -1,0 +1,17 @@
+// void is a real type with one value, `.{}`; these are what it can't do
+extern fn c_takes(x: void);              // C has no void parameter
+const NOTHING: void = .{};               // nothing to name
+fn g() {}
+fn f() -> i32 {
+    let s: []void;                       // no elements to hold
+    let a: [4]void;
+    let n = new(void);
+    let v: void = .{ .x = 1 };           // no fields
+    return 0;
+}
+fn h() {
+    return 5;                            // h returns void
+}
+fn k() {
+    return .Red;
+}

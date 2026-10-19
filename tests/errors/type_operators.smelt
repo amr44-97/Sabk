@@ -1,0 +1,9 @@
+struct S { v: i32; }
+fn f(a: S, b: S, x: f32, p: *i32) {
+    let c = a == b;
+    let d = x % 2.0;
+    let e = x & 1.0;
+    let g = !x;
+    let h = ~x;
+    let k = p * 2;                // a pointer only moves by + and -
+}

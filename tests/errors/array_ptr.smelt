@@ -1,0 +1,28 @@
+// a.ptr needs the array in memory, can't be assigned, and the escape
+// check treats it as &a
+const DIGITS: [3]i32 = .[1, 2, 3];
+let saved: *i32;
+
+fn make() -> [2]i32 { return .[1, 2]; }
+
+fn misuse(p: *[4]i32, q: *[]i32) {
+    let a = DIGITS.ptr;                     // a constant
+    let b = make().ptr;                     // a temporary
+    for (row in .[i32.[1, 2]]) {
+        let c = row.ptr;                    // the loop's copy
+    }
+    let xs: [4]i32;
+    xs.ptr = null;                          // read-only, like a slice's
+    p.ptr = null;
+    p.len = 3;                              // through a pointer too
+    q.len = 3;
+}
+
+fn first() -> *i32 {
+    let xs: [4]i32;
+    saved = xs.ptr;                         // into a global
+    let p = &xs;
+    return p.ptr;                           // where p points
+}
+
+fn main() {}

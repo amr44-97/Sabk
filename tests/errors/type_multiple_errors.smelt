@@ -1,0 +1,5 @@
+fn f() -> i32 {
+    let a: u8 = 256;
+    let b: bool = 1;
+    if (a) {}
+}

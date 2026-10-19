@@ -1,0 +1,27 @@
+[error]: a constant can't be a growable array: its elements are allocated; make it a variable, or a constant array (`const WORDS = .[...];`) at [tests/errors/growable_arrays.smelt:4:7]
+     4 | const WORDS: [..]string = .["a"];  // a constant would own heap memory
+       |       ^
+[error]: a growable array can't hold `void` at [tests/errors/growable_arrays.smelt:5:16]
+     5 | let empty: [..]void;               // nothing to hold
+       |                ^
+[error]: a growable array's elements are allocated, so a literal can't be one; copy it into one with `array_of(.[1, 2, 3])` (std/array) at [tests/errors/growable_arrays.smelt:8:22]
+     8 |     let a: [..]i64 = .[1, 2, 3];   // a literal would allocate: array_of
+       |                      ^
+[error]: can't iterate over a pointer; to iterate over the array it points at, write `p.*` at [tests/errors/growable_arrays.smelt:9:15]
+     9 |     for (x in p) {}                // a pointer: p.*
+       |               ^
+[error]: expected `string`, found `[..]i64` at [tests/errors/growable_arrays.smelt:10:21]
+    10 |     let s: string = xs;            // not text
+       |                     ^
+[error]: expected `[]u8`, found `[..]i64` at [tests/errors/growable_arrays.smelt:11:19]
+    11 |     let b: []u8 = xs;              // a view keeps the element type
+       |                   ^
+[error]: expected `isize`, found `untyped string` at [tests/errors/growable_arrays.smelt:12:14]
+    12 |     xs.cap = "big";                // the fields keep their types
+       |              ^
+[error]: `p` is a pointer to a `[..]i64`, so this would step over whole arrays; for its elements write `p.*[0]`, or `(p + 0).*` to step the pointer at [tests/errors/growable_arrays.smelt:13:14]
+    13 |     let n = p[0];                  // whole arrays: p.*[0] for an element
+       |              ^
+[error]: `p` is a pointer to a `[..]i64`, so this would step over whole arrays; for its elements write `p.*[0]`, or `(p + 0).*` to step the pointer at [tests/errors/growable_arrays.smelt:14:19]
+    14 |     let m: i64 = p[0];
+       |                   ^

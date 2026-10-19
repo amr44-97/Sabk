@@ -1,0 +1,12 @@
+[error]: `save` is `#nodiscard`, and this drops its `SaveError`; use it, or drop it on purpose with `_ = save(...);` at [tests/errors/nodiscard.smelt:10:5]
+    10 |     save();                              // dropped
+       |     ^
+[error]: `counts` is `#nodiscard`, and this drops its results; use them, or drop them on purpose with `_ = counts(...);` at [tests/errors/nodiscard.smelt:12:5]
+    12 |     counts();                            // both results
+       |     ^
+[error]: `twice` is `#nodiscard`, and this drops its `i64`; use it, or drop it on purpose with `_ = twice(...);` at [tests/errors/nodiscard.smelt:13:5]
+    13 |     twice(2);                            // a macro too
+       |     ^
+[error]: `save` is `#nodiscard`, and this drops its `SaveError`; use it, or drop it on purpose with `_ = save(...);` at [tests/errors/nodiscard.smelt:14:11]
+    14 |     defer save();                        // in a defer
+       |           ^

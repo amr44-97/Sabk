@@ -1,0 +1,3 @@
+[error]: shifting a `u8` by 8 bits always gives 0 at [tests/errors/type_shift_too_far.smelt:1:28]
+     1 | fn f(x: u8) { let y = x << 8; }
+       |                            ^

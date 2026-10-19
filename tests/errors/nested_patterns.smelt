@@ -1,0 +1,57 @@
+// what Maranget's check finds: a value no case handles, and cases that
+// can't be reached; and mistakes inside patterns
+enum Op { Add, Mul }
+enum Expr {
+    Number(i64),
+    Binary(op: Op, lhs: *Expr, rhs: *Expr),
+    Negate(*Expr),
+    Nil,
+}
+
+fn missing_nested(e: Expr) -> i64 {
+    return switch (e) {                     // .Negate(.Negate(_)) isn't handled
+    case .Number(_): 1;
+    case .Binary(_): 2;
+    case .Negate(.Number(_)): 3;
+    case .Negate(.Binary(_)): 4;
+    case .Negate(.Nil): 5;
+    case .Nil: 6;
+    };
+}
+
+fn missing_field(e: Expr) -> i64 {
+    return switch (e) {                     // .Binary{op: .Add} isn't handled
+    case .Number(_): 1;
+    case .Binary{op: .Mul}: 2;
+    case .Negate(_), .Nil: 3;
+    };
+}
+
+fn guarded_only(e: Expr) -> i64 {
+    return switch (e) {                     // a guard doesn't cover .Number
+    case .Number(n) if (n > 0): 1;
+    case .Binary(_), .Negate(_), .Nil: 2;
+    };
+}
+
+fn unreachable(e: Expr) {
+    switch (e) {
+    case .Number(_): {}
+    case .Number(0): {}                     // can't be reached
+    case .Negate(x): {}
+    case .Negate(.Nil): {}                  // can't be reached
+    case .Binary{op: .Mul}: {}
+    case .Binary{op: .Mul, lhs: .Nil}: {}   // can't be reached
+    default: {}
+    }
+}
+
+fn bad(e: Expr, k: i64) {
+    switch (e) {
+    case .Number(n) if (k): {}              // a guard needs a bool
+    case .Binary{op: .Sub}: {}              // no such Op
+    case .Binary{nope: .Mul}: {}            // no such field
+    case .Negate(.Number("x")): {}          // not an i64
+    default: {}
+    }
+}

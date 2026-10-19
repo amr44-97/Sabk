@@ -1,0 +1,7 @@
+struct V { x: f32; }
+fn f(v: V, p: *V, s: []u8) {
+    let a = v.y;
+    let b = p.z;
+    let c = s.cap;
+    let d = V.{ .w = 1.0 };
+}

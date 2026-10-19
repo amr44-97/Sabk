@@ -1,0 +1,3 @@
+[error]: `+` needs numbers, found `bool` at [tests/errors/sizeof_value.smelt:3:22]
+     3 |     let b = sizeof(1 + true);               // still type-checked
+       |                      ^

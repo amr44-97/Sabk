@@ -1,0 +1,7 @@
+// a global starts as its defaults at no cost, so it can't be `---`
+let counter: i32 = ---;
+let buffer: [64]u8 = ---;
+
+fn main() {
+    let fine: [64]u8 = ---;                 // a local can
+}

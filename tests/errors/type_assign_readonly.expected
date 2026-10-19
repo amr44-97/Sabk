@@ -1,0 +1,15 @@
+[error]: can't assign to this: `K` is a constant at [tests/errors/type_assign_readonly.smelt:4:7]
+     4 |     K = 2;
+       |       ^
+[error]: can't assign to this: the loop variable `i` is read-only at [tests/errors/type_assign_readonly.smelt:5:25]
+     5 |     for (i in 0..3) { i = 5; }
+       |                         ^
+[error]: can't assign to this: it's a temporary value at [tests/errors/type_assign_readonly.smelt:6:9]
+     6 |     g() = 1;
+       |         ^
+[error]: can't assign to this: `len` is read-only at [tests/errors/type_assign_readonly.smelt:7:11]
+     7 |     s.len = 0;
+       |           ^
+[error]: can't assign to this: `g` is a function at [tests/errors/type_assign_readonly.smelt:8:7]
+     8 |     g = f;
+       |       ^

@@ -1,0 +1,4 @@
+// generated code can't add imports
+#insert "import \"std/io\";";
+
+fn main() {}

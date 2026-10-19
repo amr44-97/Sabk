@@ -1,0 +1,3 @@
+[error]: the constant 10000000000000000000 doesn't fit in `isize`, the default integer type; give it a type: `let x: u64 = ...` at [tests/errors/type_default_too_big.smelt:1:18]
+     1 | fn f() { let x = 10000000000000000000; }
+       |                  ^

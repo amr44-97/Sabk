@@ -1,0 +1,44 @@
+// what or_return and or_else need
+enum Fail { None, Bad }
+enum NoZero { A = 1, B = 2 }
+enum Other { None, Worse }
+
+fn get() -> (i64, Fail) { return 1, .None; }
+fn get_other() -> (i64, Other) { return 1, .None; }
+fn count() -> (i64, i64) { return 1, 2; }
+fn no_zero() -> (i64, NoZero) { return 1, .A; }
+fn three() -> (i64, i64, bool) { return 1, 2, true; }
+fn one() -> i64 { return 1; }
+
+fn returns_nothing() {
+    let x = get() or_return;              // nowhere to return the Fail
+}
+
+fn returns_bool() -> bool {
+    let x = get() or_return;              // Fail isn't bool
+    return true;
+}
+
+fn returns_other() -> (i64, Fail) {
+    let x = get_other() or_return;        // Other isn't Fail
+    let y = count() or_return;            // i64 says nothing about failing
+    let z = no_zero() or_return;          // NoZero has no 0
+    return x, .None;
+}
+
+fn main() {
+    let a = three() or_else 0;            // or_else takes two values
+    let b = one() or_else 0;              // and one isn't two
+    let c = get() or_else "text";         // the fallback is the value's type
+    let d = #run get() or_return;         // not in a #run
+    let o: ?i64;
+    let e = o or_else "text";             // a ?i64's fallback is an i64
+    let p: *i64;
+    let f = p or_else 5;                  // a pointer's is a pointer
+    let g = mine() or_else 0;             // only the prelude's Option, ?T
+    let h = maybe() or_return;            // or_return takes failures only
+}
+
+enum Option($T) { Some(T), None }         // a module's own Option
+fn mine() -> Option(i64) { return .None; }
+fn maybe() -> ?i64 { return .None; }

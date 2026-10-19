@@ -1,0 +1,35 @@
+// a #format function's format is checked against its values when the
+// compiler can see it
+import "std/io";
+import "std/fmt";
+
+const ROW = "% | %";
+
+fn log(level: string, fmt: string, args: ..Any) #format {
+    print("[%] ", level);
+    println(fmt, ..args);                 // passed on: checked at log's calls
+}
+
+fn not_format(x: i32) #format {}          // must end with fmt and ..Any
+
+fn main() {
+    println("% and %", 1);                // too few values
+    println("%", 1, 2);                   // too many
+    println(ROW, 1);                      // a constant format too
+    println("x = %{zz}", 1);              // not a spec
+    println("x = %{.}", 1);
+    println("x = %{5.2q}", 1);
+    println("%{x} %{e}", "text", true);   // kinds that don't fit
+    log("info", "% %", 1);                // through a wrapper
+    let s = format("%{x}", 2.5);
+    let buf: [..]u8;
+    print_to(&buf, "% %", 1);             // onto a [..]u8
+
+    // fine: no values prints as it is; %% and an unclosed %{ are text;
+    // kinds apply inside structs; formats known only at run time
+    println("100% sure, %{ yes");
+    println("%% % %{x} %{.2} %{e}", 1, 255, 1.5, 2);
+    println("%{x}", i32.[10, 11]);
+    let runtime = "% %";
+    println(runtime, 1);
+}

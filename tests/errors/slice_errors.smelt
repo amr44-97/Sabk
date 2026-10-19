@@ -1,0 +1,11 @@
+const TABLE = i32.[1, 2, 3];
+fn f(p: *i32, r: *void, x: i32, s: []u8, arr: [4]u8) {
+    let a = p[1..];
+    let b = r[0..2];
+    let c = x[0..1];
+    let d = s[3..1];
+    let e = arr[2..5];
+    let g = s[-1..];
+    let h = TABLE[0..2];      // fine: a constant array can be sliced
+    let k = s[0.5..];
+}

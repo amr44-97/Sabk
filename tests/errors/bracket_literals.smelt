@@ -1,0 +1,17 @@
+// .[a, b] needs something to say what it holds, elements that agree, and
+// rows of one length; an array literal fills the whole array
+struct Point { x: i64; }
+
+fn f(s: []i64) {
+    let e = .[];                   // nothing says what it holds
+    let c = .[.{ .x = 1 }];        // only elements typed by it
+    let d = .[1, "x"];             // the elements don't agree
+    let r = .[.[1, 2], .[3]];      // rows of different lengths
+    let n = .[null, null];         // nulls of no type
+    let p: Point = .[1];           // not an array or slice
+    let o: [2]i64 = .{1, 2};       // arrays are written .[1, 2]
+    let ok = .[s, .[1, 2]];        // a row agrees with a slice: [2][]i64
+    let few: [5]i32 = .[1, 2, 3];  // the rest isn't zero: it's an error
+    let none: [2]i32 = .[];
+    let many = i64.[1, "x"];       // T.[ checks each element
+}

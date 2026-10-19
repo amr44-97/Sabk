@@ -1,0 +1,39 @@
+[error]: a `#format` function ends with a format and its values: `fmt: string, args: ..Any` at [tests/errors/format_check.smelt:13:4]
+    13 | fn not_format(x: i32) #format {}          // must end with fmt and ..Any
+       |    ^
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:16:20]
+    16 |     println("% and %", 1);                // too few values
+       |                    ^
+[error]: this value has no `%` in the format: it has 1 `%`, for 2 values at [tests/errors/format_check.smelt:17:21]
+    17 |     println("%", 1, 2);                   // too many
+       |                     ^
+[note]: the format at [tests/errors/format_check.smelt:17:13]
+    17 |     println("%", 1, 2);                   // too many
+       |             ^
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:18:13]
+    18 |     println(ROW, 1);                      // a constant format too
+       |             ^
+[error]: `%{zz}` isn't a format: `z` isn't a kind; the kinds are x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:19:18]
+    19 |     println("x = %{zz}", 1);              // not a spec
+       |                  ^
+[error]: `%{.}` isn't a format: a `.` needs the precision's digits after it at [tests/errors/format_check.smelt:20:18]
+    20 |     println("x = %{.}", 1);
+       |                  ^
+[error]: `%{5.2q}` isn't a format: `q` isn't a kind; the kinds are x X b o (integers), e f (floats) and c (a u8) at [tests/errors/format_check.smelt:21:18]
+    21 |     println("x = %{5.2q}", 1);
+       |                  ^
+[error]: `%{x}` formats an integer, but its value is `string` at [tests/errors/format_check.smelt:22:14]
+    22 |     println("%{x} %{e}", "text", true);   // kinds that don't fit
+       |              ^
+[error]: `%{e}` formats a number, but its value is `bool` at [tests/errors/format_check.smelt:22:19]
+    22 |     println("%{x} %{e}", "text", true);   // kinds that don't fit
+       |                   ^
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:23:20]
+    23 |     log("info", "% %", 1);                // through a wrapper
+       |                    ^
+[error]: `%{x}` formats an integer, but its value is `f64` at [tests/errors/format_check.smelt:24:21]
+    24 |     let s = format("%{x}", 2.5);
+       |                     ^
+[error]: this `%` has no value: the format has 2 `%`s, but 1 value is given at [tests/errors/format_check.smelt:26:23]
+    26 |     print_to(&buf, "% %", 1);             // onto a [..]u8
+       |                       ^

@@ -1,0 +1,3 @@
+struct A { b: B; }
+struct B { a: A; }
+struct C { c: C; }

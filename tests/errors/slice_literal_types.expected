@@ -1,0 +1,6 @@
+[error]: expected `i32`, found `untyped string` at [tests/errors/slice_literal_types.smelt:2:25]
+     2 |     let a: []i32 = .[1, "two"];
+       |                         ^
+[error]: the constant 256 doesn't fit in `u8` at [tests/errors/slice_literal_types.smelt:3:26]
+     3 |     let b: []u8 = .[255, 256];
+       |                          ^

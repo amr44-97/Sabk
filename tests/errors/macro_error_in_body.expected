@@ -1,0 +1,6 @@
+[error]: expected `[]u8`, found `i32` at [tests/errors/lib/badmacro.smelt:2:19]
+     2 |     let s: []u8 = x;
+       |                   ^
+[note]: in the expansion of `broken` here at [tests/errors/macro_error_in_body.smelt:3:14]
+     3 |     badmacro.broken(1);
+       |              ^

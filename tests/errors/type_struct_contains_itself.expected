@@ -1,0 +1,6 @@
+[error]: `A` contains itself, so it would be infinitely large; use a pointer instead at [tests/errors/type_struct_contains_itself.smelt:1:8]
+     1 | struct A { b: B; }
+       |        ^
+[error]: `C` contains itself, so it would be infinitely large; use a pointer instead at [tests/errors/type_struct_contains_itself.smelt:3:8]
+     3 | struct C { c: C; }
+       |        ^

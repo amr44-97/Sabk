@@ -1,0 +1,20 @@
+// if expressions, labeled blocks and switch expressions that give values:
+// what the type checker refuses
+import "std/io";
+enum E { A, B }
+
+fn f(x: i64, e: E) -> i64 {
+    let a = if (x) 1 else 2;               // not a bool
+    let b = if (x > 0) 1 else "one";       // the values don't agree
+    let c = blk: {                          // can reach its end
+        if (x > 0) break blk = 1;
+    };
+    let d = only: { return 5; };            // never gives a value
+    let g = sw: switch (e) {
+    case .A: 1;
+    case .B:
+        println("b");                       // falls off the end
+    };
+    let h = mixed: { if (x > 0) break mixed = 1; break mixed = "two"; };
+    return 0;
+}

@@ -493,6 +493,21 @@ pub fn children(n: *Node) -> [..]*Node {
     return out;
 }
 
+// `n`'s children without a declaration's written type (lhs, rhs, extra,
+// then the list): what walks over code look at
+pub fn code_children(n: *Node) -> [..]*Node {
+    let s = old_shape(n);
+    let out: [..]*Node;
+    out.allocator = context.temp_allocator;
+    for (c in .[s.lhs, s.rhs, s.extra])
+        if (c != null)
+            array_add(&out, c);
+    for (c in s.list)
+        if (c != null)
+            array_add(&out, c);
+    return out;
+}
+
 // a string's text as a literal, escaped: what #text and #location make
 pub fn quote_string(bytes: string) -> string {
     let out: [..]u8;

@@ -1,0 +1,10 @@
+// generic enums need their types
+enum Option($T) { Some(T), None }
+enum Plain($T) { A, B }                  // nothing uses T
+
+fn f() {
+    let a = Option.None;                 // which Option?
+    let b = Option.Some(1);
+}
+
+fn main() {}

@@ -1,0 +1,17 @@
+// mistakes with strings
+fn takes_text(s: string) {}
+fn takes_bytes(b: []u8) {}
+
+fn main() {
+    let bytes = new([]u8, 4);
+    let text = "abc";
+    takes_bytes(text);                   // text to bytes: convert with as
+    let same = bytes == bytes;           // bytes have no ==
+    let name = "x";
+    switch (text) {
+    case "a":
+    case "a":                            // twice
+    case name:                           // not known at compile time
+    }
+    let ordered = text < "b";            // only == and !=
+}

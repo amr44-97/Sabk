@@ -1,0 +1,8 @@
+fn show(x: $T) -> i32 {
+    #if (T == f64) return x;              // checked only for T = f64
+    else return 0;
+}
+fn f() {
+    let a = show(1);
+    let b = show(2.5);
+}

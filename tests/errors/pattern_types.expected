@@ -1,0 +1,27 @@
+[error]: a range in a pattern needs integers (or characters), not `Color` at [tests/errors/pattern_types.smelt:7:14]
+     7 |     case .Red..=.Green:                   // ranges need integers
+       |              ^
+[error]: this range is empty; `..` leaves its end out, `..=` includes it at [tests/errors/pattern_types.smelt:11:11]
+    11 |     case 5..5:                            // empty: .. leaves 5 out
+       |           ^
+[error]: this case overlaps an earlier one at [tests/errors/pattern_types.smelt:13:11]
+    13 |     case 8..=12:                          // overlaps
+       |           ^
+[note]: it's first handled here at [tests/errors/pattern_types.smelt:12:11]
+    12 |     case 1..=10:
+       |           ^
+[error]: `.Rect` has no field `depth` at [tests/errors/pattern_types.smelt:17:19]
+    17 |     case .Rect{w, depth}:                 // no such field
+       |                   ^
+[error]: `.Circle` holds a `f64`, which has no fields; name it with `.Circle(x)` at [tests/errors/pattern_types.smelt:18:10]
+    18 |     case .Circle{r}:                      // an f64 has no fields
+       |          ^
+[error]: a switch expression needs a `default`: there's no case for every `i32` at [tests/errors/pattern_types.smelt:21:13]
+    21 |     let p = switch (n) { case 1: 10; };   // needs a default
+       |             ^
+[error]: expected `isize`, found `untyped string` at [tests/errors/pattern_types.smelt:22:52]
+    22 |     let q = switch (word) { case "a": 1; case "b": "two"; default: 0; };
+       |                                                    ^
+[error]: `&r` points into the switch value, which must be a variable: it's a temporary value at [tests/errors/pattern_types.smelt:25:19]
+    25 |     case .Circle(&r): continue s2 = .Dot; // a continued switch is a copy
+       |                   ^

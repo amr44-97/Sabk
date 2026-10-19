@@ -1,0 +1,7 @@
+const K = 1;
+fn g() {}
+fn f() {
+    let a = &K;
+    let b = &g;
+    let c = &(1 + 2);
+}

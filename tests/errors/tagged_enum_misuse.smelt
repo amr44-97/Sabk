@@ -1,0 +1,29 @@
+// mistakes with tagged enums
+enum Expr { Number(i64), Pair(a: i32, b: i32), Nil }
+enum Other { Number(i64) }
+enum Color { Red }
+
+fn misuse(e: Expr) {
+    let a = Expr.Number;                 // holds a value: give it
+    let b = Expr.Nil(1);                 // holds nothing
+    let c = Expr.Pair(1);                // b has no default
+    let d = Expr.Number(1, 2);
+    let f = e.payload;                   // only .tag
+    e.tag = .Nil;                        // read-only
+    let g: Expr = .{ };
+    switch (e) {
+    case .Nil(z):                        // nothing to bind
+    case Other.Number(n):                // another enum's variant
+    default:
+    }
+    switch (Expr.Number(1)) {
+    case .Number(&n):                    // &n needs a variable
+    default:
+    }
+    let color = Color.Red;
+    switch (color) {
+    case .Red(x):                        // plain enums hold nothing
+    }
+}
+
+fn main() {}

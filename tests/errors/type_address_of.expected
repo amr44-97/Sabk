@@ -1,0 +1,9 @@
+[error]: can't take the address of this: `K` is a constant at [tests/errors/type_address_of.smelt:4:13]
+     4 |     let a = &K;
+       |             ^
+[error]: a function is already a pointer, use `g` without `&` at [tests/errors/type_address_of.smelt:5:13]
+     5 |     let b = &g;
+       |             ^
+[error]: can't take the address of this: it's a temporary value at [tests/errors/type_address_of.smelt:6:13]
+     6 |     let c = &(1 + 2);
+       |             ^

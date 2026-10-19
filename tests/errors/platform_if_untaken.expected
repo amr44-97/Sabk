@@ -1,0 +1,18 @@
+[error]: `exotic_sleep` isn't part of the program: it's declared in a branch of a top-level `#if` that isn't taken at [tests/errors/platform_if_untaken.smelt:9:5]
+     9 |     exotic_sleep(1);
+       |     ^
+[note]: the condition `POINTER_SIZE == 3` picks another branch at [tests/errors/platform_if_untaken.smelt:2:19]
+     2 | #if (POINTER_SIZE == 3) {
+       |                   ^
+[error]: `Exotic` isn't part of the program: it's declared in a branch of a top-level `#if` that isn't taken at [tests/errors/platform_if_untaken.smelt:10:12]
+    10 |     let e: Exotic;
+       |            ^
+[note]: the condition `POINTER_SIZE == 3` picks another branch at [tests/errors/platform_if_untaken.smelt:2:19]
+     2 | #if (POINTER_SIZE == 3) {
+       |                   ^
+[error]: `EXOTIC_PAGE` isn't part of the program: it's declared in a branch of a top-level `#if` that isn't taken at [tests/errors/platform_if_untaken.smelt:11:16]
+    11 |     let page = EXOTIC_PAGE;
+       |                ^
+[note]: the condition `POINTER_SIZE == 3` picks another branch at [tests/errors/platform_if_untaken.smelt:2:19]
+     2 | #if (POINTER_SIZE == 3) {
+       |                   ^

@@ -1,0 +1,4 @@
+fn pick(flag: bool) -> i32 #expand {
+    if (flag) return 1;
+}
+fn f() { let x = pick(true); }

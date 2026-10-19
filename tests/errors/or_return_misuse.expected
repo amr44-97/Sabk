@@ -1,0 +1,39 @@
+[error]: `or_return` returns `Fail` from `returns_nothing`, but `returns_nothing` doesn't return anything; to pass failures of any type on, make it `Error` at [tests/errors/or_return_misuse.smelt:14:19]
+    14 |     let x = get() or_return;              // nowhere to return the Fail
+       |                   ^
+[error]: `or_return` returns `Fail` from `returns_bool`, but `returns_bool`'s result is `bool` at [tests/errors/or_return_misuse.smelt:18:19]
+    18 |     let x = get() or_return;              // Fail isn't bool
+       |                   ^
+[error]: `or_return` returns `Other` from `returns_other`, but `returns_other`'s last result is `Fail`; to pass failures of any type on, make its last result `Error` at [tests/errors/or_return_misuse.smelt:23:25]
+    23 |     let x = get_other() or_return;        // Other isn't Fail
+       |                         ^
+[error]: `or_return` needs the last value to say whether it failed: a `bool` (false: it failed) or an enum (anything but its 0: it failed); found `i64` at [tests/errors/or_return_misuse.smelt:24:21]
+    24 |     let y = count() or_return;            // i64 says nothing about failing
+       |                     ^
+[error]: `or_return` treats `NoZero`'s 0 as success, but `NoZero` has no variant equal to 0; add one first, like `None` at [tests/errors/or_return_misuse.smelt:25:23]
+    25 |     let z = no_zero() or_return;          // NoZero has no 0
+       |                       ^
+[error]: `or_else` needs an option (`?T`), a pointer, or a value and whether it's valid (two values, like `get_env("HOME") or_else "/"`); `three` gives 3 values at [tests/errors/or_return_misuse.smelt:30:21]
+    30 |     let a = three() or_else 0;            // or_else takes two values
+       |                     ^
+[error]: `or_else` needs an option (`?T`), a pointer, or a value and whether it's valid (two values, like `get_env("HOME") or_else "/"`); `one` gives one value, `i64` at [tests/errors/or_return_misuse.smelt:31:19]
+    31 |     let b = one() or_else 0;              // and one isn't two
+       |                   ^
+[error]: expected `i64`, found `untyped string` at [tests/errors/or_return_misuse.smelt:32:27]
+    32 |     let c = get() or_else "text";         // the fallback is the value's type
+       |                           ^
+[error]: `or_return` can only be used in a function's body at [tests/errors/or_return_misuse.smelt:33:24]
+    33 |     let d = #run get() or_return;         // not in a #run
+       |                        ^
+[error]: expected `i64`, found `untyped string` at [tests/errors/or_return_misuse.smelt:35:23]
+    35 |     let e = o or_else "text";             // a ?i64's fallback is an i64
+       |                       ^
+[error]: expected `*i64`, found `untyped int` at [tests/errors/or_return_misuse.smelt:37:23]
+    37 |     let f = p or_else 5;                  // a pointer's is a pointer
+       |                       ^
+[error]: `or_else` needs an option (`?T`), a pointer, or a value and whether it's valid (two values, like `get_env("HOME") or_else "/"`); `mine` gives one value, `Option(i64)` at [tests/errors/or_return_misuse.smelt:38:20]
+    38 |     let g = mine() or_else 0;             // only the prelude's Option, ?T
+       |                    ^
+[error]: `or_return` needs the last value to say whether it failed: a `bool` (false: it failed) or an enum (anything but its 0: it failed); found `?i64`; a missing value isn't a failure: give a fallback with `or_else`, or match it with `is .Some(x)` at [tests/errors/or_return_misuse.smelt:39:21]
+    39 |     let h = maybe() or_return;            // or_return takes failures only
+       |                     ^

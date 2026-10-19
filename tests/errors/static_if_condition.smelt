@@ -1,0 +1,6 @@
+fn pick(x: $T, flag: bool) -> i32 {
+    #if (flag) return 1;                  // not known at compile time
+    #if (sizeof(T)) return 2;             // not a bool
+    return 0;
+}
+fn f() { let a = pick(5, true); }

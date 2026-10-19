@@ -1,0 +1,17 @@
+// an array used as a slice is a view of it, so a local one can't leave
+// the function that way, and neither can a temporary's copy
+fn three() -> [3]i64 { return .[1, 2, 3]; }
+
+fn local_view() -> []i64 {
+    let a: [3]i64 = .[1, 2, 3];
+    return a;
+}
+
+fn temporary_view() -> []i64 { return three(); }
+
+let kept: []i64;
+fn store(p: Point) { kept = p.cells; }
+struct Point { cells: [2]i64; }
+
+const DAYS = .["mon", "tue"];
+fn days() -> []string { return DAYS; }   // fine: a constant lives forever

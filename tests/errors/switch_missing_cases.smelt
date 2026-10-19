@@ -1,0 +1,35 @@
+// a switch on an enum without `default` must handle every variant
+enum Color { Red, Green, Blue }
+enum Big { A, B, C, D, E, F, G, H }
+enum Same { One = 1, Uno = 1, Two }      // equal values count once
+
+fn name(c: Color) -> i32 {
+    switch (c) {
+    case .Red: return 1;
+    case .Green: return 2;
+    }                                    // no "can reach the end" as well
+}
+
+fn many(b: Big) {
+    switch (b) {
+    case .A:
+    }
+}
+
+fn same(s: Same) {
+    switch (s) {
+    case .One:
+    }
+}
+
+fn fine(c: Color, n: i32) {
+    switch (c) {
+    case .Red:
+    default:
+    }
+    switch (n) {                         // integers don't need every value
+    case 1:
+    }
+}
+
+fn main() {}

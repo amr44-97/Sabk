@@ -1,0 +1,33 @@
+[error]: `Expr.Number` holds a value of type `i64`; write `Expr.Number(...)`. To test which variant a value is, compare its `.tag` with `.Number` at [tests/errors/tagged_enum_misuse.smelt:7:18]
+     7 |     let a = Expr.Number;                 // holds a value: give it
+       |                  ^
+[error]: `Expr.Nil` holds no value, so it takes no arguments; write `Expr.Nil` at [tests/errors/tagged_enum_misuse.smelt:8:21]
+     8 |     let b = Expr.Nil(1);                 // holds nothing
+       |                     ^
+[error]: `Expr.Pair` has 2 fields, found 1 value at [tests/errors/tagged_enum_misuse.smelt:9:22]
+     9 |     let c = Expr.Pair(1);                // b has no default
+       |                      ^
+[error]: `Expr.Number` holds one `i64`, found 2 values at [tests/errors/tagged_enum_misuse.smelt:10:24]
+    10 |     let d = Expr.Number(1, 2);
+       |                        ^
+[error]: `Expr` is a tagged enum: its only field is `tag`. A variant's value comes from a `switch`, with `case .Number(x):` at [tests/errors/tagged_enum_misuse.smelt:11:15]
+    11 |     let f = e.payload;                   // only .tag
+       |               ^
+[error]: can't assign to this: `tag` is read-only at [tests/errors/tagged_enum_misuse.smelt:12:11]
+    12 |     e.tag = .Nil;                        // read-only
+       |           ^
+[error]: `Expr` is a tagged enum: make a value with one of its variants, like `Expr.Number(...)` at [tests/errors/tagged_enum_misuse.smelt:13:19]
+    13 |     let g: Expr = .{ };
+       |                   ^
+[error]: `.Nil` holds no value to bind at [tests/errors/tagged_enum_misuse.smelt:15:15]
+    15 |     case .Nil(z):                        // nothing to bind
+       |               ^
+[error]: `Other.Number` isn't a variant of `Expr` at [tests/errors/tagged_enum_misuse.smelt:16:16]
+    16 |     case Other.Number(n):                // another enum's variant
+       |                ^
+[error]: `&n` points into the switch value, which must be a variable: it's a temporary value at [tests/errors/tagged_enum_misuse.smelt:20:19]
+    20 |     case .Number(&n):                    // &n needs a variable
+       |                   ^
+[error]: only a tagged enum's variants hold values to bind; `Color` isn't one at [tests/errors/tagged_enum_misuse.smelt:25:15]
+    25 |     case .Red(x):                        // plain enums hold nothing
+       |               ^

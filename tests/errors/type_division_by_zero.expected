@@ -1,0 +1,3 @@
+[error]: division by zero at [tests/errors/type_division_by_zero.smelt:1:16]
+     1 | const X = 10 / 0;
+       |                ^

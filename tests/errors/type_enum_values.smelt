@@ -1,0 +1,4 @@
+fn n() -> i32 { return 1; }
+enum A: u8 { X = 255, Y }
+enum B { X = n() }
+enum C: f32 { X }
