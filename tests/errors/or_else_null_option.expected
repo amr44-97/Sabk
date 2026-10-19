@@ -1,0 +1,24 @@
+[error]: `null` is a null pointer, not an Option's None: here it's an empty `string` (what `read_file` gives), so on a failure this `?string` is `.Some("")`, never `.None` at [tests/errors/or_else_null_option.sabk:12:45]
+    12 |     let b: ?string = read_file("x") or_else null;     // .Some("")
+       |                                             ^
+[note]: for `.None` on a failure, take the failure and check it: `let x, err = read_file(...);` at [tests/errors/or_else_null_option.sabk:12:45]
+    12 |     let b: ?string = read_file("x") or_else null;     // .Some("")
+       |                                             ^
+[error]: `null` is a null pointer, not an Option's None: here it's a null pointer (what `find` gives), so when `find` gives null this `?*i64` is `.Some(null)`, never `.None` at [tests/errors/or_else_null_option.sabk:14:42]
+    14 |     let p: ?*i64 = find(&m, "k") or_else null;        // .Some(null)
+       |                                          ^
+[note]: for `.None` on a failure, take the failure and check it: `let x, err = find(...);` at [tests/errors/or_else_null_option.sabk:14:42]
+    14 |     let p: ?*i64 = find(&m, "k") or_else null;        // .Some(null)
+       |                                          ^
+[error]: `null` is a null pointer, not an Option's None: here it's an empty `string` (what `read_file` gives), so on a failure this `?string` is `.Some("")`, never `.None` at [tests/errors/or_else_null_option.sabk:15:33]
+    15 |     take(read_file("x") or_else null);                // as an argument
+       |                                 ^
+[note]: for `.None` on a failure, take the failure and check it: `let x, err = read_file(...);` at [tests/errors/or_else_null_option.sabk:15:33]
+    15 |     take(read_file("x") or_else null);                // as an argument
+       |                                 ^
+[error]: `null` is a null pointer, not an Option's None: here it's an empty `[]i64` (what `numbers` gives), so on a failure this `?[]i64` is `.Some(.[])`, never `.None` at [tests/errors/or_else_null_option.sabk:16:43]
+    16 |     let n: ?[]i64 = numbers(true) or_else null;       // .Some(.[])
+       |                                           ^
+[note]: for `.None` on a failure, take the failure and check it: `let x, err = numbers(...);` at [tests/errors/or_else_null_option.sabk:16:43]
+    16 |     let n: ?[]i64 = numbers(true) or_else null;       // .Some(.[])
+       |                                           ^

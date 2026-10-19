@@ -110,3 +110,7 @@ deliberately left for later. Newest at the bottom of each list.
   To discuss together: what `null` means, whether `or_else` can produce an
   option, and how simple each rule is to explain (the user wants simple
   and clear).
+
+  Meanwhile (a) is built (Oct 20, 2026): `or_else null` going into a `?T`
+  is an error saying `null` is a null pointer, not an Option's None, and
+  what the `?T` would hold (`.Some("")`, `.Some(null)`, `.Some(.[])`).

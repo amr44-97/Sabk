@@ -2000,6 +2000,11 @@ let workers = parse_int(text) or_else w: {   // run code first: a labeled block
   `let node = map_find(&nodes, key) or_else &fallback;`.
 - `fallback` is only evaluated when it's needed. It can be another
   `or_else`.
+- The result has the value's type, and `fallback` must fit it. So
+  `read_file(p) or_else null` is a `string` (empty, with a null pointer, on
+  a failure), and going into a `?string` it would be `.Some("")`, never
+  `.None`: that's an error, since `null` is a null pointer, not an
+  Option's None. For `.None` on a failure, take the failure and check it.
 - It binds more loosely than any other operator, so a sum needs
   parentheses: `(parse_int(s) or_else 0) + 1`.
 - The fallback block can `return` instead of giving a value, which is how
