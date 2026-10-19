@@ -22,6 +22,7 @@ switch to them at the bootstrap.
 - [ ] **Results:** `E!T`, `E!void`, `!T` (inferred failure), wrapping, destructuring, `or_return .Replacement` (section 5)
 - [ ] **Dropped failures:** a warning that shows the handling; levels from flags and build options (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
+- [ ] **Function overloading:** one name, several parameter lists; picked by the arguments' types (section 7)
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 
 ## 1. Formatting
@@ -426,14 +427,78 @@ From writing the compiler in Smelt:
 - **Null checks** in checked builds: `file:line: panic: null pointer`, under the same setting as bounds checks (today it's a bare segfault, exit 139).
 - **A message fix**: `K.Let{ ... }` suggests `K.Let.{ ... }`, which then fails with "`Let` is not a struct type".
 
-## 7. How it lands
+## 7. Function overloading
+
+Added Oct 19, 2026, at the user's request. A draft: the open questions at
+the end are to be decided before it's built.
+
+Several functions can share a name when their parameter lists differ, as
+in Jai: `print_value(x: i64)`, `print_value(s: string)`,
+`print_value(p: Point)`. A call picks the one its arguments fit:
+
+```
+fn area(c: Circle) -> f64 { ... }
+fn area(r: Rect) -> f64 { ... }
+fn area(shapes: []Shape) -> f64 { ... }
+
+area(c);                     // the Circle one
+area(.{ .w = 2, .h = 3 });   // error: `.{ }` fits both `Circle` and `Rect`; write the type
+```
+
+**The set.** Every function of that name in scope is a candidate: the
+module's own, and those of its plain imports (`#import` without a name),
+which is how std can add an overload of a user's function and the
+reverse. A qualified call (`io.print`) only sees that module's. Macros
+(`#expand`) and functions don't mix under one name.
+
+**Picking one.** For each candidate whose parameter count fits (counting
+defaults and a `..` parameter), each argument is ranked against its
+parameter:
+1. the same type;
+2. an untyped constant that fits (`5` for an `i32`), or a literal that
+   takes its type from the parameter (`.Red`, `.{...}`, `.[...]`);
+3. an implicit conversion (`i32` to `i64`, `[N]T` to `[]T`, a value to
+   `?T`, to `Any`);
+4. a generic parameter (`$T`).
+The best candidate is better or equal on every argument and better on at
+least one. No best one is an error that lists the ones that fit equally,
+with what each argument would become; none at all lists every candidate
+and says which argument doesn't fit each. Rank 2 makes `f(5)` pick
+`f(x: i64)` over `f(x: f64)` only by the default type of `5` (isize, then
+i64): an untyped constant that fits several ranks them by its default
+type first.
+
+**Not overloaded:**
+- the result type: two functions that differ only in what they return are
+  an error at the second;
+- a function used as a value: `let f = area;` with several `area`s is an
+  error; `let f: fn(Circle) -> f64 = area;` picks one, as generic
+  functions are picked today.
+
+**In C** an overloaded function's name gets its parameter types, as
+generic instances do: `area__Circle`, `area__Rect`, `area__slice__Shape`.
+
+**With the rest of the plan:** `#where` (layer 1) removes a candidate
+whose condition is false, so overloads can split on what a type can do;
+`#caller_location` and notes work per function; error messages name the
+candidate by its signature, not only its name.
+
+Open questions:
+- Overloading across modules (above) or only within one? Across is more
+  useful (std's `print_value` for your type) and more surprising.
+- Operator overloading (`+` for a `Vec2`) is a separate decision; this
+  doesn't include it.
+- Should an exact-type candidate beat a generic one silently (as above),
+  or should the two together be an error?
+
+## 8. How it lands
 
 1. **Port the checker** (next), matching the C++ on existing programs, but built for this plan: a job queue; instances keyed by constant values as well as types; `Option`, `Result` and error enums as rules of the type system; flow facts for narrowing; notes kept on declarations and fields.
 2. **Port the C backend and the VM.**
 3. **Bootstrap**: the compiler compiles itself; std and the compiler move to the new syntax.
-4. **Build the features**, each with tests, in about this order: formatting; error enums, results, wrapping, destructuring, `%w` and the dropped-failure warning; `!is`, checked access and narrowing; `#import`, `#load` and the scopes; layer 1; layer 2; types as values; layer 3; the smaller additions. A feature can start as soon as the phase it needs exists in the new compiler.
+4. **Build the features**, each with tests, in about this order: formatting; error enums, results, wrapping, destructuring, `%w` and the dropped-failure warning; `!is`, checked access and narrowing; `#import`, `#load` and the scopes; function overloading (section 7, after its open questions are decided); layer 1; layer 2; types as values; layer 3; the smaller additions. A feature can start as soon as the phase it needs exists in the new compiler.
 
-## 8. Long term
+## 9. Long term
 
 - **Compile time** is fine for now and stays as it is. Later: better generated C, the choice of C compiler, or our own IR or x64 backend.
 - **Inline assembly**: passed to the C compiler's `__asm__` (cheap, GCC syntax, per CPU), or Jai's `#asm` with the compiler choosing registers (needs our own backend). `#run` can't run either.
