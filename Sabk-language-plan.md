@@ -499,6 +499,66 @@ fn parse_int(s: string) -> i64, ParseError = .None { ... }   // results, in a de
 - Existing code stays valid. Calls, `sizeof(T)` and the like keep their
   parentheses.
 
+#### Edge cases met while building it (built Oct 19, 2026; to review)
+
+1. **A `(` that only starts the condition.** The parser looks past the
+   matching `)`: if an operator, `.`, `[`, `as`, `is`, `!is` or
+   `or_return` follows, the condition goes on and takes a block.
+
+   ```
+   if (a + b) * 2 > c { ... }      // one condition, no parentheses: a block
+   if (a > b) println("no");       // the `(` is the whole condition: any statement
+   if (s) is .Dot { ... }          // goes on: `is`
+   ```
+
+2. **A body that starts with `(`.** A `(` right after the `)` starts the
+   body, never a call of what's in parentheses. Found in the compiler's
+   own code (src/vm.sabk) when it compiled itself; the tests had passed.
+
+   ```
+   if (k == .F32) (p as *f32).* = v as f32;   // the body is `(p as *f32).* = ...`
+   if (get_handler) (x);                       // also a body, not a call of `get_handler`
+   ```
+
+3. **A `{` after a name, in a condition without parentheses, is the
+   body's** (Rust's rule). Three places would otherwise read it as part
+   of the condition:
+
+   ```
+   if x { ... }                  // C's literal `x{ ... }`: an error with a hint before
+   if s !is .Circle { ... }      // the field pattern `.Circle{ r }`
+   if v == K.Let { ... }         // the variant literal `K.Let{ .declared = t }`
+   ```
+
+   Inside parentheses, call arguments and blocks, literals work as usual:
+
+   ```
+   if at_origin(Point.{ .x = 0, .y = 0 }) { ... }
+   if p.x == Point.{ .x = 1, .y = 5 }.x { ... }   // `T.{` is always a literal
+   ```
+
+   The same holds in a `for` header without parentheses (`for x in xs {`)
+   and after `switch` (`switch s {`); the cases' own patterns
+   (`case .Circle{r}:`) are inside the braces and unaffected.
+
+4. **The error shows how the condition was read**, since that's what
+   confuses:
+
+   ```
+   if done -count;
+   [error]: `{` after the condition `done -count`: without parentheses, `if`'s body is a block
+
+   for x in xs total += x;
+   [error]: `{` after the loop header: without parentheses, `for`'s body is a block
+   ```
+
+5. **Left with their parentheses**: the `if` that gives a value
+   (`if (c) a else b`: without them, `if c a else b` has no edge between
+   `c` and `a`), `#if`, a `case` guard (`case .N(n) if (n > 0):`), and a
+   function type's results (`fn(i64) -> (i64, bool)`).
+
+6. **`do ... while`** takes either form: `while i > 0;` ends at the `;`.
+
 ## 7. Function overloading
 
 Added Oct 19, 2026, at the user's request, and decided the same day:
