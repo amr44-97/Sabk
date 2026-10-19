@@ -1,0 +1,9 @@
+// a keyword can name a field, but not a variable: the shorthand that binds
+// a field to its own name needs a name of its own then
+enum Node { Let(type: i32), Nil }
+fn f(n: Node) -> i32 {
+    if (n is .Let{type})
+        return 1;
+    return 0;
+}
+fn main() {}

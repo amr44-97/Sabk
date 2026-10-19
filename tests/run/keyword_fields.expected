@@ -1,0 +1,4 @@
+4 otherwise true {type = 4, else = "otherwise", default = true}
+7 false
+type 7
+[exit 0]

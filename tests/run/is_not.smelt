@@ -1,0 +1,27 @@
+// e !is P: true where e doesn't match P, as !(e is P)
+import "std/io";
+
+enum Shape { Circle(r: f64), Square(side: f64), Dot }
+
+fn area(s: Shape) -> f64 {
+    if (s !is .Circle)
+        return 0.0;
+    return 3.0;
+}
+
+fn main() {
+    let shapes: []Shape = .[.Circle(1.0), .Square(2.0), .Dot];
+    for (s in shapes) {
+        if (s !is .Dot && s !is .Square)
+            println("a circle: %", area(s));
+        else
+            println("not a circle");
+    }
+    let o: ?i32 = .None;
+    if (o !is .Some)
+        println("none");
+    let n = 5;
+    println("%", n !is 3..=4);
+    let b = !(n is 5);
+    println("%", b);
+}

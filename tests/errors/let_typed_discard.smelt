@@ -1,0 +1,4 @@
+// _ declares nothing, so it can't be in a list of names with a type
+fn main() {
+    let a, _: i32;
+}

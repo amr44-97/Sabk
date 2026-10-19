@@ -19,7 +19,13 @@ fi
 # what the language gained since the port (Smelt-language-plan.md)
 known=" tests/resolve/macro_labels.smelt
   tests/errors/format_check.smelt tests/errors/format_directives.smelt
-  tests/errors/log_format.smelt tests/run/format_directives.smelt "
+  tests/errors/log_format.smelt tests/run/format_directives.smelt
+  tests/run/is_not.smelt tests/errors/is_not_bindings.smelt
+  tests/run/keyword_fields.smelt tests/errors/keyword_field_binding.smelt
+  tests/run/for_index.smelt tests/errors/for_index_assign.smelt
+  tests/errors/for_index_twice.smelt tests/errors/for_index_range.smelt
+  tests/run/let_typed.smelt tests/errors/let_typed_discard.smelt
+  tests/errors/parse_let_values_type.smelt "
 
 modes=("$@")
 ((${#modes[@]})) || modes=(--tokens --ast --resolve --types)

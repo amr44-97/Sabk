@@ -1,0 +1,6 @@
+[error]: `x` is already declared in this scope at [tests/errors/for_index_twice.smelt:3:13]
+     3 |     for (x, x in "ab") {}
+       |             ^
+[note]: the first declaration is here at [tests/errors/for_index_twice.smelt:3:10]
+     3 |     for (x, x in "ab") {}
+       |          ^

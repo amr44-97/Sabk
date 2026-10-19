@@ -43,7 +43,7 @@ fn is_local(d: *Node) -> bool {
         return false;
     switch (d.kind.tag) {
     case .Let, .Const, .Binding: return d.owner == null;
-    case .Param, .ForIn: return true;
+    case .Param, .ForIn, .LoopIndex: return true;
     default: return false;
     }
 }

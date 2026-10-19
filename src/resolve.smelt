@@ -1015,8 +1015,17 @@ fn resolve_test(r: *Resolver, n: *Node) {
     }
 }
 
+// `e !is .V`, parsed as a `!` right before its `is`
+fn is_negated_is(n: *Node, operand: *Node) -> bool {
+    return operand.kind.tag == .Is && n.tok.text.ptr + 1 == operand.tok.text.ptr;
+}
+
+// resolve_pattern's `bindings` for the pattern of an `!is`, which can't
+// have any
+const NEGATED: isize = -2;
+
 // A pattern's parts; its bindings go in the scope `bindings` (an index into
-// scopes), when it may have some (-1 when it can't)
+// scopes), when it may have some (-1 when it can't, NEGATED after `!is`)
 fn resolve_pattern(r: *Resolver, p: *Node, bindings: isize) {
     switch (p.kind) {
     case .Range{lo, hi}:
@@ -1031,6 +1040,10 @@ fn resolve_pattern(r: *Resolver, p: *Node, bindings: isize) {
             }
             if (item.tok.text == "_") // binds nothing
                 continue;
+            if (bindings == NEGATED) {
+                error(r, item.tok, "`!is` can't name a variant's value: where it's true, the value isn't that variant; test it with `is` to use its value");
+                return;
+            }
             if (bindings < 0) {
                 error(r, item.tok, "`is` can only name a variant's value in an `if` or `while` condition (joined with `&&`), where it's known to match");
                 return;
@@ -1163,6 +1176,11 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
             error(r, n.tok, "a backtick `let` declares one name at a time");
             return;
         }
+        if (values == null) { // let a, b: T; each a `let a: T;`
+            for (d in names)
+                resolve_stmt(r, d);
+            return;
+        }
         // the values first: `let a, b = b, a;` uses the outer a and b
         resolve_expr(r, values);
         for (d in names)
@@ -1287,12 +1305,14 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
         r.loop_depth--;
         pop_scope(r);
 
-    case .ForIn{iterable, range_end, body}:
+    case .ForIn{iterable, range_end, body, index}:
         resolve_expr(r, iterable);
         if (range_end != null)
             resolve_expr(r, range_end);
         push_scope(r);
         declare(r, top_scope(r), n.tok.text, n); // the loop variable
+        if (index != null)
+            declare(r, top_scope(r), index.tok.text, index);
         r.loop_depth++;
         resolve_body(r, body);
         r.loop_depth--;
@@ -1645,6 +1665,12 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
     case .Is{value, pattern}: // only an if's or while's condition can bind names
         resolve_expr(r, value);
         resolve_pattern(r, pattern, -1);
+
+    case .Unary{op: .Not, operand} if (is_negated_is(n, operand)):
+        if (operand.kind is .Is{value, pattern}) {
+            resolve_expr(r, value);
+            resolve_pattern(r, pattern, NEGATED);
+        }
 
     case .Switch{label, gives_value: true}:
         if (label != null)
@@ -2163,7 +2189,7 @@ fn local_use(n: *Node) -> *Node {
     if ((n.kind.tag == .Identifier || n.kind.tag == .Member) && n.decl != null) {
         let d = n.decl;
         let local = ((d.kind.tag == .Let || d.kind.tag == .Const) && d.owner == null) ||
-                    d.kind.tag == .Param || d.kind.tag == .ForIn;
+                    d.kind.tag == .Param || d.kind.tag == .ForIn || d.kind.tag == .LoopIndex;
         if (local)
             return n;
     }

@@ -1,0 +1,24 @@
+// keywords as field names: in declarations, after `.`, in `.name =`,
+// in variant fields and their patterns; the C gets them with a `_`
+import "std/io";
+
+struct Token {
+    type: i32;
+    else: string;
+    default: bool = true;
+}
+
+enum Node { Let(type: i32, if: bool), Nil }
+
+fn main() {
+    let t = Token.{ .type = 3, .else = "otherwise" };
+    t.type += 1;
+    println("% % % %", t.type, t.else, t.default, t);
+    let n = Node.Let(7, false);
+    switch (n) {
+    case .Let{type: ty, if: cond}: println("% %", ty, cond);
+    case .Nil: println("nil");
+    }
+    if (n is .Let{type: x})
+        println("type %", x);
+}

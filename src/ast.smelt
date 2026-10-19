@@ -90,7 +90,9 @@ pub enum NodeKind {
     While(cond: *Node, body: *Node, label: *Node),
     DoWhile(body: *Node, cond: *Node, label: *Node),
     For(init: *Node, cond: *Node, step: *Node, body: *Node, label: *Node),
-    ForIn(iterable: *Node, range_end: *Node, body: *Node, label: *Node), // tok: the variable
+    ForIn(iterable: *Node, range_end: *Node, body: *Node, label: *Node, // tok: the variable
+          index: *Node = null),              // for (x, i in xs): a LoopIndex
+    LoopIndex,                               // for (x, i in xs)'s i; tok: the name
     Switch(value: *Node, cases: []*Node, label: *Node, gives_value: bool,
            continued: bool = false,    // `continue label = v` runs it again
            complete: bool = false,     // handles every value of its enum
@@ -283,8 +285,13 @@ pub fn old_shape(n: *Node) -> OldShape {
         s.list[0] = f.init;
         s.list[1] = f.cond;
         s.list[2] = f.step;
-    case .ForIn{iterable, range_end, body}:
+    case .ForIn{iterable, range_end, body, index}:
         s.tag = "FOR_IN"; s.lhs = iterable; s.rhs = body; s.extra = range_end;
+        if (index != null) {
+            s.list = new([]*Node, 1);
+            s.list[0] = index;
+        }
+    case .LoopIndex: s.tag = "LOOP_INDEX";
     case .Switch{value, cases, gives_value}:
         s.tag = if (gives_value) "SWITCH_EXPR" else "SWITCH"; s.lhs = value; s.list = cases;
     case .Case{patterns, guard, body}:

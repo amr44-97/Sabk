@@ -86,6 +86,25 @@ fn at_directive(p: *Parser, name: string) -> bool {
     return at(p, .Hash) && peek(p, 1).text == name;
 }
 
+// a keyword can be a field's name: `type`, `else`, `default`
+fn is_keyword_token(kind: TokenKind) -> bool { return (kind as u8) >= (TokenKind.Fn as u8); }
+
+// is the token `k` ahead a name where a field's goes: an identifier, or a
+// keyword
+fn at_field_name(p: *Parser, k: isize = 0) -> bool {
+    let kind = peek(p, k).kind;
+    return kind == .Identifier || is_keyword_token(kind);
+}
+
+// a field's name, a keyword too: then it's a name like any other
+fn field_name(p: *Parser, what: string) -> Token {
+    if (!at_field_name(p))
+        return expect(p, .Identifier, what);
+    let t = next(p);
+    t.kind = .Identifier;
+    return t;
+}
+
 fn describe(t: Token) -> string {
     if (t.kind == .Eof)
         return "end of file";
@@ -385,7 +404,7 @@ fn aggregate(p: *Parser, is_union: bool) -> *Node {
     expect(p, .LBrace, "`{` to start the fields");
     let fields: [..]*Node;
     while (!at(p, .RBrace)) {
-        let field = expect(p, .Identifier, "a field name");
+        let field = field_name(p, "a field name");
         expect(p, .Colon, "`:` and a type after the field name");
         let declared = type_(p);
         let value: *Node = null;
@@ -414,10 +433,10 @@ fn enum_decl(p: *Parser) -> *Node {
         let value: *Node = null;
         if (eat(p, .LParen)) {
             // a payload: Number(i64), or fields: Binary(op: Op, lhs: *Expr)
-            if (at(p, .Identifier) && at(p, .Colon, 1)) {
+            if (at_field_name(p) && at(p, .Colon, 1)) {
                 let list: [..]*Node;
                 while (!at(p, .RParen)) {
-                    let field = expect(p, .Identifier, "a field name");
+                    let field = field_name(p, "a field name");
                     expect(p, .Colon, "`:` and a type after the field name");
                     let declared = type_(p);
                     let field_value: *Node = null;
@@ -475,8 +494,20 @@ fn let_decl(p: *Parser) -> *Node {
         while (eat(p, .Comma))
             array_add(&names, new_node(expect(p, .Identifier, "a variable name"),
                                        .Let(null, null, false, false, false)));
-        if (at(p, .Colon))
-            fail(p, peek(p), "names declared together get their types from the values; to give them types, declare them one at a time");
+        if (eat(p, .Colon)) {
+            // let a, b: T; several names of one type, each starting as
+            // its zero (or defaults)
+            let declared = type_(p);
+            for (i in 0..names.len) {
+                let d = names[i];
+                if (d.tok.text == "_")
+                    fail(p, d.tok, "`_` declares nothing, so it has no place in a list of names with a type");
+                d.kind = .Let(if (i == 0) declared else clone_node(declared, -1), null, false, false, false);
+            }
+            if (at(p, .Equal))
+                fail(p, peek(p), "names declared with a type start as its zero; to give them values, leave out the type (`let a, b = x, y;`) or declare them one at a time");
+            return new_node(name, .LetValues(names, null));
+        }
         expect(p, .Equal, "`=` and the values");
         return new_node(name, .LetValues(names, values(p)));
     }
@@ -733,16 +764,26 @@ fn for_stmt(p: *Parser) -> *Node {
     let t = next(p); // for
     expect(p, .LParen, "`(` after `for`");
 
-    // for (x in xs) / for (i in a..b)
-    if (at(p, .Identifier) && at(p, .In, 1)) {
+    // for (x in xs) / for (x, i in xs), with its index / for (i in a..b)
+    let indexed = at(p, .Identifier) && at(p, .Comma, 1) && at(p, .Identifier, 2) && at(p, .In, 3);
+    if ((at(p, .Identifier) && at(p, .In, 1)) || indexed) {
         let name = next(p);
+        let index: *Node = null;
+        if (indexed) {
+            next(p); // ,
+            index = new_node(next(p), .LoopIndex);
+        }
         next(p); // in
         let iterable = expr(p);
         let range_end: *Node = null;
-        if (eat(p, .Ellipsis2))
+        if (eat(p, .Ellipsis2)) {
             range_end = expr(p);
+            if (index != null)
+                fail(p, index.tok, tformat("a loop over a range takes one name: `%` would only count what `%` counts",
+                                           index.tok.text, name.text));
+        }
         expect(p, .RParen, "`)` after the loop header");
-        return new_node(name, .ForIn(iterable, range_end, stmt(p), null));
+        return new_node(name, .ForIn(iterable, range_end, stmt(p), null, index));
     }
 
     // for (init; cond; step)
@@ -920,12 +961,15 @@ fn variant_fields(p: *Parser, variant: *Node) -> *Node {
     expect(p, .LBrace, "`{`");
     let bindings: [..]*Node;
     while (!at(p, .RBrace)) {
-        if (at(p, .Identifier) && at(p, .Colon, 1)) { // field: name or pattern
-            let field = new_node(next(p), .Identifier);
+        if (at_field_name(p) && at(p, .Colon, 1)) { // field: name or pattern
+            let field = new_node(field_name(p, "a field name"), .Identifier);
             next(p);
             array_add(&bindings, subpattern(p, field));
         } else { // field, or &field: bound to its own name
             let by_ref = eat(p, .Amp);
+            if (is_keyword_token(peek(p).kind))
+                fail(p, peek(p), tformat("`%` is a keyword, so it can't name a variable; write `%: name`",
+                                         peek(p).text, peek(p).text));
             let name = expect(p, .Identifier, "a name for the field");
             let field = new_node(name, .Identifier);
             array_add(&bindings, new_node(name, .Binding(field, by_ref)));
@@ -1002,12 +1046,21 @@ fn binary(p: *Parser, min_prec: isize) -> *Node {
     end_here(p, lhs, begin);
     while (true) {
         let prec = binary_prec(peek(p).kind);
+        // `e !is .V`: not a match, as `!(e is .V)`
+        let negated = at(p, .Bang) && at(p, .Is, 1);
+        if (negated)
+            prec = CMP_PREC;
         if (prec == 0 || prec < min_prec)
             return lhs;
 
+        let bang = if (negated) next(p) else peek(p);
         let op = next(p);
         let n: *Node;
-        if (op.kind == .OrElse) {
+        if (negated) {
+            let test = new_node(op, .Is(lhs, pattern(p, CMP_PREC + 1)));
+            end_here(p, test, begin);
+            n = new_node(bang, .Unary(.Not, test));
+        } else if (op.kind == .OrElse) {
             // right to left: `a() or_else b() or_else c` tries a, then b
             n = new_node(op, .OrElse(lhs, binary(p, prec)));
         } else if (op.kind == .Is) {
@@ -1220,7 +1273,7 @@ fn postfix(p: *Parser) -> *Node {
             } else if (at(p, .Star)) { // p.*: what p points at
                 e = new_node(next(p), .Deref(e));
             } else {
-                e = new_node(expect(p, .Identifier, "a member name after `.`"), .Member(e));
+                e = new_node(field_name(p, "a member name after `.`"), .Member(e));
             }
         case .LBrace:
             // `{` after a name ends the expression (conditions are
@@ -1248,9 +1301,9 @@ fn init_list(p: *Parser, declared: *Node, array: bool) -> *Node {
     let open = expect(p, .LBrace, "`{`");
     let items: [..]*Node;
     while (!at(p, .RBrace)) {
-        if (at(p, .Period) && at(p, .Identifier, 1) && at(p, .Equal, 2)) {
+        if (at(p, .Period) && at_field_name(p, 1) && at(p, .Equal, 2)) {
             next(p); // .
-            let name = next(p);
+            let name = field_name(p, "a field name");
             next(p); // =
             array_add(&items, new_node(name, .FieldInit(expr(p))));
         } else {

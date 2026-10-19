@@ -1,0 +1,9 @@
+// a pattern after !is can't name values: where the test is true, there's
+// no value to name
+enum E { A(x: i32), B }
+fn f(e: E) -> i32 {
+    if (e !is .A(x))
+        return 0;
+    return 1;
+}
+fn main() {}

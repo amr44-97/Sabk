@@ -806,6 +806,8 @@ fn for_in(l: *Lower, n: *Node) {
         len = seq + 8;
     }
     let i = u64_slot(l, 0);
+    if (n.kind is .ForIn{index} && index != null)
+        map_put(&l.locals, index, i); // the count is the index
     let top = here(l);
     let more = alloc_slot(l, 1, 1);
     cmp(l, .U64, .Lt, more, i, len);
@@ -1552,7 +1554,7 @@ fn name(l: *Lower, n: *Node, d: *Node) -> u32 {
             return addr(l, address);
         }
         return addr(l, vm_function_for(l.vm, d));
-    case .Param, .ForIn:
+    case .Param, .ForIn, .LoopIndex:
         fail(l, n.tok, tformat("`#run` can't use `%`: it only exists when the program runs", n.tok.text));
         return 0;
     default:

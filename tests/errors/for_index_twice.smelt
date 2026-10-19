@@ -1,0 +1,4 @@
+// the element and the index are two names in one scope
+fn main() {
+    for (x, x in "ab") {}
+}

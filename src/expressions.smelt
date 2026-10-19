@@ -250,6 +250,8 @@ pub fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
                 why.* = tformat("% is a constant", q(n.tok.text));
             case .ForIn:
                 why.* = tformat("the loop variable % is read-only", q(n.tok.text));
+            case .LoopIndex:
+                why.* = tformat("the loop index % is read-only", q(n.tok.text));
             case .Fn:
                 why.* = tformat("% is a function", q(n.tok.text));
             default:
@@ -753,7 +755,7 @@ pub fn value_of_decl(c: *Checker, n: *Node, d: *Node) -> *Type {
         if (is_template(d))
             return c.types.generic_fn;
         return decl_type(c, d);
-    case .Let, .Param, .ForIn, .Binding:
+    case .Let, .Param, .ForIn, .LoopIndex, .Binding:
         return decl_type(c, d);
     case .Const:
         let t = decl_type(c, d);

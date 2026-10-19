@@ -1,0 +1,4 @@
+// a range's loop variable is the count: no index
+fn main() {
+    for (i, k in 0..4) {}
+}

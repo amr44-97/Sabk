@@ -1045,8 +1045,9 @@ fn emit_for_in(g: *CodeGen, n: *Node) {
     let range_end: *Node = null;
     let body: *Node = null;
     let label: *Node = null;
+    let index: *Node = null;
     if (n.kind is .ForIn(f))
-        iterable, range_end, body, label = f.iterable, f.range_end, f.body, f.label;
+        iterable, range_end, body, label, index = f.iterable, f.range_end, f.body, f.label, f.index;
     let var = var_name(g, n);
     let var_type = c_type(g, n.ty);
     line(g, "{");
@@ -1066,7 +1067,7 @@ fn emit_for_in(g: *CodeGen, n: *Node) {
         // for (x in xs): xs is evaluated once, x is a copy of each element
         let t = iterable.ty;
         let s = tmp(g, "seq");
-        let i = tmp(g, "i");
+        let i = if (index != null) var_name(g, index) else tmp(g, "i"); // the count is the index
         let elem = "";
         let len = "";
         line(g, cat(c_type(g, t), " ", s, " = ", expr(g, iterable), ";"));

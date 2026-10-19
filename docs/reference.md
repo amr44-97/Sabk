@@ -212,7 +212,8 @@ const_decl  = "const" IDENT [ ":" type ] "=" expr ";" ;
 let_decl    = let_binding ";" ;
 let_binding = "let" IDENT [ ":" type ] [ "=" expr ]
             | "let" IDENT ":" type "=" "---"           // a local, left uninitialized
-            | "let" IDENT { "," IDENT } "=" values ;   // let q, r = divide(a, b)
+            | "let" IDENT { "," IDENT } "=" values     // let q, r = divide(a, b)
+            | "let" IDENT { "," IDENT } ":" type ;    // let a, b: i32; in a function
 values      = expr { "," expr } ;
 ```
 
@@ -469,20 +470,23 @@ item        = [ "&" ] IDENT                          // a name for it (`_`: none
   already the default, which covers C's top-level `static`.
 - `for` has two forms. `for (i in a..b)` counts from `a` up to but not
   including `b`. `for (x in xs)` iterates over the elements of an array,
-  slice, growable array or string (its bytes, as `u8`s). The C three-clause
-  form also works. The parser tells them apart by looking for `IDENT "in"`
-  right after `(`.
+  slice, growable array or string (its bytes, as `u8`s), and `for (x, i
+  in xs)` gives each one's index too, an `isize`. The C three-clause form
+  also works. The parser tells them apart by looking for `IDENT "in"` (or
+  `IDENT "," IDENT "in"`) right after `(`.
 
   ```
   for (i in 0..xs.len) total += xs[i];     // i: isize, 0 up to xs.len - 1
   for (x in xs) total += x;                // x: a copy of each element
+  for (x, i in xs) println("% %", i, x);   // ... and its index: 0, 1, ...
   for (c in "abc") print("% ", c);         // 97 98 99
   for (let i = 10; i > 0; i -= 2) { ... }  // C's form
   ```
 
   - The loop variable of `for (x in xs)` is a copy, and can't be assigned
-    or have its address taken. To change the elements, loop over the
-    indexes: `for (i in 0..xs.len) xs[i] *= 2;`.
+    or have its address taken; nor can the index. To change the elements,
+    use the index: `for (x, i in xs) xs[i] = x * 2;`. A range takes one
+    name: `for (i in a..b)` already counts.
   - `xs` is read once, before the first pass. Adding to a growable array
     while looping over it is a [trap](#memory-traps) (12).
 - **`switch` has no implicit fallthrough.** A case runs until the next `case`
@@ -558,7 +562,7 @@ agree; C alone would leave much of this open.
 | 4     | `\|`                               | bit operators and shifts: parentheses next to a different operator |
 | 5     | `^`                                |                             |
 | 6     | `&`                                |                             |
-| 7     | `==` `!=` `<` `>` `<=` `>=` `is`   | non-associative; `is` takes a pattern |
+| 7     | `==` `!=` `<` `>` `<=` `>=` `is` `!is` | non-associative; `is` and `!is` take a pattern |
 | 8     | `<<` `>>`                          |                             |
 | 9     | `+` `-`                            |                             |
 | 10    | `*` `/` `%`                        |                             |
@@ -1529,6 +1533,22 @@ if (s is .Circle(r) || n > 0) {}   // error: the same: with ||, r might not exis
 let b = s is .Circle(_);           // fine: names nothing
 ```
 
+**`!is`** is the opposite, `!(e is pattern)`, for leaving early:
+
+```
+if (n.kind !is .Switch) return;
+if (o !is .Some) return -1;
+if (c !is 'a'..='z' && c != '_') { ... }
+```
+
+Its pattern can't name anything: where `!is` is true, the value isn't
+that variant.
+
+```
+if (e !is .Number(n)) return;      // error: `!is` can't name a variant's value: where it's
+                                   //   true, the value isn't that variant
+```
+
 ### `switch` as an expression
 
 In a value's place, each case gives a value instead of running statements:
@@ -1683,9 +1703,11 @@ q, r = r, q;                       // several targets: a swap
 
 - `return` gives one value per result. `return g();` passes on the results
   of a function that has the same ones.
-- `let a, b = ...` declares a name per value, typed by its value (to give
-  the types, declare the names one at a time). The values are one call
-  with that many results, or that many expressions.
+- `let a, b = ...` declares a name per value, typed by its value. The
+  values are one call with that many results, or that many expressions.
+  To give names a type instead, `let a, b, c: *Node;` (in a function)
+  declares each with it, starting as its zero, or its defaults; values and
+  a type together are declared one name at a time.
 - `a, b = ...` assigns the same way, with `=` only. Every value is worked
   out before any target is assigned, which is what makes `a, b = b, a` a
   swap. A result converts to its target's type as a single value would
@@ -3372,6 +3394,10 @@ A few things to know:
 - Keywords: `fn return let const type struct enum union import pub extern as
   if else for in while do switch case default break continue defer sizeof
   type_info is new context or_else or_return true false null`.
+  A keyword can still be a field's name, where a field's name goes: in a
+  struct's or variant's fields (`type: i32`), after `.` (`t.type`), in
+  `.type = 1`, and in a pattern's `type: x`. It can't name a variable, so
+  the pattern shorthand `.Let{type}` is an error: write `.Let{type: t}`.
 - Directives: `#expand`, `#format`, `#nodiscard`, `#no_bounds_check`, `#insert`, `#text`,
   `#location`, `#if`, `#run`. A backtick (`` ` ``)
   marks a caller's name in a macro.

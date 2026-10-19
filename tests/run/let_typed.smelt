@@ -1,0 +1,25 @@
+// let a, b: T; several names of one type, each starting as its zero (or
+// the type's defaults)
+import "std/io";
+
+struct Point { x: i32 = 1; y: i32; }
+
+fn count() -> i32 {
+    let a, b, c: i32;
+    a += 1;
+    b += 2;
+    c = a + b;
+    return c;
+}
+
+const COUNT = #run count();
+
+fn main() {
+    let first, last: *u8;
+    let p, q: Point;
+    q.y = 5;
+    let left, right: [2]string;
+    left[0] = "l";
+    println("% % % % % %", first == null, last == null, p, q, left, right);
+    println("% %", count(), COUNT);
+}

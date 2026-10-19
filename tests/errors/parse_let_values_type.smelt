@@ -1,4 +1,4 @@
-// names declared together take their types from the values
+// names declared with a type start as its zero: values go without the type
 fn main() {
     let a, b: i32 = 1, 2;
 }

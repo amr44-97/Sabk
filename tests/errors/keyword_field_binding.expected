@@ -1,0 +1,3 @@
+[error]: `type` is a keyword, so it can't name a variable; write `type: name` at [tests/errors/keyword_field_binding.smelt:5:19]
+     5 |     if (n is .Let{type})
+       |                   ^

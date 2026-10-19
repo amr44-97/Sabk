@@ -1,0 +1,6 @@
+// the index of for (x, i in xs) is read-only, like x
+fn main() {
+    let xs: []i32 = .[1, 2];
+    for (x, i in xs)
+        i = 4;
+}

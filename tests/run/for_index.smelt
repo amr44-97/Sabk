@@ -1,0 +1,26 @@
+// for (x, i in xs): each element and its index, an isize
+import "std/io";
+import "std/array";
+
+fn sum_weighted(xs: []i64) -> i64 {
+    let total: i64 = 0;
+    for (x, i in xs)
+        total += x * i;
+    return total;
+}
+
+const WEIGHTED = #run sum_weighted(.[1, 2, 3]);   // 0 + 2 + 6
+
+fn main() {
+    let names: [3]string = .["a", "b", "c"];
+    for (name, i in names)
+        println("% %", i, name);
+    let grow: [..]u8;
+    array_add(&grow, 'x');
+    array_add(&grow, 'y');
+    outer: for (c, k in grow) {
+        if (k == 1) break outer;
+        println("%c at %", c, k);
+    }
+    println("%", WEIGHTED);
+}

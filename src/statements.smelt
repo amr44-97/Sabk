@@ -387,6 +387,14 @@ fn check_let_values(c: *Checker, n: *Node) {
     let v: *Node = null;
     if (n.kind is .LetValues{names: ns, values})
         names, v = ns, values;
+    if (v == null) { // let a, b: T; each a `let a: T;`
+        for (d in names) {
+            d.check_state = 1;
+            check_var(c, d);
+            d.check_state = 2;
+        }
+        return;
+    }
     if (v.kind is .Values{items}) {
         if (items.len != names.len) {
             let at = if (items.len > names.len) items[names.len].tok else names[items.len].tok;
@@ -683,5 +691,9 @@ fn check_for_in(c: *Checker, n: *Node) {
     }
     n.ty = var;
     n.check_state = 2;
+    if (n.kind is .ForIn{index} && index != null) {
+        index.ty = c.types.isize;
+        index.check_state = 2;
+    }
     check_stmt(c, body);
 }
