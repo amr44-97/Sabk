@@ -77,3 +77,36 @@ deliberately left for later. Newest at the bottom of each list.
   Recommended: d, which also catches pushing onto a by-value copy of a
   growable array; needs `let x = x;` shadowing of a parameter, which Sabk
   refuses today.
+- **`null`, `?T` and `or_else` (raised Oct 20, 2026, for a deep
+  discussion).** The user's habit from Zig, where optionals are nullable,
+  met Sabk's split between `null` (a null pointer) and `.None` (no value):
+
+  ```
+  let a = read_file(p) or_else null;           // string: "" with a null pointer
+  let b: ?string = read_file(p) or_else null;  // Some(""): silently not None
+  let d: ?string = null;                       // error: write `.None` for no value
+  delete(b);                                   // error: a ?string can't be freed
+  ```
+
+  What happens: `x or_else y` has x's value type (`string`), `null` fits
+  any pointer or slice (so a string: empty, null pointer), and the
+  `string` result is then wrapped into the declared `?string` as
+  `Some("")`. `b` is the trap; `d` already has a good error.
+
+  The options:
+  - (a) Keep it, and only catch the trap: wrapping an `or_else` whose
+    fallback is `null` into a `?T` is an error with `d`'s hint.
+  - (b) The declared type reaches the fallback: `let b: ?string = x or_else
+    .None;` is None on a failure (a failure becomes an Option), and `or_else
+    null` gets `d`'s error. Sabk already lets the context type `.None`,
+    `.{}` and `.[...]`; Zig does this for `catch null` (result types),
+    Swift's `??` and Kotlin's `?:` take an optional on the right.
+  - (c) `null` only fits pointers: no more `null` for an empty string or
+    slice (`""`, `.[]` instead), so `or_else null` on a string is an error.
+  - (d) Zig's model: `?T` is nullable, `null` is its None for every T. A
+    bigger change: `null` would mean two things (a null pointer, and no
+    value), and `?*T` needs `null` and `.Some(null)` kept apart.
+
+  To discuss together: what `null` means, whether `or_else` can produce an
+  option, and how simple each rule is to explain (the user wants simple
+  and clear).
