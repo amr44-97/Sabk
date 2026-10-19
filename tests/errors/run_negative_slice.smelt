@@ -1,0 +1,4 @@
+// a negative slice bound panics, while compiling as when running
+fn from(xs: []i64, i: isize) -> []i64 { return xs[i..]; }
+
+const B = #run from(.[1, 2], -1).len;

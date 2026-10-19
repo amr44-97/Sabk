@@ -1,0 +1,6 @@
+// generated code that doesn't parse
+fn code() -> string { return "let a = ;"; }
+
+fn main() {
+    #insert #run code();
+}

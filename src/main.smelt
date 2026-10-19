@@ -17,6 +17,7 @@ import "std/fmt";
 import "std/path";
 import "std/str";
 import "std/array";
+import "std/build";
 import "source";
 import "token";
 import "lexer";
@@ -26,6 +27,14 @@ import "module";
 import "resolve";
 import "check";
 import "generics";
+
+// the VM's way to C, and libffi
+#run configure();
+
+fn configure() {
+    add_c_file("vm_ffi.c");
+    link_library("ffi");
+}
 
 extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
 
@@ -68,6 +77,7 @@ fn main() -> i32 {
         let r = make_resolver(std_dir);
         let c = make_checker(&r);
         r.checker = &c;
+        set_build_defaults(&c, path);
         if (!resolve_program(&r, path) || !check_program(&c))
             return 1;
         for (m in r.modules) {
@@ -86,6 +96,7 @@ fn main() -> i32 {
         // `#insert` and top-level `#if`s check code while resolving
         let c = make_checker(&r);
         r.checker = &c;
+        set_build_defaults(&c, path);
         if (!resolve_program(&r, path))
             return 1;
         for (m in r.modules) {
@@ -110,6 +121,13 @@ fn main() -> i32 {
     let root, errors = parse_file(&src, tokens);
     dump(root);
     return if (errors > 0) 1 else 0;
+}
+
+// what build scripts start from: relative paths are relative to the main
+// file's directory, and args() while compiling is the program's name
+fn set_build_defaults(c: *Checker, path: string) {
+    c.build.base_dir = path_dir(path);
+    array_add(&c.build.program_args, path_stem(path));
 }
 
 fn dump_tokens(tokens: []Token) {

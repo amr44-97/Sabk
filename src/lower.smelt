@@ -1,0 +1,1999 @@
+// Compiles one function (or a #run expression) to the VM's bytecode.
+// Mirrors the C backend's lowering: defers at every exit, macro expansions
+// with result slots, a copy of the context in blocks that change it.
+//
+// The first error stops it: it's kept in the VM (vm_fail), and from then
+// on expressions and statements emit nothing; what was made is thrown away.
+
+import "std/array";
+import "std/fmt";
+import "std/map";
+import "std/mem";
+import "std/str";
+import "ast";
+import "const";
+import "resolve";
+import "token";
+import "types";
+import "check";
+import "comptime";
+import "expressions";
+import "generics";
+import "patterns";
+import "vm";
+
+enum ScopeKind { Fn, Block, Loop, Switch, Macro }
+
+struct Scope {
+    kind: ScopeKind;
+    ctx_slot: i64 = -1;    // a slot holding this scope's Context pointer
+    defers: [..]*Node;
+    expansion: i32;
+    result_slot: i64 = -1; // Macro: where `return` puts the value
+}
+
+struct LoopTarget {
+    scope_depth: isize;    // the body's scope is scopes[scope_depth]
+    is_switch: bool;
+    breaks: [..]isize;
+    continues: [..]isize;
+    node: *Node;           // the loop or switch: labeled ones are found by it
+    value: u32;            // a switch: its copy of the value, and where it's
+    top: isize;            // dispatched (`continue name = v` goes there)
+    result: i64 = -1;      // a block or switch expression: its value's slot
+    is_block: bool;        // a labeled block: only `break name` leaves it
+}
+
+pub struct Lower {
+    vm: *Vm;
+    c: *Checker;
+    f: *VmFunction;
+    locals: Map(*Node, u32); // variables, parameters, loop variables
+    scopes: [..]Scope;
+    loops: [..]LoopTarget;
+    macro_ends: Map(i32, [..]isize); // expansion -> jumps to its end
+    // a global's initializer or a #run, which runs once in a frame that's
+    // gone afterwards: slice literals' elements go in memory kept forever,
+    // as the C's static data
+    lasting: bool;
+}
+
+pub fn make_lower(vm: *Vm, f: *VmFunction) -> Lower {
+    return .{ .vm = vm, .c = vm.c, .f = f };
+}
+
+fn fail(l: *Lower, t: Token, message: string) {
+    vm_fail(l.vm, t, message, true);
+}
+
+fn failed(l: *Lower) -> bool { return l.vm.failed; }
+
+/* --------------------------------------------------------------- emitting */
+
+fn alloc_slot(l: *Lower, size: u32, align: u32) -> u32 {
+    let a = if (align == 0) 1 else align;
+    l.f.frame_size = (l.f.frame_size + a - 1) / a * a;
+    let slot = l.f.frame_size;
+    l.f.frame_size += if (size != 0) size else 1;
+    return slot;
+}
+
+fn alloc(l: *Lower, t: *Type) -> u32 { return alloc_slot(l, vm_size_of(l.vm, t), vm_align_of(l.vm, t)); }
+
+fn at(l: *Lower, t: Token) { array_add(&l.f.locs, t); }
+
+fn emit(l: *Lower, instr: VmInstr) -> isize {
+    let i = instr;
+    i.loc = if (l.f.locs.len == 0) 0 else (l.f.locs.len - 1) as u32;
+    array_add(&l.f.code, i);
+    return l.f.code.len - 1;
+}
+
+fn here(l: *Lower) -> isize { return l.f.code.len; }
+fn patch(l: *Lower, jump: isize) { l.f.code[jump].imm = here(l) as u64; }
+fn patch_to(l: *Lower, jump: isize, to: isize) { l.f.code[jump].imm = to as u64; }
+
+fn konst(l: *Lower, kind: VmKind, bits: u64) -> u32 {
+    let size = kind_size(kind);
+    let slot = alloc_slot(l, size, size);
+    emit(l, .{ .op = .Const, .kind = kind, .a = slot, .imm = bits });
+    return slot;
+}
+
+fn u64_slot(l: *Lower, v: u64) -> u32 { return konst(l, .U64, v); }
+
+fn move(l: *Lower, dst: u32, src: u32, size: u32) {
+    if (dst != src && size != 0)
+        emit(l, .{ .op = .Move, .a = dst, .b = src, .imm = size as u64 });
+}
+
+fn zero(l: *Lower, dst: u32, size: u32) {
+    if (size != 0)
+        emit(l, .{ .op = .Zero, .a = dst, .imm = size as u64 });
+}
+
+fn addr_frame(l: *Lower, slot: u32) -> u32 {
+    let p = alloc_slot(l, 8, 8);
+    emit(l, .{ .op = .AddrFrame, .a = p, .b = slot });
+    return p;
+}
+
+fn addr(l: *Lower, address: *void) -> u32 {
+    let p = alloc_slot(l, 8, 8);
+    emit(l, .{ .op = .Addr, .a = p, .imm = address as usize });
+    return p;
+}
+
+fn load(l: *Lower, ptr: u32, t: *Type) -> u32 {
+    let slot = alloc(l, t);
+    emit(l, .{ .op = .Load, .a = slot, .b = ptr, .imm = vm_size_of(l.vm, t) as u64 });
+    return slot;
+}
+
+fn store(l: *Lower, ptr: u32, src: u32, size: u32) {
+    if (size != 0)
+        emit(l, .{ .op = .Store, .a = ptr, .b = src, .imm = size as u64 });
+}
+
+fn offset(l: *Lower, ptr: u32, by: u64) -> u32 {
+    if (by == 0)
+        return ptr;
+    let p = alloc_slot(l, 8, 8);
+    emit(l, .{ .op = .PtrOffset, .a = p, .b = ptr, .imm = by });
+    return p;
+}
+
+fn ptr_add(l: *Lower, ptr: u32, index_u64: u32, scale: u64) -> u32 {
+    let p = alloc_slot(l, 8, 8);
+    emit(l, .{ .op = .PtrAdd, .a = p, .b = ptr, .c = index_u64, .imm = scale });
+    return p;
+}
+
+fn bin(l: *Lower, kind: VmKind, op: VmBin, a: u32, b: u32, c: u32) {
+    emit(l, .{ .op = .Bin, .kind = kind, .sub = op as u8, .a = a, .b = b, .c = c });
+}
+
+fn cmp(l: *Lower, kind: VmKind, op: VmCmp, a: u32, b: u32, c: u32) {
+    emit(l, .{ .op = .Cmp, .kind = kind, .sub = op as u8, .a = a, .b = b, .c = c });
+}
+
+fn jump(l: *Lower, op: VmOp, cond: u32) -> isize { return emit(l, .{ .op = op, .b = cond }); }
+
+fn fail_with(l: *Lower, t: Token, message: string) {
+    at(l, t);
+    array_add(&l.f.messages, message);
+    emit(l, .{ .op = .Fail, .imm = (l.f.messages.len - 1) as u64 });
+}
+
+// p + n and p - n: n of what p points at, as p[n] counts
+fn move_pointer(l: *Lower, p: u32, pt: *Type, count: u32, ct: *Type, back: bool) -> u32 {
+    let index = to_u64(l, count, ct);
+    if (back) {
+        let negated = alloc_slot(l, 8, 8);
+        emit(l, .{ .op = .Un, .kind = .I64, .sub = VmUn.Neg as u8, .a = negated, .b = index });
+        index = negated;
+    }
+    return ptr_add(l, p, index, vm_size_of(l.vm, pt.elem) as u64);
+}
+
+// p + n, n + p, p - n, and q - p: how many values lie between them
+fn pointer_arithmetic(l: *Lower, lhs: *Node, rhs: *Node, is_sub: bool, a: u32, b: u32) -> u32 {
+    let lt, rt = type_of(l, lhs), type_of(l, rhs);
+    if (lt.kind == .Ptr && rt.kind == .Ptr) {
+        let bytes = alloc_slot(l, 8, 8);
+        let count = alloc_slot(l, 8, 8);
+        bin(l, .I64, .Sub, bytes, a, b);
+        bin(l, .I64, .Div, count, bytes, konst(l, .I64, vm_size_of(l.vm, lt.elem) as u64));
+        return count;
+    }
+    if (lt.kind == .Ptr)
+        return move_pointer(l, a, lt, b, rt, is_sub);
+    return move_pointer(l, b, rt, a, lt, false); // n + p
+}
+
+fn conv(l: *Lower, slot: u32, from: VmKind, to: VmKind) -> u32 {
+    if (from == to)
+        return slot;
+    let size = kind_size(to);
+    let out = alloc_slot(l, size, size);
+    emit(l, .{ .op = .Conv, .kind = to, .sub = from as u8, .a = out, .b = slot });
+    return out;
+}
+
+fn to_u64(l: *Lower, slot: u32, t: *Type) -> u32 {
+    return conv(l, slot, kind_of(concrete(l.vm, t)), .U64);
+}
+
+fn type_of(l: *Lower, n: *Node) -> *Type { return concrete(l.vm, if (n.conv != null) n.conv else n.ty); }
+
+fn ctx_slot(l: *Lower) -> u32 {
+    let i = l.scopes.len;
+    while (i > 0) {
+        i--;
+        if (l.scopes[i].ctx_slot >= 0)
+            return l.scopes[i].ctx_slot as u32;
+    }
+    let none: Token;
+    fail(l, none, "no context");
+    return 0;
+}
+
+fn field(t: *Type, name: string) -> *Field {
+    for (i in 0..t.fields.len)
+        if (t.fields[i].name == name)
+            return &t.fields[i];
+    return null;
+}
+
+fn last_scope(l: *Lower) -> *Scope { return &l.scopes[l.scopes.len - 1]; }
+fn last_loop(l: *Lower) -> *LoopTarget { return &l.loops[l.loops.len - 1]; }
+
+fn push_loop(l: *Lower, node: *Node, is_switch: bool) -> *LoopTarget {
+    let target = array_add_new(&l.loops);
+    target.scope_depth = l.scopes.len;
+    target.is_switch = is_switch;
+    target.node = node;
+    target.result = -1;
+    return target;
+}
+
+/* -------------------------------------------------------------- functions */
+
+pub fn lower_function(l: *Lower) {
+    let fun = l.f.decl;
+    let none: Token;
+    if ((map_get(&l.c.body_state, fun) or_else 0) == 1 || (map_get(&l.c.res.resolve_state, fun) or_else 0) == 1) {
+        vm_fail(l.vm, none, tformat("`%` is still being checked: the `#run` is inside it", fun.tok.text), false);
+        return;
+    }
+    if (!ensure_body_checked(l.c, fun)) {
+        vm_fail(l.vm, fun.tok, "", false);
+        l.vm.error.silent = true; // its errors were reported
+        return;
+    }
+    let is_extern = fun.kind is .Fn{is_extern: true};
+    let t = fun.ty;
+    let top = Scope.{ .kind = .Fn };
+    if (!is_extern) {
+        let slot = alloc_slot(l, 8, 8);
+        array_add(&l.f.param_offsets, slot);
+        top.ctx_slot = slot;
+    }
+    for (p in fn_params(fun)) {
+        if (is_type_param(p))
+            continue;
+        let slot = alloc(l, p.ty);
+        array_add(&l.f.param_offsets, slot);
+        map_put(&l.locals, p, slot);
+    }
+    if (t.ret.kind != .Void) {
+        l.f.ret_offset = alloc(l, t.ret);
+        l.f.ret_size = vm_size_of(l.vm, t.ret);
+    }
+    array_add(&l.scopes, top);
+    if (is_extern) { // called from C: the default context
+        let ctx = vm_context(l.vm);
+        if (failed(l))
+            return;
+        last_scope(l).ctx_slot = addr(l, ctx) as i64;
+    }
+    at(l, fun.tok);
+    emit_scope(l, block_list(fn_body(fun)), .{ .kind = .Block });
+    emit(l, .{ .op = .Ret });
+}
+
+// a #run expression as a function of no parameters
+pub fn lower_thunk(l: *Lower, n: *Node) {
+    let ctx = vm_context(l.vm);
+    if (failed(l))
+        return;
+    let top = Scope.{ .kind = .Fn };
+    top.ctx_slot = addr(l, ctx) as i64;
+    array_add(&l.scopes, top);
+    at(l, n.tok);
+    let t = type_of(l, n);
+    if (t.kind == .Void) {
+        if (n.kind.tag == .MacroExpansion)
+            expansion(l, n);
+        else
+            expr_void(l, n);
+    } else {
+        l.f.ret_offset = alloc(l, t);
+        l.f.ret_size = vm_size_of(l.vm, t);
+        move(l, l.f.ret_offset, expr(l, n), l.f.ret_size);
+    }
+    emit(l, .{ .op = .Ret });
+}
+
+// a global without a value: its type's defaults, as a function to run
+pub fn lower_default_thunk(l: *Lower, t: *Type) {
+    let ctx = vm_context(l.vm);
+    if (failed(l))
+        return;
+    let top = Scope.{ .kind = .Fn };
+    top.ctx_slot = addr(l, ctx) as i64;
+    array_add(&l.scopes, top);
+    l.f.ret_offset = alloc(l, t);
+    l.f.ret_size = vm_size_of(l.vm, t);
+    move(l, l.f.ret_offset, default_value(l, t), l.f.ret_size);
+    emit(l, .{ .op = .Ret });
+}
+
+/* ----------------------------------------------------------------- scopes */
+
+fn changes_context(target: *Node) -> bool {
+    if (target.kind is .Values{items}) { // a, b = ...
+        for (t in items)
+            if (changes_context(t))
+                return true;
+        return false;
+    }
+    let e = target;
+    while (true) {
+        switch (e.kind) {
+        case .Member{object}: e = object; continue;
+        case .Grouped{inner}: e = inner; continue;
+        case .Index{object}: e = object; continue;
+        default:
+        }
+        break;
+    }
+    return e.kind.tag == .Context;
+}
+
+// `context.x = ...` at a block's top level gives the block its own context
+fn assigns_context(s: *Node) -> bool {
+    if (s.kind is .Assign{target})
+        return changes_context(target);
+    return false;
+}
+
+fn emit_scope(l: *Lower, stmts: []*Node, scope: Scope) {
+    array_add(&l.scopes, scope);
+    for (s in stmts) {
+        if (assigns_context(s)) {
+            let context_type = l.c.context_type;
+            let copy = alloc(l, context_type);
+            move(l, copy, load(l, ctx_slot(l), context_type), vm_size_of(l.vm, context_type));
+            last_scope(l).ctx_slot = addr_frame(l, copy) as i64;
+            break;
+        }
+    }
+    for (s in stmts)
+        stmt(l, s);
+    defers_until(l, l.scopes.len - 1);
+    l.scopes.len--;
+}
+
+fn body(l: *Lower, s: *Node, kind: ScopeKind) {
+    if (s.kind is .Block{stmts, gives_value: false})
+        emit_scope(l, stmts, .{ .kind = kind });
+    else
+        emit_scope(l, .[s], .{ .kind = kind });
+}
+
+// runs the defers of scopes[from..], innermost first, each in its scope
+fn defers_until(l: *Lower, from: isize) {
+    let i = l.scopes.len;
+    while (i > from) {
+        i--;
+        let defers = l.scopes[i].defers;
+        let k = defers.len;
+        while (k > 0) {
+            k--;
+            // the defer runs in its own scope: the ones inside it are gone,
+            // and its scope's defers (this one among them) don't run again
+            let saved = l.scopes;
+            let working: [..]Scope;
+            array_append(&working, saved[..i + 1]);
+            let none: [..]*Node;
+            working[i].defers = none;
+            l.scopes = working;
+            body(l, defers[k], .Block);
+            l.scopes = saved;
+        }
+    }
+}
+
+// a macro expansion's statements; returns its result slot, or -1
+fn expansion(l: *Lower, x: *Node) -> i64 {
+    let stmts: []*Node;
+    let color: i32 = 0;
+    if (x.kind is .MacroExpansion{stmts: s, expansion: e})
+        stmts, color = s, e;
+    let scope = Scope.{ .kind = .Macro, .expansion = color };
+    if (x.ty.kind != .Void)
+        scope.result_slot = alloc(l, x.ty) as i64;
+    let result = scope.result_slot;
+    emit_scope(l, stmts, scope);
+    let ends = map_find(&l.macro_ends, color);
+    if (ends != null)
+        for (j in ends.*)
+            patch(l, j);
+    map_remove(&l.macro_ends, color);
+    return result;
+}
+
+fn add_macro_end(l: *Lower, color: i32, j: isize) {
+    let list = map_find(&l.macro_ends, color);
+    if (list == null) {
+        let none: [..]isize;
+        map_put(&l.macro_ends, color, none);
+        list = map_find(&l.macro_ends, color);
+    }
+    array_add(list, j);
+}
+
+/* ------------------------------------------------------------- statements */
+
+fn stmt(l: *Lower, n: *Node) {
+    if (failed(l))
+        return;
+    at(l, n.tok);
+    switch (n.kind) {
+    case .Block{stmts, label, gives_value: false}:
+        if (label != null) { // `break name;` leaves it
+            push_loop(l, n, false).is_block = true;
+            emit_scope(l, stmts, .{ .kind = .Block });
+            end_loop(l, here(l));
+            return;
+        }
+        emit_scope(l, stmts, .{ .kind = .Block });
+
+    case .Let(d):
+        local_decl(l, n, d.value, d.uninit);
+    case .Const{value}:
+        if (n.cval.kind != .None)
+            return; // its uses are the value
+        local_decl(l, n, value, false);
+
+    case .LetValues{names, values}:
+        if (values == null) { // let a, b = x, y: each name has its own value
+            for (d in names) {
+                if (d.tok.text == "_")
+                    expr_void(l, value_of(d));
+                else
+                    stmt(l, d);
+            }
+            return;
+        }
+        // let q, r = divide(a, b): the results, then a variable for each;
+        // a void name takes nothing when the void result is left out
+        let t = type_of(l, values);
+        let results = expr(l, values);
+        let name_types: [..]*Type;
+        for (d in names)
+            array_add(&name_types, d.ty);
+        let slots = result_slots(name_types, if (t.is_tuple) t.fields.len else 1);
+        for (i in 0..names.len) {
+            let d = names[i];
+            if (d.tok.text == "_")
+                continue;
+            let slot = alloc(l, d.ty);
+            if (slots[i] >= 0) {
+                let at_offset: u32 = if (t.is_tuple) t.fields[slots[i]].offset as u32 else 0;
+                move(l, slot, results + at_offset, vm_size_of(l.vm, d.ty));
+            }
+            map_put(&l.locals, d, slot);
+        }
+
+    case .ExprStmt{value}:
+        if (value.kind.tag == .MacroExpansion)
+            expansion(l, value);
+        else if (value.kind.tag != .Run) // a void #run already ran
+            expr_void(l, value);
+
+    case .Assign, .Inc, .Dec:
+        simple(l, n);
+
+    case .Return{value}:
+        if (n.decl != null) { // from a macro expansion
+            let color: i32 = 0;
+            if (n.decl.kind is .MacroExpansion{expansion: e})
+                color = e;
+            let target = l.scopes.len;
+            while (target > 0) {
+                target--;
+                if (l.scopes[target].kind == .Macro && l.scopes[target].expansion == color)
+                    break;
+            }
+            let result = l.scopes[target].result_slot;
+            if (value != null && result >= 0)
+                move(l, result as u32, expr(l, value), vm_size_of(l.vm, n.decl.ty));
+            defers_until(l, target);
+            add_macro_end(l, color, emit(l, .{ .op = .Jmp }));
+            return;
+        }
+        if (value != null)
+            move(l, l.f.ret_offset, expr(l, value), l.f.ret_size);
+        defers_until(l, 0);
+        emit(l, .{ .op = .Ret });
+
+    case .Break{value}:
+        leave(l, n, true, value);
+    case .Continue{value}:
+        leave(l, n, false, value);
+
+    case .Defer{stmt: s}:
+        if (n.caller) {
+            let i = l.scopes.len - 1;
+            while (i >= 1) {
+                if (l.scopes[i].kind == .Macro && l.scopes[i].expansion == n.color) {
+                    array_add(&l.scopes[i - 1].defers, s);
+                    return;
+                }
+                i--;
+            }
+        }
+        array_add(&last_scope(l).defers, s);
+
+    case .If{cond, then, else_, gives_value: false}:
+        let skip = jump(l, .Jz, expr(l, cond));
+        body(l, then, .Block);
+        if (else_ != null) {
+            let end = emit(l, .{ .op = .Jmp });
+            patch(l, skip);
+            body(l, else_, .Block);
+            patch(l, end);
+        } else {
+            patch(l, skip);
+        }
+
+    case .StaticIf:
+        let taken = static_if_branch(n);
+        if (taken != null)
+            body(l, taken, .Block);
+
+    case .While{cond, body: b}:
+        let top = here(l);
+        let exit = jump(l, .Jz, expr(l, cond));
+        loop_body(l, b, top, n);
+        emit(l, .{ .op = .Jmp, .imm = top as u64 });
+        patch(l, exit);
+        end_loop(l, here(l));
+
+    case .DoWhile{body: b, cond}:
+        let top = here(l);
+        push_loop(l, n, false);
+        body(l, b, .Loop);
+        let test = here(l);
+        emit(l, .{ .op = .Jnz, .b = expr(l, cond), .imm = top as u64 });
+        for (j in last_loop(l).continues)
+            patch_to(l, j, test);
+        end_loop(l, here(l));
+
+    case .For(fr):
+        if (fr.init != null)
+            stmt(l, fr.init);
+        let top = here(l);
+        let exit: isize = -1;
+        if (fr.cond != null)
+            exit = jump(l, .Jz, expr(l, fr.cond));
+        push_loop(l, n, false);
+        body(l, fr.body, .Loop);
+        for (j in last_loop(l).continues)
+            patch(l, j);
+        if (fr.step != null)
+            simple(l, fr.step);
+        emit(l, .{ .op = .Jmp, .imm = top as u64 });
+        if (exit >= 0)
+            patch(l, exit);
+        end_loop(l, here(l));
+
+    case .ForIn:
+        for_in(l, n);
+
+    case .Switch{gives_value: false}:
+        switch_(l, n, -1);
+
+    default:
+    }
+}
+
+fn local_decl(l: *Lower, n: *Node, value: *Node, uninit: bool) {
+    let size = vm_size_of(l.vm, n.ty);
+    let slot = alloc(l, n.ty);
+    if (uninit) // `= ---`: a pattern rather than zeros, as in Zig
+        emit(l, .{ .op = .Fill, .a = slot, .imm = size as u64 });
+    else if (value != null)
+        move(l, slot, expr(l, value), size);
+    else
+        move(l, slot, default_value(l, n.ty), size);
+    map_put(&l.locals, n, slot);
+}
+
+// break and continue, labeled or not, with a value or not
+fn leave(l: *Lower, n: *Node, is_break: bool, value: *Node) {
+    if (n.decl != null) { // labeled
+        let i = l.loops.len;
+        while (i > 0) {
+            i--;
+            if (l.loops[i].node == n.decl)
+                break;
+        }
+        if (is_break && value != null) {
+            // break name = value: the value, the defers, then out with it
+            let t = type_of(l, value);
+            let given = alloc(l, t);
+            move(l, given, expr(l, value), vm_size_of(l.vm, t));
+            defers_until(l, l.loops[i].scope_depth);
+            move(l, l.loops[i].result as u32, given, vm_size_of(l.vm, t));
+            array_add(&l.loops[i].breaks, emit(l, .{ .op = .Jmp }));
+            return;
+        }
+        if (!is_break && value != null) {
+            // continue state = value: the value, the defers, then the
+            // switch again with it
+            let t = type_of(l, value);
+            let next = alloc(l, t);
+            move(l, next, expr(l, value), vm_size_of(l.vm, t));
+            defers_until(l, l.loops[i].scope_depth);
+            move(l, l.loops[i].value, next, vm_size_of(l.vm, t));
+            emit(l, .{ .op = .Jmp, .imm = l.loops[i].top as u64 });
+            return;
+        }
+        defers_until(l, l.loops[i].scope_depth);
+        let j = emit(l, .{ .op = .Jmp });
+        if (is_break)
+            array_add(&l.loops[i].breaks, j);
+        else
+            array_add(&l.loops[i].continues, j);
+        return;
+    }
+    let i = l.loops.len;
+    while (i > 0) {
+        i--;
+        if (!l.loops[i].is_block && (!l.loops[i].is_switch || is_break))
+            break;
+    }
+    defers_until(l, l.loops[i].scope_depth);
+    let j = emit(l, .{ .op = .Jmp });
+    // `loops` may grow while the defers above are emitted; index again
+    if (is_break)
+        array_add(&l.loops[i].breaks, j);
+    else
+        array_add(&l.loops[i].continues, j);
+}
+
+fn loop_body(l: *Lower, s: *Node, continue_to: isize, owner: *Node) {
+    push_loop(l, owner, false);
+    body(l, s, .Loop);
+    for (j in last_loop(l).continues)
+        patch_to(l, j, continue_to);
+}
+
+fn end_loop(l: *Lower, exit: isize) {
+    for (j in last_loop(l).breaks)
+        patch_to(l, j, exit);
+    l.loops.len--;
+}
+
+fn assign_op(op: string) -> VmBin {
+    return switch (op) {
+    case "+=": .Add;
+    case "-=": .Sub;
+    case "*=": .Mul;
+    case "/=": .Div;
+    case "%=": .Mod;
+    case "&=": .And;
+    case "|=": .Or;
+    case "^=": .Xor;
+    case "<<=": .Shl;
+    default: .Shr;
+    };
+}
+
+// assignment, ++ and --: also the step of a `for`
+fn simple(l: *Lower, n: *Node) {
+    switch (n.kind) {
+    case .Assign{target, value}:
+        if (target.kind is .Values{items: targets}) {
+            // a, b = ...: every value first, then each target in turn (a
+            // void one takes nothing when the void result is left out)
+            let t = type_of(l, value);
+            let values = expr(l, value);
+            let wanted: [..]*Type;
+            for (x in targets)
+                array_add(&wanted, if (is_discard(x)) null else x.ty);
+            let slots = result_slots(wanted, if (t.is_tuple) t.fields.len else 1);
+            for (i in 0..targets.len) {
+                let x = targets[i];
+                if (is_discard(x) || slots[i] < 0)
+                    continue;
+                let from = if (t.is_tuple) t.fields[slots[i]].ty else t;
+                let v = values + (if (t.is_tuple) t.fields[slots[i]].offset as u32 else 0);
+                if (i < n.convs.len && n.convs[i] != null)
+                    v = convert(l, v, from, n.convs[i]);
+                store(l, address(l, x), v, vm_size_of(l.vm, concrete(l.vm, x.ty)));
+            }
+            return;
+        }
+        let t = concrete(l.vm, target.ty);
+        let place = address(l, target);
+        let op = n.tok.text;
+        if (op == "=") {
+            store(l, place, expr(l, value), vm_size_of(l.vm, t));
+            return;
+        }
+        let current = load(l, place, t);
+        let v = expr(l, value);
+        if (t.kind == .Ptr) { // p += n, p -= n
+            store(l, place, move_pointer(l, current, t, v, type_of(l, value), op == "-="), 8);
+            return;
+        }
+        let b = assign_op(op);
+        if (b == .Shl || b == .Shr)
+            v = to_u64(l, v, type_of(l, value));
+        let result = alloc(l, t);
+        bin(l, kind_of(t), b, result, current, v);
+        store(l, place, result, vm_size_of(l.vm, t));
+    case .Inc{target}:
+        step(l, target, false);
+    case .Dec{target}:
+        step(l, target, true);
+    case .ExprStmt{value}:
+        expr_void(l, value);
+    default:
+        stmt(l, n);
+    }
+}
+
+// x++ and x--
+fn step(l: *Lower, target: *Node, down: bool) {
+    let t = concrete(l.vm, target.ty);
+    let k = kind_of(t);
+    let place = address(l, target);
+    let current = load(l, place, t);
+    if (t.kind == .Ptr) { // p++, p--: by one value
+        store(l, place, move_pointer(l, current, t, konst(l, .I64, 1), l.c.types.isize, down), 8);
+        return;
+    }
+    let one: u32 = 0;
+    if (is_float(k)) {
+        let size = kind_size(k);
+        one = alloc_slot(l, size, size);
+        emit(l, .{ .op = .Const, .kind = k, .a = one, .imm = float_bits(k, 1.0) });
+    } else {
+        one = konst(l, k, 1);
+    }
+    let result = alloc(l, t);
+    bin(l, k, if (down) .Sub else .Add, result, current, one);
+    store(l, place, result, vm_size_of(l.vm, t));
+}
+
+fn for_in(l: *Lower, n: *Node) {
+    let iterable: *Node = null;
+    let range_end: *Node = null;
+    let b: *Node = null;
+    if (n.kind is .ForIn{iterable: it, range_end: e, body: bd})
+        iterable, range_end, b = it, e, bd;
+    let var_type = n.ty;
+    let var_size = vm_size_of(l.vm, var_type);
+    let var = alloc(l, var_type);
+    map_put(&l.locals, n, var);
+    let k = kind_of(var_type);
+    if (range_end != null) {
+        // for (i in a..b): the end is evaluated once, first
+        let end = alloc(l, var_type);
+        move(l, end, expr(l, range_end), var_size);
+        move(l, var, expr(l, iterable), var_size);
+        let top = here(l);
+        let in_range = alloc_slot(l, 1, 1);
+        cmp(l, k, .Lt, in_range, var, end);
+        let exit = jump(l, .Jz, in_range);
+        push_loop(l, n, false);
+        body(l, b, .Loop);
+        for (j in last_loop(l).continues)
+            patch(l, j);
+        let one = konst(l, k, 1);
+        bin(l, k, .Add, var, var, one);
+        emit(l, .{ .op = .Jmp, .imm = top as u64 });
+        patch(l, exit);
+        end_loop(l, here(l));
+        return;
+    }
+    // for (x in xs): xs once, x a copy of each element
+    let t = concrete(l.vm, iterable.ty);
+    let seq = alloc(l, t);
+    move(l, seq, expr(l, iterable), vm_size_of(l.vm, t));
+    let base: u32 = 0;
+    let len: u32 = 0;
+    if (t.kind == .Array) {
+        base = addr_frame(l, seq);
+        len = u64_slot(l, t.len);
+    } else {
+        base = seq;
+        len = seq + 8;
+    }
+    let i = u64_slot(l, 0);
+    let top = here(l);
+    let more = alloc_slot(l, 1, 1);
+    cmp(l, .U64, .Lt, more, i, len);
+    let exit = jump(l, .Jz, more);
+    if (t.kind == .Slice || t.kind == .Growable) {
+        let p = alloc_slot(l, 8, 8);
+        move(l, p, base, 8);
+        base = p;
+    }
+    let element = ptr_add(l, base, i, var_size as u64);
+    emit(l, .{ .op = .Load, .a = var, .b = element, .imm = var_size as u64 });
+    push_loop(l, n, false);
+    body(l, b, .Loop);
+    for (j in last_loop(l).continues)
+        patch(l, j);
+    let one = u64_slot(l, 1);
+    bin(l, .U64, .Add, i, i, one);
+    emit(l, .{ .op = .Jmp, .imm = top as u64 });
+    patch(l, exit);
+    end_loop(l, here(l));
+}
+
+/* --------------------------------------------------------------- switches */
+
+// does a pattern bind a pointer into what it matches (`&x`)?
+fn binds_by_ref(p: *Node) -> bool {
+    switch (p.kind) {
+    case .Binding{by_ref}: return by_ref;
+    case .FieldPattern{pattern}: return binds_by_ref(pattern);
+    case .VariantPattern{bindings}:
+        for (item in bindings)
+            if (binds_by_ref(item))
+                return true;
+        return false;
+    default: return false;
+    }
+}
+
+fn clause_parts(clause: *Node) -> ([]*Node, *Node, *Node) {
+    switch (clause.kind) {
+    case .Case{patterns, guard, body: b}: return patterns, guard, b;
+    case .DefaultCase{body: b}: return .[], null, b;
+    default: return .[], null, null;
+    }
+}
+
+// a switch statement, or a switch expression's cases into `result`
+fn switch_(l: *Lower, n: *Node, result: i64) {
+    let subject: *Node = null;
+    let clauses: []*Node;
+    let in_order = false;
+    let complete = false;
+    if (n.kind is .Switch(s))
+        subject, clauses, in_order, complete = s.value, s.cases, s.in_order, s.complete;
+    let t = type_of(l, subject);
+    // a tagged enum switches on its tag; `case .V(&x):` needs its address
+    let tagged: *Type = if (t.is_tagged) t else null;
+    let values = if (tagged != null) tagged.fields[0].ty else t;
+    let by_ref = false;
+    for (clause in clauses) {
+        let patterns, _, _ = clause_parts(clause);
+        for (p in patterns)
+            by_ref = by_ref || binds_by_ref(p);
+    }
+    let value: u32 = 0;
+    let base: u32 = 0;
+    if (by_ref) {
+        base = address(l, subject);
+    } else { // a copy, which `continue name = v` replaces
+        value = alloc(l, t);
+        move(l, value, expr(l, subject), vm_size_of(l.vm, t));
+    }
+    if (in_order) {
+        switch_in_order(l, n, clauses, complete, result, t, value, if (by_ref) base else addr_frame(l, value));
+        return;
+    }
+    let top = here(l);
+    let tag = if (by_ref) load(l, base, values) else value; // the tag comes first
+    let to_clause = new([][..]isize, clauses.len);
+    let default_clause: isize = -1;
+    for (k in 0..clauses.len) {
+        let clause = clauses[k];
+        if (clause.kind.tag == .DefaultCase)
+            default_clause = k;
+        let patterns, _, _ = clause_parts(clause);
+        for (p in patterns)
+            array_add(&to_clause[k], jump(l, .Jnz, matches(l, p, values, tag)));
+    }
+    if (default_clause >= 0)
+        array_add(&to_clause[default_clause], emit(l, .{ .op = .Jmp }));
+    let target = push_loop(l, n, true);
+    target.value = value;
+    target.top = top;
+    target.result = result;
+    if (default_clause < 0 && complete) { // a value made with `as`
+        fail_with(l, n.tok, "the switch value isn't one of its enum's variants");
+    } else if (default_clause < 0) {
+        array_add(&last_loop(l).breaks, emit(l, .{ .op = .Jmp }));
+    }
+    for (k in 0..clauses.len) {
+        for (j in to_clause[k])
+            patch(l, j);
+        let patterns, _, b = clause_parts(clauses[k]);
+        for (p in patterns)
+            if (p.kind.tag == .VariantPattern)
+                bind(l, p, tagged, value, base, by_ref);
+        case_body(l, n, b, result);
+        array_add(&last_loop(l).breaks, emit(l, .{ .op = .Jmp })); // no fallthrough
+    }
+    end_loop(l, here(l));
+}
+
+// a case's statements, or a switch expression's value from it
+fn case_body(l: *Lower, n: *Node, b: *Node, result: i64) {
+    if (result >= 0 && b.kind.tag != .Block)
+        move(l, result as u32, expr(l, b), vm_size_of(l.vm, type_of(l, n)));
+    else // statements: break name = value gives a switch expression's
+        body(l, b, .Switch);
+}
+
+// a switch with guards or patterns inside variants: each case in order,
+// matched at the address in `subject`
+fn switch_in_order(l: *Lower, n: *Node, clauses: []*Node, complete: bool, result: i64, t: *Type,
+                   value: u32, subject: u32) {
+    let top = here(l);
+    let target = push_loop(l, n, true);
+    target.value = value;
+    target.top = top;
+    target.result = result;
+    let default_case: *Node = null;
+    for (clause in clauses) {
+        if (clause.kind.tag == .DefaultCase) {
+            default_case = clause;
+            continue;
+        }
+        let patterns, guard, b = clause_parts(clause);
+        let oks: [..]isize;
+        let fails: [..]isize;
+        for (p in patterns) { // any of its patterns
+            let no: [..]isize;
+            match_at(l, p, t, subject, &no);
+            array_add(&oks, emit(l, .{ .op = .Jmp }));
+            for (j in no)
+                patch(l, j);
+        }
+        array_add(&fails, emit(l, .{ .op = .Jmp }));
+        for (j in oks)
+            patch(l, j);
+        for (p in patterns)
+            bind_at(l, p, t, subject);
+        if (guard != null) // the guard
+            array_add(&fails, jump(l, .Jz, expr(l, guard)));
+        case_body(l, n, b, result);
+        array_add(&last_loop(l).breaks, emit(l, .{ .op = .Jmp }));
+        for (j in fails)
+            patch(l, j);
+    }
+    if (default_case != null) {
+        let _, _, b = clause_parts(default_case);
+        case_body(l, n, b, result);
+        array_add(&last_loop(l).breaks, emit(l, .{ .op = .Jmp }));
+    } else if (complete) {
+        fail_with(l, n.tok, "no case of the switch matched its value (a null pointer inside it?)");
+    }
+    end_loop(l, here(l));
+}
+
+fn pattern_parts(p: *Node) -> (*Node, []*Node, bool) {
+    if (p.kind is .VariantPattern{variant, bindings, by_fields})
+        return variant, bindings, by_fields;
+    return null, .[], false;
+}
+
+fn item_field_name(item: *Node) -> string {
+    switch (item.kind) {
+    case .Binding{field}: return if (field != null) field.tok.text else "";
+    case .FieldPattern{field}: return if (field != null) field.tok.text else "";
+    default: return "";
+    }
+}
+
+// where a variant pattern's item is, from the address of the tagged value
+// in `at_slot`
+fn item_at(l: *Lower, p: *Node, item: *Node, tagged: *Type, at_slot: u32) -> u32 {
+    let by = tagged.fields[1].offset;
+    let variant, _, by_fields = pattern_parts(p);
+    if (by_fields) {
+        let pt = payload_of(tagged, variant.decl);
+        for (fl in pt.fields)
+            if (fl.name == item_field_name(item))
+                by += fl.offset;
+    }
+    return offset(l, at_slot, by);
+}
+
+// jumps put in `fails` are taken when the value at the address in
+// `at_slot`, of type `t`, doesn't match `p`; inside a variant a pointer is
+// followed, and a null one doesn't match
+fn match_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32, fails: *[..]isize) {
+    let t = concrete(l.vm, pt);
+    if (!t.is_tagged) {
+        let same = matches(l, p, t, load(l, at_slot, t));
+        array_add(fails, jump(l, .Jz, same));
+        return;
+    }
+    let tag_type = t.fields[0].ty;
+    let variant, items, _ = pattern_parts(p);
+    let head = if (variant != null) variant else p;
+    let same = alloc_slot(l, 1, 1);
+    cmp(l, kind_of(tag_type), .Eq, same, load(l, at_slot, tag_type), expr(l, head));
+    array_add(fails, jump(l, .Jz, same));
+    if (variant == null)
+        return;
+    for (item in items) {
+        if (item.kind.tag != .FieldPattern)
+            continue;
+        let it = concrete(l.vm, item.ty);
+        let where = item_at(l, p, item, t, at_slot);
+        let inner_pattern = pattern_of(item);
+        if (it.kind != .Ptr) {
+            match_at(l, inner_pattern, it, where, fails);
+            continue;
+        }
+        let ptr = load(l, where, it);
+        let set = alloc_slot(l, 1, 1);
+        cmp(l, .U64, .Ne, set, ptr, u64_slot(l, 0));
+        array_add(fails, jump(l, .Jz, set));
+        match_at(l, inner_pattern, it.elem, ptr, fails);
+    }
+}
+
+fn pattern_of(item: *Node) -> *Node {
+    if (item.kind is .FieldPattern{pattern})
+        return pattern;
+    return null;
+}
+
+// the names `p` binds, from the value at the address in `at_slot`
+fn bind_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32) {
+    let t = concrete(l.vm, pt);
+    let variant, items, _ = pattern_parts(p);
+    if (variant == null || !t.is_tagged)
+        return;
+    for (item in items) {
+        let it = concrete(l.vm, if (item.ty != null) item.ty else t);
+        let where = item_at(l, p, item, t, at_slot);
+        if (item.kind.tag == .FieldPattern) {
+            if (it.kind == .Ptr)
+                bind_at(l, pattern_of(item), it.elem, load(l, where, it));
+            else
+                bind_at(l, pattern_of(item), it, where);
+            continue;
+        }
+        if (item.tok.text == "_")
+            continue;
+        let slot = alloc(l, item.ty);
+        if (item.kind is .Binding{by_ref: true})
+            move(l, slot, where, 8);
+        else
+            move(l, slot, load(l, where, it), vm_size_of(l.vm, it));
+        map_put(&l.locals, item, slot);
+    }
+}
+
+// a bool slot: does the value in `tag` (of type `values`) match `p`?
+fn matches(l: *Lower, p: *Node, values: *Type, tag: u32) -> u32 {
+    let k = kind_of(values);
+    let same = alloc_slot(l, 1, 1);
+    if (values.is_string) {
+        emit(l, .{ .op = .StrEq, .a = same, .b = tag, .c = expr(l, p) });
+    } else if (p.kind is .Range{lo, hi, inclusive}) {
+        let low = alloc_slot(l, 1, 1);
+        let high = alloc_slot(l, 1, 1);
+        cmp(l, k, .Ge, low, tag, expr(l, lo));
+        cmp(l, k, if (inclusive) .Le else .Lt, high, tag, expr(l, hi));
+        bin(l, .Bool, .And, same, low, high);
+    } else {
+        let variant, _, _ = pattern_parts(p);
+        cmp(l, k, .Eq, same, tag, expr(l, if (variant != null) variant else p));
+    }
+    return same;
+}
+
+// a variant pattern's bindings: copies of the value or its fields, or
+// with `&` pointers into it (`base` holds its address)
+fn bind(l: *Lower, p: *Node, tagged: *Type, value: u32, base: u32, by_ref: bool) {
+    let payload_at = tagged.fields[1].offset as u32;
+    let variant, items, by_fields = pattern_parts(p);
+    let pt = payload_of(tagged, variant.decl);
+    for (b in items) {
+        if (b.tok.text == "_")
+            continue;
+        let at_offset = payload_at;
+        let bt = pt;
+        if (by_fields) {
+            for (fl in pt.fields) {
+                if (fl.name == item_field_name(b)) {
+                    at_offset += fl.offset as u32;
+                    bt = fl.ty;
+                }
+            }
+        }
+        let slot = alloc(l, b.ty);
+        if (b.kind is .Binding{by_ref: true})
+            move(l, slot, offset(l, base, at_offset as u64), 8);
+        else if (by_ref)
+            move(l, slot, load(l, offset(l, base, at_offset as u64), bt), vm_size_of(l.vm, bt));
+        else
+            move(l, slot, value + at_offset, vm_size_of(l.vm, bt));
+        map_put(&l.locals, b, slot);
+    }
+}
+
+/* ------------------------------------------------------------ expressions */
+
+// evaluates `n` for its effects
+fn expr_void(l: *Lower, n: *Node) {
+    if (n.kind.tag == .MacroExpansion)
+        expansion(l, n);
+    else if (n.kind.tag == .Call)
+        call(l, n);
+    else
+        expr(l, n);
+}
+
+// evaluates `n` into a slot holding its value (converted, if the checker
+// recorded a conversion)
+fn expr(l: *Lower, n: *Node) -> u32 {
+    if (failed(l))
+        return 0;
+    at(l, n.tok);
+    if (n.conv != null && n.conv.kind == .Slice && concrete(l.vm, n.ty).kind == .Array)
+        return array_view(l, n);
+    let value = if (n.cval.kind != .None) constant(l, n) else inner(l, n);
+    if (n.conv != null)
+        value = convert(l, value, concrete(l.vm, n.ty), n.conv);
+    return value;
+}
+
+// an array where a slice is expected: a view of it, or of the slot a
+// temporary is in, which lasts until the function returns (as the C)
+fn array_view(l: *Lower, n: *Node) -> u32 {
+    let t = concrete(l.vm, n.ty);
+    let p = if (is_place(n)) address(l, n) else addr_frame(l, inner(l, n));
+    let s = alloc(l, n.conv);
+    move(l, s, p, 8);
+    emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = t.len });
+    return s;
+}
+
+fn constant(l: *Lower, n: *Node) -> u32 {
+    let t = concrete(l.vm, n.ty);
+    let k = kind_of(t);
+    let bits: u64 = 0;
+    if (n.cval.kind == .Float)
+        bits = float_bits(k, n.cval.f);
+    else if (is_float(k)) // an integer constant used as a float
+        bits = float_bits(k, i128_to_f64(n.cval.i));
+    else
+        bits = n.cval.i.lo;
+    return konst(l, k, bits);
+}
+
+fn convert(l: *Lower, value: u32, from: *Type, to: *Type) -> u32 {
+    if (to == l.c.any_type) { // a pointer to a copy, and the type
+        let copy = alloc(l, from);
+        move(l, copy, value, vm_size_of(l.vm, from));
+        let any = alloc(l, to);
+        emit(l, .{ .op = .AddrFrame, .a = any + field(to, "value").offset as u32, .b = copy });
+        let info = vm_type_info(l.vm, from);
+        emit(l, .{ .op = .Addr, .a = any + field(to, "info").offset as u32, .imm = info as usize });
+        return any;
+    }
+    if (from.kind == .Growable) { // [..]T -> []T: its first two fields
+        let s = alloc(l, to);
+        move(l, s, value, 16);
+        return s;
+    }
+    if (to.kind == .Slice && from.kind == .Ptr) { // *[N]T -> []T
+        let s = alloc(l, to);
+        move(l, s, value, 8);
+        emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = from.elem.len });
+        return s;
+    }
+    if (to.is_failure && from != to) { // a failure enum -> Error
+        let low = conv(l, conv(l, value, kind_of(from), .U32), .U32, .U64);
+        let out = u64_slot(l, 0); // its 0 is Error's 0
+        let nonzero = alloc_slot(l, 1, 1);
+        cmp(l, .U64, .Ne, nonzero, low, u64_slot(l, 0));
+        let skip = jump(l, .Jz, nonzero);
+        let id = map_get(&l.c.error_ids, from) or_else 0;
+        bin(l, .U64, .Or, out, low, u64_slot(l, (id as u64) << 32));
+        patch(l, skip);
+        return out;
+    }
+    return conv(l, value, kind_of(from), kind_of(to));
+}
+
+fn string_literal(l: *Lower, n: *Node) -> u32 {
+    let bytes = string_literal_text(n);
+    let data = vm_intern(l.vm, bytes);
+    let t = concrete(l.vm, n.ty);
+    if (t.kind == .Ptr)
+        return addr(l, data);
+    let s = alloc(l, t);
+    emit(l, .{ .op = .Addr, .a = s, .imm = data as usize });
+    emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = bytes.len as u64 });
+    return s;
+}
+
+fn binary_op(op: BinaryOp) -> VmBin {
+    return switch (op) {
+    case .Add: .Add;
+    case .Sub: .Sub;
+    case .Mul: .Mul;
+    case .Div: .Div;
+    case .Mod: .Mod;
+    case .BitOr: .Or;
+    case .BitAnd: .And;
+    case .BitXor: .Xor;
+    case .Shl: .Shl;
+    default: .Shr;
+    };
+}
+
+fn compare_op(op: BinaryOp) -> VmCmp {
+    return switch (op) {
+    case .Lt: .Lt;
+    case .Gt: .Gt;
+    case .LtEq: .Le;
+    case .GtEq: .Ge;
+    case .EqEq: .Eq;
+    default: .Ne;
+    };
+}
+
+fn inner(l: *Lower, n: *Node) -> u32 {
+    let t = concrete(l.vm, n.ty);
+    switch (n.kind) {
+    case .String:
+        return string_literal(l, n);
+
+    case .Null:
+        let slot = alloc(l, t);
+        zero(l, slot, vm_size_of(l.vm, t));
+        return slot;
+
+    case .Context:
+        return load(l, ctx_slot(l), l.c.context_type);
+
+    case .Identifier, .Member:
+        if (n.decl != null)
+            return name(l, n, n.decl);
+        return field_value(l, n);
+
+    case .Grouped{inner: e}:
+        return expr(l, e);
+
+    case .Binary{op, lhs, rhs}:
+        switch (op) {
+        case .Lt, .Gt, .LtEq, .GtEq, .EqEq, .NotEq:
+            let operand = type_of(l, lhs);
+            let values = ordered(l, .[lhs, rhs]);
+            let result = alloc_slot(l, 1, 1);
+            if (operand.is_string) { // by their contents
+                emit(l, .{ .op = .StrEq, .a = result, .b = values[0], .c = values[1] });
+                if (op == .NotEq)
+                    emit(l, .{ .op = .Un, .kind = .Bool, .sub = VmUn.Not as u8, .a = result, .b = result });
+                return result;
+            }
+            cmp(l, kind_of(operand), compare_op(op), result, values[0], values[1]);
+            return result;
+        case .And, .Or:
+            // the right side only runs when it decides the result
+            let result = alloc_slot(l, 1, 1);
+            move(l, result, expr(l, lhs), 1);
+            let skip = jump(l, if (op == .And) .Jz else .Jnz, result);
+            move(l, result, expr(l, rhs), 1);
+            patch(l, skip);
+            return result;
+        default:
+            let b = binary_op(op);
+            let values = ordered(l, .[lhs, rhs]);
+            let x, y = values[0], values[1];
+            if ((b == .Add || b == .Sub) && (type_of(l, lhs).kind == .Ptr || type_of(l, rhs).kind == .Ptr))
+                return pointer_arithmetic(l, lhs, rhs, b == .Sub, x, y);
+            if (b == .Shl || b == .Shr)
+                y = to_u64(l, y, type_of(l, rhs));
+            let result = alloc(l, t);
+            bin(l, kind_of(t), b, result, x, y);
+            return result;
+        }
+
+    case .Unary{op, operand}:
+        if (op == .AddressOf)
+            return address(l, operand);
+        let value = expr(l, operand);
+        let result = alloc(l, t);
+        let u = if (op == .Neg) VmUn.Neg else if (op == .BitNot) VmUn.BitNot else VmUn.Not;
+        emit(l, .{ .op = .Un, .kind = kind_of(t), .sub = u as u8, .a = result, .b = value });
+        return result;
+
+    case .Deref{pointer}:
+        return load(l, expr(l, pointer), t);
+
+    case .Index:
+        return load(l, element(l, n), t);
+
+    case .Slice:
+        return slice(l, n);
+
+    case .Call:
+        return call(l, n);
+
+    case .StructInit:
+        if (t.kind == .Array || t.kind == .Slice)
+            return array_literal(l, n, t);
+        return struct_init(l, n, t);
+
+    case .ArrayLiteral:
+        return array_literal(l, n, t);
+
+    case .TypeInfo{of}:
+        return addr(l, vm_type_info(l.vm, of.ty));
+
+    case .Switch{gives_value: true}:
+        let result = alloc(l, t);
+        switch_(l, n, result as i64);
+        return result;
+
+    case .If{cond, then, else_, gives_value: true}: // only the value chosen is evaluated
+        let result = alloc(l, t);
+        let skip = jump(l, .Jz, expr(l, cond));
+        move(l, result, expr(l, then), vm_size_of(l.vm, t));
+        let end = emit(l, .{ .op = .Jmp });
+        patch(l, skip);
+        move(l, result, expr(l, else_), vm_size_of(l.vm, t));
+        patch(l, end);
+        return result;
+
+    case .Block{stmts, gives_value: true}: // break name = value sets the result and leaves
+        let result = alloc(l, t);
+        let target = push_loop(l, n, false);
+        target.is_block = true;
+        target.result = result as i64;
+        emit_scope(l, stmts, .{ .kind = .Block });
+        end_loop(l, here(l));
+        return result;
+
+    case .Values: // the results `return a, b;` gives
+        return struct_init(l, n, t);
+
+    case .OrReturn:
+        return lower_or_return(l, n);
+
+    case .OrElse{value: e, fallback}:
+        // the value, or the fallback (only evaluated then)
+        let from = type_of(l, e);
+        let values = expr(l, e);
+        let result = alloc(l, t);
+        let missing: u32 = 0;
+        let value = values; // the first value: offset 0
+        if (is_option(l.c, from) || !from.is_tuple) {
+            // a ?T is None (its tag 0) or holds a value; a pointer is null
+            // or not
+            let option = is_option(l.c, from);
+            let flag = if (option) values + from.fields[0].offset as u32 else values;
+            let k = kind_of(if (option) from.fields[0].ty else from);
+            missing = alloc_slot(l, 1, 1);
+            cmp(l, k, .Eq, missing, flag, konst(l, k, 0));
+            if (option)
+                value = values + from.fields[1].offset as u32;
+        } else {
+            missing = failed_slot(l, values, from);
+        }
+        let ok = jump(l, .Jz, missing);
+        move(l, result, expr(l, fallback), vm_size_of(l.vm, t));
+        let end = emit(l, .{ .op = .Jmp });
+        patch(l, ok);
+        move(l, result, value, vm_size_of(l.vm, t));
+        patch(l, end);
+        return result;
+
+    case .Is{value: e, pattern: p}: // does it match? and on a match, the bindings
+        let subject = type_of(l, e);
+        let tagged: *Type = if (subject.is_tagged) subject else null;
+        let values = if (tagged != null) tagged.fields[0].ty else subject;
+        let by_ref = binds_by_ref(p);
+        let value: u32 = 0;
+        let base: u32 = 0;
+        if (by_ref)
+            base = address(l, e);
+        else
+            value = expr(l, e);
+        if (has_subpatterns(p)) { // patterns inside the variant
+            let at_slot = if (by_ref) base else addr_frame(l, value);
+            let same = alloc_slot(l, 1, 1);
+            let fails: [..]isize;
+            match_at(l, p, subject, at_slot, &fails);
+            bind_at(l, p, subject, at_slot);
+            emit(l, .{ .op = .Const, .kind = .Bool, .a = same, .imm = 1 });
+            let end = emit(l, .{ .op = .Jmp });
+            for (j in fails)
+                patch(l, j);
+            emit(l, .{ .op = .Const, .kind = .Bool, .a = same, .imm = 0 });
+            patch(l, end);
+            return same;
+        }
+        let tag = if (by_ref) load(l, base, values) else value;
+        let same = matches(l, p, values, tag);
+        let _, items, _ = pattern_parts(p);
+        if (p.kind.tag == .VariantPattern && items.len > 0) {
+            let skip = jump(l, .Jz, same);
+            bind(l, p, tagged, value, base, by_ref);
+            patch(l, skip);
+        }
+        return same;
+
+    case .VariantValue{payload}: // a tagged enum: the tag and the payload
+        let slot = alloc(l, t);
+        zero(l, slot, vm_size_of(l.vm, t));
+        let tag = t.fields[0];
+        emit(l, .{ .op = .Const, .kind = kind_of(tag.ty), .a = slot + tag.offset as u32, .imm = n.decl.cval.i.lo });
+        if (payload != null)
+            move(l, slot + t.fields[1].offset as u32, expr(l, payload), vm_size_of(l.vm, type_of(l, payload)));
+        return slot;
+
+    case .Cast{value: e}:
+        let from = type_of(l, e);
+        let value = expr(l, e);
+        if (from.kind == .Growable && t.kind == .Slice)
+            return convert(l, value, from, t);
+        if (from.kind == .Slice || from == t)
+            return value;
+        return conv(l, value, kind_of(from), kind_of(t));
+
+    case .New:
+        return new_(l, n, t);
+
+    case .MacroExpansion:
+        let result = expansion(l, n);
+        if (result < 0) {
+            fail(l, n.tok, "this macro has no value");
+            return 0;
+        }
+        return result as u32;
+
+    default:
+        fail(l, n.tok, tformat("can't run % at compile time", old_shape(n).tag));
+        return 0;
+    }
+}
+
+// a bool slot: whether the last of `values`, of type `t` (a tuple or one
+// value), says it failed: a false bool, or an enum other than 0
+fn failed_slot(l: *Lower, values: u32, t: *Type) -> u32 {
+    let flag = values;
+    let flag_type = t;
+    if (t.is_tuple) {
+        flag += t.fields[t.fields.len - 1].offset as u32;
+        flag_type = t.fields[t.fields.len - 1].ty;
+    }
+    let out = alloc_slot(l, 1, 1);
+    let k = kind_of(flag_type);
+    if (flag_type.kind == .Bool)
+        emit(l, .{ .op = .Un, .kind = .Bool, .sub = VmUn.Not as u8, .a = out, .b = flag });
+    else
+        cmp(l, k, .Ne, out, flag, konst(l, k, 0));
+    return out;
+}
+
+fn last_type(t: *Type) -> *Type { return if (t.is_tuple) t.fields[t.fields.len - 1].ty else t; }
+
+// f() or_return: returns from the function when f's last value says it
+// failed; the value is f's other values
+fn lower_or_return(l: *Lower, n: *Node) -> u32 {
+    let e: *Node = null;
+    if (n.kind is .OrReturn{value})
+        e = value;
+    let t = type_of(l, e);
+    let values = expr(l, e);
+    let ok = jump(l, .Jz, failed_slot(l, values, t));
+    // the function's last result is the failure; the others start as
+    // `let x: T;` does
+    let flag = values;
+    let flag_size = vm_size_of(l.vm, t);
+    if (t.is_tuple) {
+        flag += t.fields[t.fields.len - 1].offset as u32;
+        flag_size = vm_size_of(l.vm, last_type(t));
+    }
+    let ret = l.f.decl.ty.ret;
+    let flag_type = last_type(t);
+    let ret_flag = last_type(ret);
+    if (ret_flag != flag_type) { // a failure enum passed on as an Error
+        flag = convert(l, flag, flag_type, ret_flag);
+        flag_size = vm_size_of(l.vm, ret_flag);
+    }
+    if (ret.is_tuple) {
+        let r = default_value(l, ret);
+        move(l, r + ret.fields[ret.fields.len - 1].offset as u32, flag, flag_size);
+        move(l, l.f.ret_offset, r, l.f.ret_size);
+    } else {
+        move(l, l.f.ret_offset, flag, l.f.ret_size);
+    }
+    defers_until(l, 0);
+    emit(l, .{ .op = .Ret });
+    patch(l, ok);
+    // what's left: one value (the first, at offset 0), or several
+    let rest = type_of(l, n);
+    if (!rest.is_tuple)
+        return values;
+    let slot = alloc(l, rest);
+    for (i in 0..rest.fields.len)
+        move(l, slot + rest.fields[i].offset as u32, values + t.fields[i].offset as u32,
+             vm_size_of(l.vm, rest.fields[i].ty));
+    return slot;
+}
+
+// a declared name used as a value
+fn name(l: *Lower, n: *Node, d: *Node) -> u32 {
+    let local, found = map_get(&l.locals, d);
+    if (found)
+        return local;
+    switch (d.kind) {
+    case .Let, .Const:
+        if (d.owner == null) {
+            fail(l, n.tok, tformat("`#run` can't use the local variable `%`: it only exists when the program runs",
+                                   n.tok.text));
+            return 0;
+        }
+        if (!c_variable(l, n, d))
+            return 0;
+        let storage = vm_global_storage(l.vm, d);
+        if (storage == null)
+            return 0;
+        return load(l, addr(l, storage), concrete(l.vm, d.ty));
+    case .Fn{is_extern}:
+        if (is_extern) { // a rawptr: a C function pointer
+            let address = vm_c_address(l.vm, vm_function_for(l.vm, d));
+            if (address == null) {
+                fail(l, n.tok, tformat("`%` isn't available as a C function while compiling", d.tok.text));
+                return 0;
+            }
+            return addr(l, address);
+        }
+        return addr(l, vm_function_for(l.vm, d));
+    case .Param, .ForIn:
+        fail(l, n.tok, tformat("`#run` can't use `%`: it only exists when the program runs", n.tok.text));
+        return 0;
+    default:
+        fail(l, n.tok, tformat("can't use `%` at compile time", n.tok.text));
+        return 0;
+    }
+}
+
+// an `extern let` used at `n` must exist in the compiler, to be read
+fn c_variable(l: *Lower, n: *Node, d: *Node) -> bool {
+    if (d.kind is .Let{is_extern: true} && vm_dlsym(d.tok.text) == null) {
+        fail(l, n.tok, tformat("the C variable `%` isn't available while compiling, so `#run` code can't use it",
+                               d.tok.text));
+        return false;
+    }
+    return true;
+}
+
+fn member_object(n: *Node) -> *Node {
+    if (n.kind is .Member{object})
+        return object;
+    return null;
+}
+
+// n.x on a value or through a pointer
+fn field_value(l: *Lower, n: *Node) -> u32 {
+    let object = member_object(n);
+    let base = concrete(l.vm, object.ty);
+    let t = concrete(l.vm, n.ty);
+    if (base.kind == .Array) // a.ptr: where the array is
+        return address(l, object);
+    if (base.kind == .Ptr && base.elem.kind == .Array)
+        return expr(l, object); // p.ptr: the same address
+    if (base.kind == .Ptr) {
+        let p = expr(l, object);
+        return load(l, offset(l, p, member_offset(l, base.elem, n)), t);
+    }
+    let value = expr(l, object);
+    return value + member_offset(l, base, n) as u32;
+}
+
+fn member_offset(l: *Lower, t: *Type, n: *Node) -> u64 {
+    let field_name = n.tok.text;
+    if (t.kind == .Slice)
+        return if (field_name == "len") 8 else 0;
+    if (t.kind == .Growable)
+        return if (field_name == "ptr") 0 else if (field_name == "len") 8 else if (field_name == "cap") 16 else 24;
+    layout(l.c, t);
+    let fl = field(t, field_name);
+    if (fl != null)
+        return fl.offset;
+    fail(l, n.tok, tformat("no field `%`", field_name));
+    return 0;
+}
+
+// a slot holding the address of `n`
+fn address(l: *Lower, n: *Node) -> u32 {
+    if (failed(l))
+        return 0;
+    at(l, n.tok);
+    switch (n.kind) {
+    case .Grouped{inner: e}:
+        return address(l, e);
+    case .Identifier, .Member:
+        let d = n.decl;
+        if (d != null) {
+            let local, found = map_get(&l.locals, d);
+            if (found)
+                return addr_frame(l, local);
+            if ((d.kind.tag == .Let || d.kind.tag == .Const) && d.owner != null) {
+                if (!c_variable(l, n, d))
+                    return 0;
+                let storage = vm_global_storage(l.vm, d);
+                if (storage == null)
+                    return 0;
+                return addr(l, storage);
+            }
+            name(l, n, d); // reports why it can't be used
+            return 0;
+        }
+        let object = member_object(n);
+        let base = concrete(l.vm, object.ty);
+        if (base.kind == .Ptr)
+            return offset(l, expr(l, object), member_offset(l, base.elem, n));
+        return offset(l, address(l, object), member_offset(l, base, n));
+    case .Index:
+        return element(l, n);
+    case .Deref{pointer}:
+        return expr(l, pointer);
+    case .Context:
+        return ctx_slot(l);
+    default:
+        return addr_frame(l, expr(l, n)); // a temporary: its slot is its address
+    }
+}
+
+// the address of xs[i], bounds-checked like the C
+fn element(l: *Lower, n: *Node) -> u32 {
+    let object: *Node = null;
+    let index: *Node = null;
+    if (n.kind is .Index{object: o, index: i})
+        object, index = o, i;
+    let t = concrete(l.vm, object.ty);
+    let elem_size = vm_size_of(l.vm, n.ty) as u64;
+    let known = index.cval.kind == .Int;
+    // what's indexed first, then the index; a growable array starts with a
+    // slice's two fields
+    if (t.kind == .Slice || t.kind == .Growable) {
+        let s = expr(l, object);
+        let i = to_u64(l, expr(l, index), type_of(l, index));
+        at(l, n.tok); // an error points at the indexing, as in the program
+        emit(l, .{ .op = .CheckIndex, .b = i, .c = s + 8 });
+        return ptr_add(l, s, i, elem_size);
+    }
+    if (t.kind == .Array) {
+        let base = address(l, object);
+        let i = to_u64(l, expr(l, index), type_of(l, index));
+        at(l, n.tok);
+        if (!known)
+            emit(l, .{ .op = .CheckIndex, .b = i, .c = u64_slot(l, t.len) });
+        return ptr_add(l, base, i, elem_size);
+    }
+    let base = expr(l, object); // a raw pointer
+    return ptr_add(l, base, to_u64(l, expr(l, index), type_of(l, index)), elem_size);
+}
+
+fn slice(l: *Lower, n: *Node) -> u32 {
+    let object: *Node = null;
+    let lo_node: *Node = null;
+    let hi_node: *Node = null;
+    if (n.kind is .Slice{object: o, lo: a, hi: b})
+        object, lo_node, hi_node = o, a, b;
+    let t = concrete(l.vm, object.ty);
+    let result = concrete(l.vm, n.ty);
+    let elem_size = vm_size_of(l.vm, result.elem) as u64;
+    let lo = if (lo_node != null) to_u64(l, expr(l, lo_node), type_of(l, lo_node)) else u64_slot(l, 0);
+    let base: u32 = 0;
+    let len: u32 = 0;
+    if (t.kind == .Slice || t.kind == .Growable) {
+        let s = expr(l, object);
+        base = s;
+        len = s + 8;
+    } else if (t.kind == .Array) {
+        base = address(l, object);
+        len = u64_slot(l, t.len);
+    } else {
+        base = expr(l, object);
+        len = u64_slot(l, 0x7fffffffffffffff); // a raw pointer: only lo <= hi is checked
+    }
+    let hi = if (hi_node != null) to_u64(l, expr(l, hi_node), type_of(l, hi_node)) else len;
+    emit(l, .{ .op = .CheckSlice, .a = lo, .b = hi, .c = len });
+    let out = alloc(l, result);
+    let start = ptr_add(l, base, lo, elem_size);
+    move(l, out, start, 8);
+    bin(l, .U64, .Sub, out + 8, hi, lo);
+    return out;
+}
+
+fn struct_init(l: *Lower, n: *Node, t: *Type) -> u32 {
+    layout(l.c, t);
+    let slot = alloc(l, t);
+    zero(l, slot, vm_size_of(l.vm, t));
+    // the values in the order they're written, then the fields left out
+    let items = items_of(n);
+    let parts: [..]*Node;
+    let names: [..]string;
+    for (i in 0..items.len) {
+        let item = items[i];
+        array_add(&parts, item_value(item));
+        array_add(&names, if (item.kind.tag == .FieldInit) item.tok.text else t.fields[i].name);
+    }
+    let values = ordered(l, parts);
+    let given: Map(string, u32);
+    for (i in 0..names.len)
+        map_put(&given, names[i], values[i]);
+    for (fl in t.fields) {
+        let v, found = map_get(&given, fl.name);
+        let fsize = vm_size_of(l.vm, fl.ty);
+        let at_offset = slot + fl.offset as u32;
+        if (found) {
+            move(l, at_offset, v, fsize);
+        } else if (t.kind == .Struct && fl.decl != null && value_of(fl.decl) != null) { // the field's default
+            move(l, at_offset, expr(l, value_of(fl.decl)), fsize);
+        } else if (t.kind == .Struct && has_defaults(l.c, fl.ty)) {
+            move(l, at_offset, default_value(l, fl.ty), fsize); // its type's defaults
+        }
+    }
+    map_free(&given);
+    return slot;
+}
+
+fn array_literal(l: *Lower, n: *Node, t: *Type) -> u32 {
+    let items = items_of(n);
+    let elem_size = vm_size_of(l.vm, t.elem);
+    if (t.kind == .Array) {
+        let slot = alloc(l, t);
+        zero(l, slot, vm_size_of(l.vm, t));
+        for (i in 0..items.len)
+            move(l, slot + (i as u32) * elem_size, expr(l, items[i]), elem_size);
+        return slot;
+    }
+    // a slice of an unnamed array that lives in this frame
+    let s = alloc(l, t);
+    zero(l, s, 16);
+    if (items.len == 0)
+        return s;
+    if (l.lasting) {
+        let base = addr(l, vm_keep(l.vm, (elem_size as isize) * items.len));
+        for (i in 0..items.len)
+            store(l, offset(l, base, (i as u64) * (elem_size as u64)), expr(l, items[i]), elem_size);
+        move(l, s, base, 8);
+        emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = items.len as u64 });
+        return s;
+    }
+    let backing = alloc_slot(l, elem_size * (items.len as u32), vm_align_of(l.vm, t.elem));
+    for (i in 0..items.len)
+        move(l, backing + (i as u32) * elem_size, expr(l, items[i]), elem_size);
+    move(l, s, addr_frame(l, backing), 8);
+    emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = items.len as u64 });
+    return s;
+}
+
+// is `n` the same whenever it's evaluated: a constant or a literal?
+fn is_fixed(n: *Node) -> bool {
+    if (n.cval.kind != .None)
+        return true;
+    switch (n.kind.tag) {
+    case .String, .Null, .TypeInfo, .SizeOf: return true;
+    default: return false;
+    }
+}
+
+// can evaluating `n` change memory that another part reads (a call, a
+// macro, new)?
+fn has_call(n: *Node) -> bool {
+    if (n == null)
+        return false;
+    switch (n.kind.tag) {
+    case .Call, .MacroExpansion, .New: return true;
+    default:
+    }
+    if (n.cval.kind != .None)
+        return false;
+    for (child in code_children(n))
+        if (has_call(child))
+            return true;
+    return false;
+}
+
+// each part's value, in order; copied as it's made when a later part could
+// change what an earlier one reads
+fn ordered(l: *Lower, parts: []*Node) -> [..]u32 {
+    let changing = 0;
+    let calls = false;
+    for (p in parts) {
+        if (!is_fixed(p))
+            changing++;
+        calls = calls || has_call(p);
+    }
+    let copy = changing >= 2 && calls;
+    let values: [..]u32;
+    for (p in parts) {
+        let value = expr(l, p);
+        if (copy && !is_fixed(p)) {
+            let t = type_of(l, p);
+            let fresh = alloc(l, t);
+            move(l, fresh, value, vm_size_of(l.vm, t));
+            value = fresh;
+        }
+        array_add(&values, value);
+    }
+    return values;
+}
+
+fn call(l: *Lower, n: *Node) -> u32 {
+    let callee: *Node = null;
+    let args: []*Node;
+    if (n.kind is .Call{callee: e, args: a})
+        callee, args = e, a;
+    let t = concrete(l.vm, callee.ty);
+    let fun: *Node = if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl else null;
+    if (n.decl != null)
+        fun = n.decl; // a generic instance
+    let params = if (fun != null) fn_params(fun) else .[];
+    // a function value, the arguments, then the defaults (evaluated at the
+    // call site): left to right
+    let parts: [..]*Node;
+    let variadic: [..]bool;
+    if (fun == null)
+        array_add(&parts, callee);
+    for (i in 0..args.len) {
+        if (fun != null && i < params.len && is_type_param(params[i]))
+            continue; // a type argument
+        array_add(&parts, args[i]);
+        array_add(&variadic, i >= t.params.len);
+    }
+    if (fun != null) {
+        for (i in args.len..params.len) {
+            array_add(&parts, value_of(params[i]));
+            array_add(&variadic, false);
+        }
+    }
+    let values = ordered(l, parts);
+
+    let site: VmCallSite;
+    let first = 0;
+    if (fun != null) {
+        site.callee = vm_function_for(l.vm, fun);
+    } else {
+        site.fn_slot = values[0];
+        first = 1;
+    }
+    let c_call = fun != null && fun.kind is .Fn{is_extern: true};
+    if (!c_call)
+        array_add(&site.args, ArgSlot.{ .slot = ctx_slot(l), .size = 8 });
+    for (k in first..parts.len) {
+        let arg_type = type_of(l, parts[k]);
+        let value = values[k];
+        if (variadic[k - first] && arg_type == l.c.types.f32) {
+            value = conv(l, value, .F32, .F64); // C variadics take doubles
+            arg_type = l.c.types.f64;
+        }
+        array_add(&site.args, ArgSlot.{ .slot = value, .size = vm_size_of(l.vm, arg_type) });
+        array_add(&site.arg_types, arg_type);
+    }
+    let ret = concrete(l.vm, t.ret);
+    site.ret_type = ret;
+    if (ret.kind != .Void) {
+        site.ret_slot = alloc(l, ret);
+        site.ret_size = vm_size_of(l.vm, ret);
+    }
+    array_add(&l.f.calls, site);
+    emit(l, .{ .op = .Call, .imm = (l.f.calls.len - 1) as u64 });
+    return site.ret_slot;
+}
+
+// new(T [, allocator]) and new([]T, n [, allocator]), like the C runtime's
+// rt_new: through the allocator's procedure, never null, zeroed
+fn new_(l: *Lower, n: *Node, t: *Type) -> u32 {
+    let first: *Node = null;
+    let second: *Node = null;
+    let value: *Node = null;
+    if (n.kind is .New{first: a, second: b, value: v})
+        first, second, value = a, b, v;
+    let is_slice = t.kind == .Slice;
+    let of = t.elem; // a slice's elements, or what the pointer points at
+    let allocator_type = l.c.allocator_type;
+    let alloc_node = if (is_slice) second else first;
+    let allocator: u32 = 0;
+    if (alloc_node != null) {
+        allocator = expr(l, alloc_node);
+    } else {
+        let in_context = field(l.c.context_type, "allocator").offset;
+        allocator = load(l, offset(l, ctx_slot(l), in_context), allocator_type);
+    }
+    let elem_size = vm_size_of(l.vm, of);
+    let count: u32 = 0;
+    let size: u32 = 0;
+    let empty_jump: isize = 0;
+    let result = alloc(l, t);
+    zero(l, result, vm_size_of(l.vm, t));
+    if (is_slice) {
+        count = to_u64(l, expr(l, first), type_of(l, first));
+        let is_empty = alloc_slot(l, 1, 1);
+        cmp(l, .U64, .Eq, is_empty, count, u64_slot(l, 0));
+        empty_jump = jump(l, .Jnz, is_empty);
+        size = alloc_slot(l, 8, 8);
+        bin(l, .U64, .Mul, size, count, u64_slot(l, elem_size as u64));
+    } else {
+        size = u64_slot(l, if (elem_size != 0) elem_size as u64 else 1);
+    }
+    let site: VmCallSite;
+    site.fn_slot = allocator + field(allocator_type, "procedure").offset as u32;
+    let data = allocator + field(allocator_type, "data").offset as u32;
+    let mode_type = concrete(l.vm, allocator_type.fields[0].ty.params[1]);
+    array_add(&site.args, ArgSlot.{ .slot = ctx_slot(l), .size = 8 });
+    array_add(&site.args, ArgSlot.{ .slot = data, .size = 8 });
+    array_add(&site.args, ArgSlot.{ .slot = konst(l, kind_of(mode_type), 0), .size = vm_size_of(l.vm, mode_type) }); // Alloc
+    array_add(&site.args, ArgSlot.{ .slot = size, .size = 8 });
+    array_add(&site.args, ArgSlot.{ .slot = u64_slot(l, vm_align_of(l.vm, of) as u64), .size = 8 });
+    array_add(&site.args, ArgSlot.{ .slot = u64_slot(l, 0), .size = 8 });
+    array_add(&site.args, ArgSlot.{ .slot = u64_slot(l, 0), .size = 8 });
+    site.ret_slot = alloc_slot(l, 8, 8);
+    site.ret_size = 8;
+    let ret_slot = site.ret_slot;
+    array_add(&l.f.calls, site);
+    emit(l, .{ .op = .Call, .imm = (l.f.calls.len - 1) as u64 });
+    emit(l, .{ .op = .CheckNull, .b = ret_slot });
+    emit(l, .{ .op = .MemZero, .b = ret_slot, .c = size });
+    // new(value), or a type with defaults: filled in
+    if (value != null)
+        store(l, ret_slot, expr(l, value), elem_size);
+    else if (has_defaults(l.c, of) && is_slice)
+        fill(l, ret_slot, count, default_value(l, of), of);
+    else if (has_defaults(l.c, of))
+        store(l, ret_slot, default_value(l, of), elem_size);
+    move(l, result, ret_slot, 8);
+    if (is_slice) {
+        move(l, result + 8, count, 8);
+        patch(l, empty_jump);
+    }
+    return result;
+}
+
+// a value of `t` as it starts: its fields' defaults, and those of what it
+// holds (has_defaults); zeros when it has none
+fn default_value(l: *Lower, t: *Type) -> u32 {
+    let slot = alloc(l, t);
+    zero(l, slot, vm_size_of(l.vm, t));
+    if (!has_defaults(l.c, t))
+        return slot;
+    if (t.kind == .Array) {
+        fill(l, addr_frame(l, slot), u64_slot(l, t.len), default_value(l, t.elem), t.elem);
+    } else if (t.is_tagged) { // the first variant, holding its defaults
+        let first = enum_variants(t.decl)[0];
+        let tag = t.fields[0];
+        emit(l, .{ .op = .Const, .kind = kind_of(tag.ty), .a = slot + tag.offset as u32, .imm = first.cval.i.lo });
+        let pt = payload_of(t, first);
+        move(l, slot + t.fields[1].offset as u32, default_value(l, pt), vm_size_of(l.vm, pt));
+    } else {
+        for (fl in t.fields) {
+            let value: *Node = if (fl.decl != null) value_of(fl.decl) else null;
+            if (value != null)
+                move(l, slot + fl.offset as u32, expr(l, value), vm_size_of(l.vm, fl.ty));
+            else if (has_defaults(l.c, fl.ty))
+                move(l, slot + fl.offset as u32, default_value(l, fl.ty), vm_size_of(l.vm, fl.ty));
+        }
+    }
+    return slot;
+}
+
+// `count` (a u64 slot) copies of `value`, a `t`, from the pointer in `base`
+fn fill(l: *Lower, base: u32, count: u32, value: u32, t: *Type) {
+    let size = vm_size_of(l.vm, t);
+    let i = u64_slot(l, 0);
+    let top = here(l);
+    let more = alloc_slot(l, 1, 1);
+    cmp(l, .U64, .Lt, more, i, count);
+    let exit = jump(l, .Jz, more);
+    store(l, ptr_add(l, base, i, size as u64), value, size);
+    bin(l, .U64, .Add, i, i, u64_slot(l, 1));
+    emit(l, .{ .op = .Jmp, .imm = top as u64 });
+    patch(l, exit);
+}

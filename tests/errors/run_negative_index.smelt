@@ -1,0 +1,4 @@
+// a negative index panics, while compiling as when running
+fn at(xs: []i64, i: isize) -> i64 { return xs[i]; }
+
+const A = #run at(.[1, 2], -1);

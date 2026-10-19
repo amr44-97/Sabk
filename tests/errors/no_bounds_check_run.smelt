@@ -1,0 +1,11 @@
+// #run code keeps its bounds checks, #no_bounds_check or not
+fn peek(xs: []i32, i: isize) -> i32 #no_bounds_check { return xs[i]; }
+
+fn third() -> i32 {
+    let all: [5]i32 = .[1, 2, 3, 4, 5];
+    return peek(all[0..2], 3);
+}
+
+const THIRD = #run third();
+
+fn main() {}

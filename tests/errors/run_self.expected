@@ -1,0 +1,6 @@
+[error]: `#run` failed: `size` is still being checked: the `#run` is inside it at [tests/errors/run_self.smelt:3:15]
+     3 |     const N = #run size();
+       |               ^
+[note]: here at [tests/errors/run_self.smelt:3:24]
+     3 |     const N = #run size();
+       |                        ^

@@ -17,8 +17,7 @@
 //   formats.smelt      #format calls
 //   memory.smelt       memory that escapes, memory traps (not yet)
 //
-// `#run` needs the bytecode VM, which isn't ported yet: a `#run` whose
-// value isn't already known is an error until it is.
+// `#run` runs code on the VM (vm.smelt, lower.smelt).
 
 import "std/array";
 import "std/fmt";
@@ -40,6 +39,7 @@ import "generics";
 import "comptime";
 import "formats";
 import "memory";
+import "vm";
 
 pub const MAX_INSTANCE_DEPTH = 64;
 
@@ -96,6 +96,12 @@ pub struct Checker {
     // the type so far of a labeled block or switch expression's value
     value_types: Map(*Node, *Type);
     warned: Map(string, bool);  // a warning is given once per place
+
+    // #run: the interpreter, made when the first #run needs it
+    vm: *Vm;
+    // what build scripts (top-level `#run`s, run once the program checks)
+    // set
+    build: BuildOptions;
 }
 
 pub fn make_checker(r: *Resolver) -> Checker {

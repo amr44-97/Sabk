@@ -1,0 +1,12 @@
+[error]: `#run` failed: index 2 is out of bounds for length 2 at [tests/errors/run_failure.smelt:5:11]
+     5 | const X = #run third();
+       |           ^
+[note]: here at [tests/errors/run_failure.smelt:2:51]
+     2 | fn get(items: []i32, i: i32) -> i32 { return items[i]; }
+       |                                                   ^
+[note]: called from here at [tests/errors/run_failure.smelt:3:41]
+     3 | fn third() -> i32 { return get(.[1, 2], 2); }
+       |                                         ^
+[note]: called from here at [tests/errors/run_failure.smelt:5:21]
+     5 | const X = #run third();
+       |                     ^

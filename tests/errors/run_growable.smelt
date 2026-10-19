@@ -1,0 +1,11 @@
+// what #run makes is carried into the program; a growable array's
+// elements were allocated while compiling, so it can't be
+import "std/array";
+
+fn build() -> [..]i64 { let xs: [..]i64; array_add(&xs, 1); return xs; }
+struct Holder { items: [..]i64; }
+fn hold() -> Holder { return .{ .items = build() }; }
+
+const XS = #run build();
+const H = #run hold();
+const FINE = #run build()[0];      // a value from it is fine

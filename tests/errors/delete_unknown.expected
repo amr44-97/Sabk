@@ -1,0 +1,19 @@
+std/mem.smelt:69:15: panic: delete can't free a `*i64`: it frees strings, slices, growable arrays, Maps and Builders; a pointer is freed with free(p)
+[error]: `#run` failed: it called abort() (a panic?) at [std/mem.smelt:61:17]
+    61 |         #insert #run delete_code(type_info(T));
+       |                 ^
+[note]: in `delete` with T = *i64, used here at [tests/errors/delete_unknown.smelt:5:17]
+     5 | fn f(p: *i64) { delete(p); }
+       |                 ^
+[note]: here at [<prelude>:129:5]
+   129 |     abort();
+       |     ^
+[note]: called from here at [std/os.smelt:36:52]
+    36 |     handler.procedure(handler.data, what, message, location);
+       |                                                    ^
+[note]: called from here at [std/str.smelt:137:64]
+   137 | pub fn join(parts: []string, separator: string, a: Allocator = context.allocator) -> string {
+       |                                                                ^
+[note]: called from here at [std/mem.smelt:61:34]
+    61 |         #insert #run delete_code(type_info(T));
+       |                                  ^

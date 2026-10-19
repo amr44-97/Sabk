@@ -1,0 +1,12 @@
+// the code an #insert runs can't use what the #insert is part of
+struct Config {
+    size: i32 = #insert #run default_size();
+    name: string;
+}
+
+fn default_size() -> string {
+    let c: Config;
+    return "4";
+}
+
+fn main() {}

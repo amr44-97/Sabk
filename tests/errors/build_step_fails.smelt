@@ -1,0 +1,10 @@
+// a build step that fails is a compile error
+fn check_config() {
+    let sizes: []i32 = .[1, 2];
+    let i = 2;
+    let x = sizes[i];
+}
+
+#run check_config();
+
+fn main() {}

@@ -1,0 +1,13 @@
+// what #run produces must be able to become part of the program
+fn make_ptr() -> *i32 { return new(i32); }
+struct Handle { name: string; memory: *void; }
+fn make_handle() -> Handle { return .{ .name = "h" }; }
+fn nothing() {}
+fn pick() -> fn() { return nothing; }
+
+const P = #run make_ptr();
+const H = #run make_handle();
+const F = #run pick();
+const V = #run nothing();
+
+fn main() {}

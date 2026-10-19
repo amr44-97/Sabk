@@ -1,0 +1,7 @@
+// a #run that fails at compile time is a compile error, with the calls
+fn get(items: []i32, i: i32) -> i32 { return items[i]; }
+fn third() -> i32 { return get(.[1, 2], 2); }
+
+const X = #run third();
+
+fn main() {}

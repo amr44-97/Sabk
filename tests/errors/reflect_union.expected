@@ -1,0 +1,22 @@
+std/reflect.smelt:59:15: panic: values_equal can't work with the union `Bits`: which of its fields holds the value isn't known
+[error]: `#run` failed: it called abort() (a panic?) at [std/reflect.smelt:25:13]
+    25 |     #insert #run equal_code(type_info(T));
+       |             ^
+[note]: in `values_equal` with T = Holder, used here at [tests/errors/reflect_union.smelt:10:16]
+    10 |     let same = values_equal(h, h);
+       |                ^
+[note]: here at [<prelude>:129:5]
+   129 |     abort();
+       |     ^
+[note]: called from here at [std/os.smelt:36:52]
+    36 |     handler.procedure(handler.data, what, message, location);
+       |                                                    ^
+[note]: called from here at [std/reflect.smelt:59:112]
+    59 |         panic(format("% can't work with the union `%`: which of its fields holds the value isn't known", what, t.name));
+       |                                                                                                                ^
+[note]: called from here at [std/reflect.smelt:73:31]
+    73 |             no_unions(f.info, "values_equal");
+       |                               ^
+[note]: called from here at [std/reflect.smelt:25:29]
+    25 |     #insert #run equal_code(type_info(T));
+       |                             ^

@@ -1,0 +1,7 @@
+// a function can't #run itself while it's being checked
+fn size() -> i32 {
+    const N = #run size();
+    return N;
+}
+
+fn main() {}

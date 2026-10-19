@@ -1,0 +1,6 @@
+// #insert needs a string known at compile time
+fn number() -> i32 { return 1; }
+
+fn main() {
+    #insert #run number();
+}

@@ -1,0 +1,12 @@
+[error]: `#run` can't produce `*i32`: a pointer's address means nothing once the program runs at [tests/errors/run_cant_bake.smelt:8:11]
+     8 | const P = #run make_ptr();
+       |           ^
+[error]: `#run` can't produce `Handle`: its field `memory`: a pointer's address means nothing once the program runs at [tests/errors/run_cant_bake.smelt:9:11]
+     9 | const H = #run make_handle();
+       |           ^
+[error]: `#run` can't produce `fn()`: a function can't be carried over yet at [tests/errors/run_cant_bake.smelt:10:11]
+    10 | const F = #run pick();
+       |           ^
+[error]: `#run` of something that returns nothing has no value; use it as a statement, `#run f();` at [tests/errors/run_cant_bake.smelt:11:11]
+    11 | const V = #run nothing();
+       |           ^

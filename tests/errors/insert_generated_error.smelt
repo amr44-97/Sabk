@@ -1,0 +1,7 @@
+// an error in code an #insert made points into that code, then at the
+// #insert, through every level of nesting
+fn code() -> string { return "#insert \"let flag: bool = 1;\";"; }
+
+fn main() {
+    #insert #run code();
+}

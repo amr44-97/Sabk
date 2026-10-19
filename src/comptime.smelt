@@ -1,10 +1,6 @@
-// The checker's compile-time parts: `#run`, the strings `#insert` splices
-// in, top-level `#if` conditions, what type_info says about a type, build
-// steps, and field defaults.
-//
-// Running code needs the bytecode VM, which isn't ported yet: a `#run`
-// whose value is already known (`#run 4 * 1024`) folds, and any other is
-// an error until the VM is.
+// The checker's compile-time parts: `#run` (on the VM, vm.smelt), the
+// strings `#insert` splices in, top-level `#if` conditions, what type_info
+// says about a type, build steps, and field defaults.
 
 import "std/array";
 import "std/fmt";
@@ -18,6 +14,7 @@ import "types";
 import "check";
 import "expressions";
 import "patterns";
+import "vm";
 
 /* -------------------------------------------------------------------- #run */
 
@@ -42,10 +39,39 @@ pub fn check_run(c: *Checker, n: *Node, expected: *Type) -> *Type {
         error(c, n.tok, "`#run` of something that returns nothing has no value; use it as a statement, `#run f();`");
         return c.types.error;
     }
+    if (c.vm == null)
+        c.vm = make_vm(c);
+    if (t.kind != .Void) {
+        let ok, why = vm_bakeable(c.vm, t);
+        if (!ok) {
+            error(c, n.tok, tformat("`#run` can't produce %: %", qt(t), why));
+            return c.types.error;
+        }
+    }
     if (c.error_count > 0 || c.res.error_count > 0)
         return c.types.error; // the program it would run may be broken
-    error(c, n.tok, "`#run` needs the bytecode VM, which the new compiler doesn't have yet");
-    return c.types.error;
+    let value, ran = vm_evaluate(c.vm, inner, n);
+    if (!ran)
+        return c.types.error;
+    if (t.kind == .Void)
+        return t; // it ran for what it does; there's no value to keep
+    let baked = vm_bake(c.vm, t, value.ptr, n.tok);
+    if (baked == null) {
+        error(c, n.tok, "`#run` made a tagged enum whose tag isn't one of its variants (a value made with `as`?)");
+        return c.types.error;
+    }
+    mark_baked(baked, n.color);
+    n.* = baked.*;
+    return n.ty;
+}
+
+fn mark_baked(n: *Node, color: i32) {
+    if (n == null)
+        return;
+    n.is_baked = true;
+    n.color = color;
+    for (child in code_children(n)) // a variant's value, the items
+        mark_baked(child, color);
 }
 
 // `#insert e`: e must come to a string literal: `#run f()`, a string, or a
@@ -203,7 +229,7 @@ pub fn type_kind_value(c: *Checker, kind: string) -> i64 {
 
 // Top-level `#run`s, in order, once the program checks without errors:
 // build scripts, which can set how it's built (std/build). Any value they
-// make is dropped. Until the VM is ported they're checked, not run.
+// make is dropped.
 pub fn run_build_steps(c: *Checker) {
     for (n in c.build_steps) {
         if (c.error_count > 0)
@@ -224,6 +250,11 @@ pub fn run_build_steps(c: *Checker) {
             i++;
         }
         c.current_instance = null;
+        if (c.error_count > 0)
+            return;
+        if (c.vm == null)
+            c.vm = make_vm(c);
+        vm_evaluate(c.vm, value, n);
     }
 }
 
