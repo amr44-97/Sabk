@@ -19,10 +19,11 @@ switch to them at the bootstrap.
 - [ ] **Types as values:** `#insert` in struct and enum bodies, value parameters on structs (section 3)
 - [x] **Tagged enums:** `!is`, checked variant access `x.Variant`, narrowing (section 4)
 - [x] **Error enums:** `enum IoError: Error { ... }`; plain enums go back to being plain (section 5)
-- [ ] **Results:** `E!T`, `E!void`, `!T` (inferred failure), wrapping, destructuring, `or_return .Replacement` (section 5)
-- [ ] **Dropped failures:** a warning that shows the handling; levels from flags and build options (section 5)
+- [ ] **Failures:** the reason logged, `context.log_level`, result defaults (`-> (i64, ParseError = .None)`), results taken from the left, `or_return .Replacement` (section 5)
+- [ ] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
-- [ ] **Function overloading:** one name, several parameter lists; picked by the arguments' types (section 7)
+- [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
+- [ ] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 
 ## 1. Formatting
@@ -270,7 +271,7 @@ if (o !is .Some) return -1;
 return o.Some;                      // no check: narrowed
 ```
 
-## 5. Errors and results
+## 5. Errors
 
 ### Error enums
 
@@ -287,92 +288,136 @@ enum ConfigError: Error { BadLine(line: isize), UnknownKey(key: string), CantRea
 6. Variant values fit in 32 bits, and an error enum doesn't choose its integer type (at first).
 7. Tagged error enums carry data, as `ConfigError` does above.
 
-### Results: `E!T`
+### Failing: an error enum for the caller, the reason for the log
 
-`E!T` is the prelude's `Result(E, T)`, `enum Result($E, $T) { Ok(T), Err(E) }`,
-written with the value last, as `?T` is `Option(T)` and every type
-constructor is a prefix (`?T`, `*T`, `[]T`).
+Revised Oct 19, 2026 (evening). Results (`E!T`, `!T`) are dropped: two
+ways to fail were one too many. A function that can fail returns several
+results, the failure last, as today. From Jai: the function that fails
+**logs why**, so the caller gets a value it can act on, and the details
+(the path, the line, the bad text) aren't lost.
 
 ```
-fn read_file(path: string, a: Allocator = context.allocator) -> IoError!string {
-    ...
-    if (file == null) return last_io_error();     // a failure: Err
-    ...
-    return data[..len] as string;                 // a value: Ok
-}
+enum ConfigError: Error { CantRead(IoError), NoEquals(line: isize), BadNumber(line: isize) }
 
-fn write_file(path: string, data: string) -> IoError!void {
+fn load_config(path: string) -> (Config, ConfigError = .None) {
+    let config: Config;
+    let text = read_file(path) or_return .CantRead;   // read_file logged why
+    defer free(text.ptr);
     ...
-    if (written != size) return last_io_error();
-}                                                 // the end: success
-
-fn parse_prefix(s: string) -> ParseError!(i64, isize)    // several values
-
-fn load_config(path: string) -> !Config {         // the failure type is inferred
-    let text = read_file(path) or_return;         // IoError
-    let port = parse_int(text) or_return;         // ParseError
-    return .{ .port = port };
-}                                                 // two error enums: Error!Config
-
-fn main() -> !void {
+        if (!found) {
+            log(.Error, "%:%: expected key = value, found '%'", path, i + 1, line);
+            return config, .NoEquals(i + 1);
+        }
     ...
+    return config;                                    // the failure takes its default: None
 }
 ```
 
-- **`E!void`**: nothing, or a failure. Reaching the end of the function is success.
-- **`!T` infers the failure type**: the one error enum the body fails with, or `Error` when it fails with several. It must be written for recursive functions ("`walk`'s failure type depends on itself; write it, like `IoError!void`"), function types and `extern` functions, and a body that never fails makes the `!` an error. Messages name the inferred type ("found `Error!Config` (`load_config`'s failure type is inferred from its body)"). std writes its failure types: its signatures are documentation.
-- **E can be any type**; error enums are the normal case, and the ones that convert to `Error`. A quick tool can return `string!Config`.
-- **Wrapping**: a value becomes `Ok`, a failure `Err`; when T and E are the same type, write `.Ok(x)` or `.Err(x)`. The same goes for `?T` (`let o: ?i64 = 5;` is `.Some(5)`). Not for other tagged enums: the variant's name is the point there.
-- **Zero** is `Ok` holding a zero value.
-- **Several values with a failure** (`ParseError!(i64, isize)`) need tuples to be storable in a `Result`: a small extension.
-- **`fn main() -> !void`**: a failure is printed (`error: %w`) and the exit code is 1.
-- **Tuples keep their meaning**: `(T, U)` is always both. A partial result and a failure are `(Config, ?ConfigError)`. `or_return` on `(T, E)` tuples stays while std moves to results, then gets decided.
+- **Both types are written** in the signature; nothing is inferred. The
+  failure is a `bool`, an error enum or `Error`. Use an error enum when
+  the caller may want to tell the failures apart.
+- **The reason goes to the log**: the function that fails calls
+  `log(.Error, ...)`, std's functions included (`read_file` logs
+  `error: can't read app.cfg: no such file`). Passing a failure on doesn't
+  log again: one failure, one message.
+- **A caller that expects a failure quiets it** for a block:
+  `context.logger = silent_logger();` (Jai's `,,` would do it for one
+  call, later).
+- **A minimum level**: `context.log_level` (`.Debug` by default: all of
+  them); the default logger skips messages below it. Set for a block like
+  the logger.
+- Converting to `Error` drops a payload (below), but the log line kept the
+  details.
+
+### Result defaults
+
+As in Jai, a result can have a default, and `return` leaves out the
+results at the end that have one:
+
+```
+fn parse_int(s: string) -> (i64, ParseError = .None) {
+    if (s.len == 0) return 0, .Empty;
+    ...
+    return value;                       // the failure: its default
+}
+
+fn find_user(name: string) -> (*User = null, LookupError = .None) {
+    if (!loaded) return null, .NotLoaded;   // a failure is written in full
+    ...
+}
+
+fn main() -> Error = .None {            // may end without a return
+    ...
+}
+```
+
+- `return` gives values from the left; only results with defaults can be
+  left out. Without defaults, every return gives every value, as today.
+- **`or_return`** fills the function's other results with their defaults
+  (zeros, or field defaults, where there's none), so a function says what
+  it returns on failure (`-> (isize = -1, ...)`).
+- **Falling off the end** is allowed when every result has a default.
+  This replaces the special case for `-> Error`: write `-> Error = .None`.
+- Nothing is implied: a failure's default is written, never assumed, so
+  giving a function a failure doesn't silently turn its old `return x;`s
+  into successes.
+
+### Taking the results
+
+As in Jai, results are taken from the left, and what isn't taken is
+dropped, silently:
+
+```
+let n, used, err = parse_prefix(s);   // all three
+let n, used = parse_prefix(s);        // the failure is dropped
+let n = parse_prefix(s);              // just the number
+let _, _, err = parse_prefix(s);      // `_` to reach a later one
+total += parse_int(s);                // in an expression: its first value
+parse_int(s);                         // a statement: all dropped
+```
+
+- A call with several results used in an expression (an operand, an
+  argument, `let x =`) is its first value. Today that's an error.
+- **`#nodiscard`** (Jai's `#must`) on a function makes dropping its
+  failure an error, wherever it's dropped. `_` still counts as taking it.
+- The failure was logged where it happened, so a dropped one still shows
+  in the log, with where and when.
 
 ### Handling one
 
 ```
 let text = read_file(path) or_return;             // pass it on (as an Error, if that's the result type)
 let text = read_file(path) or_else "";            // a fallback
-let text = read_file(path) or_return .CantRead;   // replace it: the IoError goes inside CantRead
-let text, err = read_file(path);                  // both sides: the value (zero if it failed),
-if (err != .None) { ... }                         //   the failure (None if it didn't)
-let err = write_file(path, data);                 // E!void: only the failure
+let text = read_file(path) or_return .CantRead;   // wrap it: the IoError goes inside CantRead
+let text, err = read_file(path);                  // both
+if err != .None { ... }
 
-let r = load_config(path);
-if (r is .Err(e)) {
-    eprintln("can't load %: %w", path, e);
-    return;
-}
-let cfg = r.Ok;                                   // narrowed: no check
-
-switch (load_config(path)) {
-case .Ok(c):                       run(c);
-case .Err(.CantRead(.NotFound)):   use_defaults();     // nested patterns see the whole stack
-case .Err(e):                      eprintln("%w", e);
+let config, err = load_config(path);
+switch err {
+case .None:
+case .CantRead(.NotFound):  config = Config.{};   // no file: the defaults
+default:                    exit(1);              // the log already said why
 }
 ```
 
-- `or_return .Variant` puts the failure inside the variant when the variant holds its type, and replaces it otherwise.
-- Destructuring works when the failure type has `None` (error enums and `Error`); others use `is`, `switch` or `or_else`.
+- `or_return .Variant` puts the failure inside the variant when the
+  variant holds its type, and replaces it otherwise.
 
-### Dropped failures
+### Warnings: `--strict` and `--werror`
 
-Not everything has to be a language rule: the default is a warning,
-`#nodiscard` makes it an error, and flags and build options set the level
-for the lenient or the strict, as `--bounds-checks` does for checks.
+The default is Jai's: no warning for a dropped failure. For the strict:
 
-```
-[warning]: this drops `read_file`'s result, and with it the failure (IoError) at [main.sabk:9:5]
-     9 |     read_file(path);
-       |     ^
-[note]: handle it:   let text, err = read_file(path);
-        pass it on:  read_file(path) or_return;
-        drop it:     _ = read_file(path);
-```
-
-- **`#nodiscard`** on a function makes the same message an error. `_ =` still counts as receiving it: it's explicit.
-- **Levels**: `--dropped-failures ignore|warn|error` on the command line, `set_dropped_failures(.Error)` in a build script; the command line wins.
-- Flags change diagnostics, never meaning, and apply to the program's own modules; std stays clean under `error`. The same scheme can later cover the other warnings (`--warnings error`).
+- **`--strict`** adds two warnings:
+  - a dropped failure, showing the handling (`let text, err = ...`,
+    `or_return`, `_ =`);
+  - a value used where its failure was never checked:
+    `let n, err = parse_int(s); total += n;` with `err` unread.
+- **`--werror`** makes every warning an error.
+- A build script sets them with `set_strict(true)` and `set_werror(true)`;
+  the command line wins. Flags change diagnostics, never meaning, and
+  apply to the program's own modules; std stays clean under both.
+- Not decided: in debug builds, a dropped failure that isn't `None`
+  logging `debug: dropped ParseError.Invalid at main.sabk:12`.
 
 ### Stacking, and what `Error` keeps
 
@@ -386,14 +431,14 @@ for the enum, 32 for the variant), so a payload has no room and is
 dropped:
 
 ```
-fn start() -> Error!void {
+fn start() -> Error = .None {
     let cfg = load_config("app.cfg") or_return;   // ConfigError.BadLine(12) becomes an Error
 }
 // error: ConfigError.BadLine                      (the 12 is gone; `is ConfigError(e)` still works)
 ```
 
-Ways to keep the details: inference keeps the specific type when there's
-only one; an app-level error enum wraps its causes
+Ways to keep the details: the log line written where it failed; an
+app-level error enum wraps its causes
 (`enum AppError: Error { Config(ConfigError), Io(IoError) }`); debug
 traces record them. Lossy stays for now, **to be reconsidered after the
 compiler is finished** (the options: room for a small payload inside
@@ -427,10 +472,37 @@ From writing the compiler in Sabk:
 - **Null checks** in checked builds: `file:line: panic: null pointer`, under the same setting as bounds checks (today it's a bare segfault, exit 139).
 - **A message fix**: `K.Let{ ... }` suggests `K.Let.{ ... }`, which then fails with "`Let` is not a struct type".
 
+### Optional parentheses
+
+Decided Oct 19, 2026. The parentheses around a condition become
+optional; without them, the body must be a block, so the condition can't
+run into it (`if done -count;`):
+
+```
+if err != .None { return config, .CantRead(err); }   // no parentheses: a block
+if (err != .None) return config, .CantRead(err);     // parentheses: any statement, as today
+while i < n { i += 1; }
+for x, i in xs { ... }
+switch key { case "port": ... }
+fn parse_int(s: string) -> i64, ParseError = .None { ... }   // results, in a declaration
+```
+
+- For `if`, `while`, `for` and `switch`, and for a declaration's results
+  (its `{` ends them). A function type keeps its parentheses:
+  `fn(i64) -> (i64, bool)`, since a comma there could start the next
+  parameter.
+- A condition that starts with `(` but goes on (`if (a + b) * 2 > c`)
+  needs the block.
+- Sabk's syntax makes this safe where C's wouldn't be: literals start with
+  `.{` or `T.{` (Rust's `if x == S { }` problem can't happen), and
+  dereferencing is postfix `p.*` (C's `if (p) *q = 1;` can't be misread).
+- Existing code stays valid. Calls, `sizeof(T)` and the like keep their
+  parentheses.
+
 ## 7. Function overloading
 
-Added Oct 19, 2026, at the user's request. A draft: the open questions at
-the end are to be decided before it's built.
+Added Oct 19, 2026, at the user's request, and decided the same day:
+Jai's model, for functions and for operators.
 
 Several functions can share a name when their parameter lists differ, as
 in Jai: `print_value(x: i64)`, `print_value(s: string)`,
@@ -483,20 +555,43 @@ whose condition is false, so overloads can split on what a type can do;
 `#caller_location` and notes work per function; error messages name the
 candidate by its signature, not only its name.
 
-Open questions:
-- Overloading across modules (above) or only within one? Across is more
-  useful (std's `print_value` for your type) and more surprising.
-- Operator overloading (`+` for a `Vec2`) is a separate decision; this
-  doesn't include it.
-- Should an exact-type candidate beat a generic one silently (as above),
-  or should the two together be an error?
+Decided, as in Jai:
+- **Across modules**: the candidates are the module's own and its plain
+  imports' (above).
+- **A concrete candidate beats a generic one** silently, by rank 4.
+
+### Operators
+
+```
+fn operator +(a: Vec2, b: Vec2) -> Vec2 { return .{ .x = a.x + b.x, .y = a.y + b.y }; }
+fn operator *(v: Vec2, k: f64) -> Vec2 #symmetric { return .{ .x = v.x * k, .y = v.y * k }; }
+fn operator [](m: *Matrix, i: isize) -> f64 { ... }
+fn operator []=(m: *Matrix, i: isize, value: f64) { ... }
+
+let c = a + b;
+let d = 2.0 * c;              // #symmetric: (v: Vec2, k: f64) taken either way round
+a += b;                       // from operator +
+```
+
+- **The operators**: `+ - * / % & | ^ << >> == !=`, and `[]` (reading)
+  and `[]=` (writing). An operator is an overloaded function named
+  `operator +`, picked the same way.
+- **`+` gives `+=`**, and so on for the others.
+- **`#symmetric`** on a two-parameter operator also accepts its arguments
+  the other way round (`k * v`).
+- **Not overloadable**: `=`, `&&`, `||`, `!`, `.`, `as`, `is`, `new`.
+  At least one parameter must be a struct, enum or union: `+` on `i64`
+  can't change.
+- In C an operator is a function: `operator_add__Vec2__Vec2`.
+- Advice (Jai's too): keep them for math. `v + w` that allocates or fails
+  hides what `vec_add(v, w)` would show.
 
 ## 8. How it lands
 
-1. **Port the checker** (next), matching the C++ on existing programs, but built for this plan: a job queue; instances keyed by constant values as well as types; `Option`, `Result` and error enums as rules of the type system; flow facts for narrowing; notes kept on declarations and fields.
-2. **Port the C backend and the VM.**
-3. **Bootstrap**: the compiler compiles itself; std and the compiler move to the new syntax.
-4. **Build the features**, each with tests, in about this order: formatting; error enums, results, wrapping, destructuring, `%w` and the dropped-failure warning; `!is`, checked access and narrowing; `#import`, `#load` and the scopes; function overloading (section 7, after its open questions are decided); layer 1; layer 2; types as values; layer 3; the smaller additions. A feature can start as soon as the phase it needs exists in the new compiler.
+1. **Port the checker** (done), matching the C++ on existing programs, but built for this plan: a job queue; instances keyed by constant values as well as types; `Option` and error enums as rules of the type system; flow facts for narrowing; notes kept on declarations and fields.
+2. **Port the C backend and the VM** (done).
+3. **Bootstrap** (done): the compiler compiles itself; std and the compiler move to the new syntax.
+4. **Build the features**, each with tests, in about this order: formatting; error enums, logged failures, result defaults, taking results, `%w`, `--strict` and `--werror`; `!is`, checked access and narrowing; `#import`, `#load` and the scopes; function overloading and operators (section 7); optional parentheses; layer 1; layer 2; types as values; layer 3; the smaller additions. A feature can start as soon as the phase it needs exists in the new compiler.
 
 ## 9. Long term
 
