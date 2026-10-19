@@ -28,7 +28,9 @@ known=" tests/resolve/macro_labels.smelt
   tests/errors/parse_let_values_type.smelt tests/run/variant_literal.smelt
   tests/errors/variant_literal_misuse.smelt tests/errors/variant_literal_dot.smelt
   tests/errors/parse_old_literals.smelt tests/run/null_pointer.smelt
-  tests/run/option_wrap.smelt tests/errors/option_wrap.smelt "
+  tests/run/option_wrap.smelt tests/errors/option_wrap.smelt
+  tests/run/variant_access.smelt tests/errors/variant_access.smelt
+  tests/errors/variant_access_run.smelt tests/errors/tagged_enum_misuse.smelt "
 
 modes=("$@")
 ((${#modes[@]})) || modes=(--tokens --ast --resolve --types)

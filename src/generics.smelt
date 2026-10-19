@@ -659,6 +659,8 @@ pub fn is_place(n: *Node) -> bool {
         return object.ty.kind == .Ptr || is_place(object);
     case .Index, .Deref:
         return true;
+    case .VariantAccess{object}:
+        return object.ty.kind == .Ptr || is_place(object);
     default:
         return false;
     }

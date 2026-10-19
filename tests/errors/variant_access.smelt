@@ -1,0 +1,8 @@
+// x.Variant needs a variant that holds a value
+enum Shape { Circle(r: f64), Dot }
+fn f(s: Shape) -> f64 {
+    let a = s.Dot;
+    let b = s.Square;
+    return 0.0;
+}
+fn main() {}

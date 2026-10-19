@@ -13,6 +13,7 @@ import "check";
 import "patterns";
 import "expressions";
 import "generics";
+import "narrowing";
 
 pub fn check_cond(c: *Checker, n: *Node) {
     let t = check_expr(c, n, null);
@@ -36,8 +37,10 @@ pub fn is_unit_literal(e: *Node) -> bool {
 pub fn check_stmt(c: *Checker, n: *Node) {
     switch (n.kind) {
     case .Block{stmts}:
+        let known = c.facts.len; // what's learned in it ends with it
         for (s in stmts)
             check_stmt(c, s);
+        c.facts.len = known;
 
     case .Let, .Const:
         n.check_state = 1;
@@ -79,9 +82,19 @@ pub fn check_stmt(c: *Checker, n: *Node) {
 
     case .If{cond, then, else_}:
         check_cond(c, cond);
+        let known = c.facts.len;
+        add_facts(c, cond, true);
         check_stmt(c, then);
+        c.facts.len = known;
+        add_facts(c, cond, false);
         if (else_ != null)
             check_stmt(c, else_);
+        c.facts.len = known;
+        // `if (x !is .V) return;`: from here on, x is .V
+        if (always_leaves(then))
+            add_facts(c, cond, false);
+        else if (else_ != null && always_leaves(else_))
+            add_facts(c, cond, true);
 
     case .StaticIf{cond}:
         // only the branch taken is checked: the other may not even make
@@ -104,7 +117,10 @@ pub fn check_stmt(c: *Checker, n: *Node) {
 
     case .While{cond, body}:
         check_cond(c, cond);
+        let known = c.facts.len;
+        add_facts(c, cond, true);
         check_stmt(c, body);
+        c.facts.len = known;
     case .DoWhile{body, cond}:
         check_cond(c, cond);
         check_stmt(c, body);

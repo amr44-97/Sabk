@@ -1,0 +1,4 @@
+// a failed check in #run code is a compile error
+fn none() -> ?i32 { return .None; }
+const X = #run none().Some;
+fn main() {}

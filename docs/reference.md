@@ -1375,8 +1375,34 @@ default:
 in messages)
 with the same variant names, so `if (e.tag == .Nil)` and `switch (e.tag)`
 work. It's read-only: change the variant by assigning a whole new value.
-There's no other field access: the variant's value is only reachable
-through a `switch` or `is`, so it can't be read as the wrong variant.
+
+**`e.Variant`** takes a variant's value out: `o.Some`, `e.Number`, or for
+one with fields their struct, `e.Binary.op`. It's a place: `p.Number += 1`
+through a pointer, `n.kind.Switch.continued = true`. When `e` is another
+variant it panics, `file:line:col: panic: the value isn't .Number`, like
+an index out of bounds, and under the same setting as bounds checks; in
+`#run` code it's a compile error.
+
+```
+if (n.kind !is .Switch) return;
+let s = n.kind.Switch;                       // checked
+```
+
+**Narrowing** drops the check where the compiler knows the variant:
+
+```
+if (o is .Some) println("%", o.Some);        // no check: it's .Some here
+if (e is .Number && e.Number > 9) { ... }    // and on the right of &&
+if (s !is .Rect) return 0;
+return s.Rect.w * s.Rect.h;                  // no check after leaving
+```
+
+The compiler knows it after `if (x is .V)` (in the body, and on the right
+of `&&`), and after `if (x !is .V)` whose body leaves (`return`, `break`,
+`continue`). Only for a local, a parameter, or a field of one reached
+without a pointer, and only when the function never assigns it or takes
+its address, so nothing can change it in between; through a pointer the
+check stays.
 
 **Generic tagged enums** take type parameters like generic structs:
 

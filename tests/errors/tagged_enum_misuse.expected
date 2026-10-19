@@ -10,8 +10,8 @@
 [error]: `Expr.Number` holds one `i64`, found 2 values at [tests/errors/tagged_enum_misuse.smelt:10:24]
     10 |     let d = Expr.Number(1, 2);
        |                        ^
-[error]: `Expr` is a tagged enum: its only field is `tag`. A variant's value comes from a `switch`, with `case .Number(x):` at [tests/errors/tagged_enum_misuse.smelt:11:15]
-    11 |     let f = e.payload;                   // only .tag
+[error]: `Expr` has no variant `payload`; its variants' values are taken out with their names, like `x.Number`, and its tag is `.tag` at [tests/errors/tagged_enum_misuse.smelt:11:15]
+    11 |     let f = e.payload;                   // only .tag and the variants
        |               ^
 [error]: can't assign to this: `tag` is read-only at [tests/errors/tagged_enum_misuse.smelt:12:11]
     12 |     e.tag = .Nil;                        // read-only

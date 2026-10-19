@@ -66,6 +66,10 @@ fn root(n: *Node) -> *Node {
         if (object.ty != null && object.ty.kind == .Array)
             return root(object);
         return null;
+    case .VariantAccess{object}:
+        if (object.ty != null && object.ty.kind == .Ptr)
+            return null;
+        return root(object);
     default:
         return null;
     }
@@ -87,6 +91,10 @@ fn param_target(n: *Node) -> *Node {
         return param_target(object);
     case .Index{object}:
         if (object.ty != null && (object.ty.kind == .Slice || object.ty.kind == .Growable || object.ty.kind == .Ptr))
+            return pointer_param(object);
+        return param_target(object);
+    case .VariantAccess{object}:
+        if (object.ty != null && object.ty.kind == .Ptr)
             return pointer_param(object);
         return param_target(object);
     default:
@@ -505,6 +513,7 @@ fn pointer_base(n: *Node) -> *Node {
     case .Deref{pointer}: return pointer_base(pointer);
     case .Member{object}: return if (e.decl != null) null else pointer_base(object);
     case .Index{object}: return pointer_base(object);
+    case .VariantAccess{object}: return pointer_base(object);
     default: return null;
     }
 }

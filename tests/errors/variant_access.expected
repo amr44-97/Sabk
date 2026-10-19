@@ -1,0 +1,6 @@
+[error]: `.Dot` holds no value, so there's nothing to take out; test for it with `is .Dot` at [tests/errors/variant_access.smelt:4:15]
+     4 |     let a = s.Dot;
+       |               ^
+[error]: `Shape` has no variant `Square`; its variants' values are taken out with their names, like `x.Circle`, and its tag is `.tag` at [tests/errors/variant_access.smelt:5:15]
+     5 |     let b = s.Square;
+       |               ^

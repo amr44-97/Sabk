@@ -13,6 +13,7 @@ import "check";
 import "statements";
 import "expressions";
 import "generics";
+import "narrowing";
 
 // What a pattern matches, for finding cases that repeat or overlap: the
 // values lo..=hi, or a string
@@ -539,7 +540,7 @@ fn case_parts(clause: *Node) -> ([]*Node, *Node, *Node) {
 }
 
 // the value a pattern names: a variant's, or its own
-fn pattern_head(p: *Node) -> *Node {
+pub fn pattern_head(p: *Node) -> *Node {
     if (p.kind is .VariantPattern{variant})
         return variant;
     return p;
@@ -757,10 +758,15 @@ pub fn check_if_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
     if (cond.kind != .Error && cond != c.types.bool_)
         error(c, cond_node.tok, tformat("an `if` needs a `bool` condition, found %", qt(cond)));
     let result = expected;
+    let known = c.facts.len;
+    add_facts(c, cond_node, true);
     let a = check_expr(c, then, result);
+    c.facts.len = known;
     if (result == null && !is_untyped(a) && a.kind != .Error)
         result = a;
+    add_facts(c, cond_node, false);
     let b = check_expr(c, else_, result);
+    c.facts.len = known;
     if (a.kind == .Error || b.kind == .Error)
         return c.types.error;
     if (result == null && !is_untyped(b))

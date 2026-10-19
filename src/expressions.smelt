@@ -18,6 +18,7 @@ import "patterns";
 import "generics";
 import "comptime";
 import "formats";
+import "narrowing";
 
 /* ------------------------------------------------------------ conversions */
 
@@ -343,6 +344,10 @@ pub fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
         if (object.ty.kind == .Array)
             return assignable(c, object, why);
         return true; // slices and pointers point at memory elsewhere
+    case .VariantAccess{object}:
+        if (object.ty.kind == .Ptr)
+            return true; // p.Some writes through the pointer
+        return assignable(c, object, why);
     case .Deref, .Context:
         return true;
     default:
@@ -899,7 +904,12 @@ fn check_binary(c: *Checker, n: *Node) -> *Type {
 
     if (op == .And || op == .Or) {
         let l = check_expr(c, lhs, null);
+        // the right side runs only when the left is true (`&&`) or false
+        // (`||`): what that says holds there
+        let known = c.facts.len;
+        add_facts(c, lhs, op == .And);
         let r = check_expr(c, rhs, null);
+        c.facts.len = known;
         if (l.kind != .Bool && l.kind != .Error) {
             error(c, lhs.tok, tformat("% needs `bool` operands, found %", op_name, qt(l)));
             return c.types.error;
@@ -1215,9 +1225,25 @@ fn check_member(c: *Checker, n: *Node) -> *Type {
     if (t.is_tagged) {
         if (name == "tag")
             return t.fields[0].ty;
+        // x.Some: the value a variant holds, checked to be that variant
+        // unless it's known to be (narrowing)
+        for (v in enum_variants(t.decl)) {
+            if (v.tok.text != name)
+                continue;
+            let held = payload_of(t, v);
+            if (held == null) {
+                error(c, n.tok, tformat("`.%` holds no value, so there's nothing to take out; test for it with `is .%`",
+                                        name, name));
+                return c.types.error;
+            }
+            let known = !through_ptr && is_narrowed(c, object, v);
+            n.kind = .VariantAccess(object, !known);
+            n.decl = v;
+            return held;
+        }
         let example = t.fields[1].ty.fields[0].name;
-        error(c, n.tok, tformat("% is a tagged enum: its only field is `tag`. A variant's value comes from a `switch`, with `case .%(x):`",
-                                qt(t), example));
+        error(c, n.tok, tformat("% has no variant %; its variants' values are taken out with their names, like `x.%`, and its tag is `.tag`",
+                                qt(t), q(name), example));
         return c.types.error;
     }
 

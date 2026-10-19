@@ -1393,6 +1393,9 @@ fn expr_inner(g: *CodeGen, n: *Node) -> string {
             body = cat(body, ", .payload.", local_name(n.decl.tok.text), " = ", expr(g, payload));
         return compound(g, n.ty, body);
 
+    case .VariantAccess{object, checked}:
+        return variant_access(g, n, object, checked);
+
     case .Cast{value}:
         if (value.ty.kind == .Growable && n.ty.kind == .Slice)
             return convert(g, expr(g, value), value.ty, n.ty);
@@ -1409,6 +1412,30 @@ fn expr_inner(g: *CodeGen, n: *Node) -> string {
     default:
         return internal_error(g, n);
     }
+}
+
+// x.Some: the value a variant holds; checked (when bounds are) to be that
+// variant, as a place where it is one, so it can be assigned to
+fn variant_access(g: *CodeGen, n: *Node, object: *Node, checked: bool) -> string {
+    let through = object.ty.kind == .Ptr;
+    let t = if (through) object.ty.elem else object.ty;
+    let field = cat("payload.", local_name(n.decl.tok.text));
+    let check = checked && checks_bounds(g);
+    if (!check) {
+        if (through)
+            return cat("(", nonnull(g, expr(g, object), n.tok), ")->", field);
+        return cat("(", expr(g, object), ").", field);
+    }
+    let tag = constant(g, n.decl.cval, t.fields[0].ty);
+    let v = tmp(g, "variant");
+    let panic = cat("rt_panic(", location(g, n.tok), ", ", c_string(tformat("the value isn't .%", n.decl.tok.text)), ")");
+    if (through || is_place(object)) {
+        let address = if (through) nonnull(g, expr(g, object), n.tok) else cat("&", expr(g, object));
+        return cat("(*({ ", c_type(g, t), " *", v, " = ", address, "; if (", v, "->tag != ", tag, ") ", panic, "; &", v,
+                   "->", field, "; }))");
+    }
+    return cat("({ ", c_type(g, t), " ", v, " = ", expr(g, object), "; if (", v, ".tag != ", tag, ") ", panic, "; ", v,
+               ".", field, "; })");
 }
 
 // every expression the checker accepts is handled; reaching here is a

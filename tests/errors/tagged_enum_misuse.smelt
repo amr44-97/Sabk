@@ -8,7 +8,7 @@ fn misuse(e: Expr) {
     let b = Expr.Nil(1);                 // holds nothing
     let c = Expr.Pair(1);                // b has no default
     let d = Expr.Number(1, 2);
-    let f = e.payload;                   // only .tag
+    let f = e.payload;                   // only .tag and the variants
     e.tag = .Nil;                        // read-only
     let g: Expr = .{ };
     switch (e) {

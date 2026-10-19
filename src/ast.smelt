@@ -138,6 +138,9 @@ pub enum NodeKind {
     // made by the checker: a tagged enum's value, `Expr.Number(1)`; decl:
     // the variant, payload: its value, or null
     VariantValue(payload: *Node),
+    // made by the checker: x.Some, the value variant `decl` holds, checked
+    // to be that variant unless the checker knows it is (narrowing)
+    VariantAccess(object: *Node, checked: bool),
 
     // ---- patterns, in cases and after `is`
     Is(value: *Node, pattern: *Node),
@@ -341,6 +344,7 @@ pub fn old_shape(n: *Node) -> OldShape {
         s.tag = "MACRO_EXPANSION"; s.declared = result; s.lhs = callee; s.list = stmts;
     case .TypeCompare{lhs, rhs}: s.tag = "TYPE_COMPARE"; s.lhs = lhs; s.rhs = rhs;
     case .VariantValue{payload}: s.tag = "VARIANT_VALUE"; s.lhs = payload;
+    case .VariantAccess{object}: s.tag = "VARIANT_ACCESS"; s.lhs = object;
 
     case .Is{value, pattern}: s.tag = "IS"; s.lhs = value; s.rhs = pattern;
     case .Range{lo, hi}: s.tag = "RANGE"; s.lhs = lo; s.rhs = hi;

@@ -40,6 +40,7 @@ import "comptime";
 import "formats";
 import "memory";
 import "vm";
+import "narrowing";
 
 pub const MAX_INSTANCE_DEPTH = 64;
 
@@ -48,6 +49,12 @@ pub const MAX_INSTANCE_DEPTH = 64;
 pub struct InstanceKey {
     templ: *Node;
     args: []*Type;
+}
+
+// a place (a local, a parameter, a field of one) known to be a variant
+pub struct Fact {
+    path: string;
+    variant: *Node;
 }
 
 pub struct Checker {
@@ -96,6 +103,13 @@ pub struct Checker {
     // the type so far of a labeled block or switch expression's value
     value_types: Map(*Node, *Type);
     warned: Map(string, bool);  // a warning is given once per place
+
+    // narrowing: what the checker knows a place's variant to be where it
+    // is (a stack, cut back as scopes end), and the variables of the
+    // function being checked that are assigned or have their address
+    // taken somewhere, whose variant can change
+    facts: [..]Fact;
+    unstable: Map(*Node, bool);
 
     // #run: the interpreter, made when the first #run needs it
     vm: *Vm;
@@ -889,8 +903,14 @@ pub fn check_fn_body(c: *Checker, fun: *Node) {
     map_put(&c.body_state, fun, 1);
     let errors = c.error_count;
     c.current_fn = fun;
+    let saved_facts, saved_unstable = c.facts, c.unstable;
+    let no_facts: [..]Fact;
+    let no_unstable: Map(*Node, bool);
+    c.facts, c.unstable = no_facts, no_unstable;
+    find_unstable(c, body);
     for (stmt in block_list(body))
         check_stmt(c, stmt);
+    c.facts, c.unstable = saved_facts, saved_unstable;
 
     // a function returning only an Error may fall off its end: success
     if (fun.ty.ret.kind != .Void && !fun.ty.ret.is_failure && !always_returns(body, null))

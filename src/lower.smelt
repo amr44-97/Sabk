@@ -1447,6 +1447,16 @@ fn inner(l: *Lower, n: *Node) -> u32 {
     case .New:
         return new_(l, n, t);
 
+    case .VariantAccess{object, checked}:
+        if (object.ty.kind == .Ptr || is_place(object))
+            return load(l, address(l, n), t);
+        // a value made here: its own slot, checked in place
+        let value = expr(l, object);
+        let tagged = concrete(l.vm, object.ty);
+        if (checked)
+            check_variant(l, n, value + tagged.fields[0].offset as u32, tagged);
+        return value + tagged.fields[1].offset as u32;
+
     case .MacroExpansion:
         let result = expansion(l, n);
         if (result < 0) {
@@ -1610,6 +1620,16 @@ fn member_offset(l: *Lower, t: *Type, n: *Node) -> u64 {
     return 0;
 }
 
+// fails unless the tag in slot `tag` is x.V's variant
+fn check_variant(l: *Lower, n: *Node, tag: u32, tagged: *Type) {
+    let k = kind_of(tagged.fields[0].ty);
+    let same = alloc_slot(l, 1, 1);
+    cmp(l, k, .Eq, same, tag, konst(l, k, n.decl.cval.i.lo));
+    let fine = jump(l, .Jnz, same);
+    fail_with(l, n.tok, tformat("the value isn't .%", n.decl.tok.text));
+    patch(l, fine);
+}
+
 // a slot holding the address of `n`
 fn address(l: *Lower, n: *Node) -> u32 {
     if (failed(l))
@@ -1644,6 +1664,14 @@ fn address(l: *Lower, n: *Node) -> u32 {
         return element(l, n);
     case .Deref{pointer}:
         return expr(l, pointer);
+    case .VariantAccess{object, checked}:
+        // where the tagged value is, its tag checked, then its payload
+        let through = object.ty.kind == .Ptr;
+        let base = if (through) expr(l, object) else address(l, object);
+        let tagged = concrete(l.vm, if (through) object.ty.elem else object.ty);
+        if (checked)
+            check_variant(l, n, load(l, offset(l, base, tagged.fields[0].offset), tagged.fields[0].ty), tagged);
+        return offset(l, base, tagged.fields[1].offset);
     case .Context:
         return ctx_slot(l);
     default:

@@ -1,0 +1,6 @@
+4 3 0
+found at 2
+12 2
+now a dot
+tests/run/variant_access.smelt:41:20: panic: the value isn't .Circle
+[exit 134]
