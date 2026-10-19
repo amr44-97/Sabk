@@ -1,0 +1,168 @@
+// #run: code that runs while compiling, its result baked into the program
+import "std/fmt";
+import "std/io";
+import "std/str";
+import "std/array";
+import "std/map";
+import "std/sorting";
+
+fn fib(n: isize) -> isize {
+    if (n < 2) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+
+// allocates through the context, like any code
+fn primes(count: isize) -> []isize {
+    let out = new([]isize, count);
+    let found = 0;
+    for (let n = 2; found < count; n++) {
+        let prime = true;
+        for (let d = 2; d * d <= n; d++)
+            if (n % d == 0) { prime = false; break; }
+        if (prime) { out[found] = n; found++; }
+    }
+    return out;
+}
+
+const FIB20 = #run fib(20);
+const PRIMES = #run primes(10);
+const KNOWN = #run 4 * 1024;                  // already constant: no running
+let table: [#run fib(6)]u8;                   // an array length
+
+// strings, the standard library, generics
+fn greeting(who: string) -> string {
+    let b = make_builder();
+    builder_append(&b, "hello, ");
+    builder_append(&b, who);
+    builder_append_char(&b, '!');
+    builder_append(&b, " \"quoted\"\ttab\n");
+    builder_print(&b, "%{.2}", 1.5);
+    return builder_string(&b);
+}
+
+fn sorted_words() -> []string {
+    let words: [..]string;
+    array_add(&words, "pear");
+    array_add(&words, "apple");
+    array_add(&words, "fig");
+    sort_by(words, string_less);
+    return words;
+}
+
+fn word_counts() -> [3]i32 {
+    let m = make_map(string, i32);
+    for (w in string.["a", "b", "a", "c", "a", "b"]) {
+        let v = map_find(&m, w);
+        if (v == null) map_put(&m, w, 1); else v.* += 1;
+    }
+    return .[map_get(&m, "a") or_else 0, map_get(&m, "b") or_else 0, map_get(&m, "c") or_else 0];
+}
+
+const GREETING = #run greeting("world");
+const WORDS = #run sorted_words();
+const COUNTS = #run word_counts();
+
+// structs, enums, field defaults
+enum Suit: u8 { Clubs, Diamonds, Hearts, Spades }
+struct Card { suit: Suit; rank: i32; name: string; }
+struct Point { x: f64; y: f64 = 2.5; }
+
+fn best() -> Card { return .{ .suit = .Spades, .rank = 14, .name = "ace" }; }
+
+const BEST = #run best();
+const ORIGIN = #run Point.{ .x = 1 };
+const SUIT = #run best().suit;
+
+// defer, macros, floats
+fn with_defer() -> isize {
+    let x = 1;
+    {
+        defer x *= 10;
+        x += 1;
+    }
+    return x;
+}
+
+fn twice(body: Code) #expand { #insert body; #insert body; }
+
+fn with_macro() -> isize {
+    let n = 0;
+    twice() { n += 21; }
+    return n;
+}
+
+fn half(x: f32) -> f32 { return x / 2; }
+
+const DEFERRED = #run with_defer();
+const MACRO = #run with_macro();
+const HALF = #run half(3);
+
+// compile-time code has its own copy of the globals: the program starts
+// with counter = 0 whatever #run did to it
+let counter = 0;
+fn next() -> isize { counter += 1; return counter; }
+const FIRST = #run next();
+const SECOND = #run next();
+
+// integer arithmetic matches the compiled program exactly
+fn a1() -> i64 { let x: u8 = 200; return ((x << 1) >> 1) as i64; }
+fn a2() -> i64 { let x: u8 = 250; let y: u8 = 10; return (x + y) as i64; }
+fn a3() -> i64 { let x: i8 = -128; return (x / -1) as i64; }
+fn a4() -> i64 { let x: i32 = 2147483647; return (x + 1) as i64; }
+fn a5() -> i64 { let x: u16 = 65535; return (x * x) as i64; }
+fn a6() -> i64 { let x: i16 = -1; return (x >> 3) as i64; }
+fn a7() -> i64 { let f: f64 = -3.9; return f as i64; }
+fn a8() -> i64 { let x: u8 = 1; return (~x) as i64; }
+fn a9() -> i64 { let x: i8 = 100; x += 100; return x as i64; }
+fn a10() -> i64 { let a: i64 = -7; return a / 2 + a % 2 * 100; }
+
+// C functions, and C calling back into compile-time code
+extern fn qsort(base: *void, count: usize, size: usize, compare: *void);
+extern fn compare_bytes(a: *u8, b: *u8) -> i32 { return (a.* as i32) - (b.* as i32); }
+
+fn sorted_letters() -> [5]u8 {
+    let letters = u8.['d', 'b', 'e', 'a', 'c'];
+    qsort(&letters, 5, 1, compare_bytes);
+    return letters;
+}
+
+const LETTERS = #run sorted_letters();
+
+fn is_ready() -> bool { return true; }
+fn announce() { println("this runs while compiling"); }
+
+fn main() {
+    #run announce();
+    print("%", FIB20); print(" "); print("%", KNOWN); print(" ");
+    print("%", table.len); println();
+    for (p in PRIMES) { print("%", p); print(" "); }
+    println();
+    println(GREETING);
+    for (w in WORDS) { print(w); print(" "); }
+    println();
+    for (c in COUNTS) { print("%", c); print(" "); }
+    println();
+    print(BEST.name); print(" "); print("%", BEST.rank); print(" ");
+    print("%", BEST.suit as i64); print(" "); print("%", SUIT == .Spades); println();
+    print("%{.1}", ORIGIN.x); print(" "); print("%{.1}", ORIGIN.y); println();
+    print("%", DEFERRED); print(" "); print("%", MACRO); print(" ");
+    print("%{.2}", HALF); println();
+    print("%", FIRST); print(" "); print("%", SECOND); print(" ");
+    print("%", next()); println();
+
+    let at_run_time = i64.[a1(), a2(), a3(), a4(), a5(), a6(), a7(), a8(), a9(), a10()];
+    let at_compile_time = i64.[#run a1(), #run a2(), #run a3(), #run a4(), #run a5(),
+                                   #run a6(), #run a7(), #run a8(), #run a9(), #run a10()];
+    for (i in 0..10) {
+        print("%", at_compile_time[i]);
+        if (at_compile_time[i] != at_run_time[i]) print(" (differs!)");
+        print(" ");
+    }
+    println();
+
+    for (c in LETTERS) print("%{c}", c);
+    println();
+
+    #if (#run is_ready())
+        println("#if can use #run");
+}

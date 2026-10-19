@@ -1,0 +1,10 @@
+u8 wraps: 44
+i8 wraps: -128
+~0 as u32: 4294967295
+shifts: 16 -4
+div/mod: -3 -1
+float: 3.00 2.50
+casts: 3 44 7.0
+widened: 200000000
+precedence: 7 1
+[exit 0]

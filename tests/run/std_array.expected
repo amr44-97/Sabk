@@ -1,0 +1,12 @@
+[0 10 20 30 40] len 5
+[-1 0 10 15 20 30 40 99] len 8
+0 -1 40
+[99 10 15 20 30] len 5
+[4 10 15 20 30 7 8 9] len 8
+1008 true
+[4 10] len 2
+[] len 0
+2401 64
+two one
+std/array.smelt:89:15: panic: array_pop on an empty array
+[exit 134]

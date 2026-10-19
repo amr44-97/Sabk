@@ -1,0 +1,56 @@
+import "std/io";
+import "std/array";
+import "std/map";
+
+enum Color { Red, Green, Blue }
+struct Point { x: i32; y: i32; }
+struct Pixel { at: Point; color: Color = .Blue; }   // .Blue: the field's type
+
+fn color_name(c: Color) -> string {
+    switch (c) {                                     // case .Red: the subject's
+    case .Red: return "red";
+    case .Green: return "green";
+    default: return "blue";
+    }
+}
+
+fn origin() -> Point { return .{};  }                // the return type
+fn shifted(p: Point, by: Point = .{ .x = 1, .y = 1 }) -> Point {
+    return .{ .x = p.x + by.x, .y = p.y + by.y };
+}
+
+fn main() {
+    let p: Point = .{ .x = 3, .y = 4 };             // a declared type
+    print("%", p.x + p.y); println();
+    p = .{ 10, 20 };                                 // assignment, positional
+    print("%", p.y); println();
+
+    let q = shifted(.{ .x = 1, .y = 2 });            // a parameter's type
+    print("%", q.x); print(" "); print("%", q.y); println();
+    print("%", origin().x); println();
+
+    let px = Pixel.{ .at = .{ .x = 5, .y = 6 } };    // nested: a field's type
+    println(color_name(px.color));
+    println(color_name(.Green));                     // .Green: a parameter
+    let c: Color = .Red;
+    if (c == .Red) println("c is red");              // the other operand's
+    if (.Blue != c) println("c isn't blue");
+
+    let a: [3]i32 = .[1, 2, 3];                      // arrays and slices: brackets
+    let s: []Point = .[.{ .x = 1 }, .{ .y = 2 }];
+    print("%", a[2]); print(" "); print("%", s[1].y); println();
+
+    let points: [..]Point;
+    array_add(&points, .{ .x = 7, .y = 8 });         // a generic parameter:
+    print("%", points[0].y); println();               // T from &points first
+
+    // new's allocator argument knows it wants an Allocator
+    let heap = new(Point, .{ .procedure = context.allocator.procedure });
+    heap.x = 9;
+    print("%", heap.x); println();
+
+    let colors = make_map(string, Color);
+    map_put(&colors, "sky", .Blue);
+    map_put(&colors, "grass", .Green);
+    for (e in colors.entries) { print(e.key); print(" is "); println(color_name(e.value)); }
+}

@@ -1,0 +1,44 @@
+import "std/fmt";
+import "std/io";
+import "std/mem";
+import "std/str" as strings;
+
+pub struct Vec2 {
+    x: f32;
+    y: f32;
+}
+
+enum Color: u8 { Red, Green, Blue = 10 }
+
+type Callback = fn(i32) -> bool;
+
+const MAX: i32 = 64;
+
+extern fn printf(fmt: *u8, ...) -> i32;
+
+pub fn main() -> i32 {
+    let arena = arena_init(4096);         // from std/mem, no prefix needed
+    defer arena_destroy(&arena);
+    context.allocator = arena_allocator(&arena);
+
+    let v = new(Vec2);                    // allocated with context.allocator
+    v.x = 1.5;
+
+    let nums = i32.[1, 2, 3, 4];
+    let total: i64 = 0;
+    for (i in 0..4) {
+        total += nums[i] as i64;
+    }
+
+    let b = strings.make_builder();       // `as strings`: always qualified
+    strings.builder_append(&b, "total = ");
+    builder_print(&b, "%", total);         // std/fmt, imported plainly
+    println(strings.builder_string(&b));
+
+    if (total > 5 && v.x != 0.0) {
+        io.print("big\n");                // the qualified form works too
+    } else {
+        printf("small\n");
+    }
+    return 0;
+}

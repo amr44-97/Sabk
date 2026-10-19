@@ -1,0 +1,100 @@
+// Error: every failure enum converts to it, so or_return passes failures
+// of different enums on, and they print as the enum and the variant. The
+// #run line checks the VM gives the same text as the compiled program.
+import "std/fmt";
+import "std/io";
+import "std/mem";
+import "std/str";
+
+enum ConfigError { None, BadLine, UnknownKey }
+enum Own { None, Bad = 7 }
+
+struct Config { port: i64 = 80; }
+struct Result { what: string; err: Error; }
+
+// IoError, ParseError and this file's own enum, all passed on as Errors
+fn load(text: string) -> (Config, Error) {
+    let config: Config;
+    for (line in split(text, "\n", context.temp_allocator)) {
+        if (line.len == 0) continue;
+        let key, value, found = cut(line, "=");
+        if (!found) return config, ConfigError.BadLine;
+        switch (trim(key)) {
+        case "port": config.port = parse_int(trim(value)) or_return;
+        default:     return config, ConfigError.UnknownKey;
+        }
+    }
+    return config, .None;
+}
+
+// only an Error: it may fall off its end, meaning success
+fn check_file(path: string) -> Error {
+    defer println("  check_file's defer");
+    let text = read_file(path) or_return;
+    free(text.ptr);
+}
+
+fn describe(e: Error) -> string {
+    return switch (e) {
+    case .None:                   "fine";
+    case IoError.NotFound:        "no such file";
+    case ParseError.Invalid:      "not a number";
+    case ConfigError.BadLine:     "a line without =";
+    default:                      "something else";
+    };
+}
+
+fn parse(s: string) -> (i64, Error) {
+    let n = parse_int(s) or_return;
+    if (n < 0) return 0, Own.Bad;
+    return n, .None;
+}
+
+fn at_compile_time() -> string {
+    let _, e1 = parse("x");
+    let _, e2 = parse("-3");
+    let k: Own = .Bad;
+    let e3: Error = k;
+    return tformat("% % % % %", e1, e2, e3 == Own.Bad, error_value(e3),
+                   describe(e1));
+}
+
+const BAKED = #run at_compile_time();
+
+fn main() -> Error {
+    for (text in string.["port = 9\n", "port = x\n", "nope\n", "colour = red\n"]) {
+        let config, err = load(text);
+        println("% %: %", config, err, describe(err));
+    }
+
+    let err = check_file("/no/such/file");
+    println("% %", err, describe(err));
+    println("%", check_file("tests/run/error_type.smelt"));
+
+    // comparing: constants and values of the enums, and None
+    let k = IoError.IsDirectory;
+    let x: Error = k;
+    println("% % % %", x == IoError.IsDirectory, x != IoError.NotFound,
+            x == .None, x == k);
+
+    // a statement switch can leave values out, as on an integer
+    switch (x) {
+    case IoError.NotFound: println("not found");
+    case IoError.IsDirectory: println("a directory");
+    }
+
+    // where it came from
+    println("% % %", error_enum(x) == type_info(IoError), error_value(x),
+            error_enum(Error.None) == null);
+
+    // printed alone, as None, and inside a struct
+    let r = Result.{ .what = "read", .err = x };
+    let none: Error;
+    println("% % %", r, none, k as Error);
+
+    let fallback = load("bad\n") or_else Config.{ .port = 1 };
+    println("%", fallback);
+
+    println("% (at compile time)", BAKED);
+    println("% (at run time)", at_compile_time());
+}

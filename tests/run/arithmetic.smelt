@@ -1,0 +1,20 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() {
+    let a: u8 = 200;
+    let b: u8 = 100;
+    printf("u8 wraps: %d\n", a + b);               // 44
+    let c: i8 = 127;
+    c += 1;
+    printf("i8 wraps: %d\n", c);                   // -128
+    let x: u32 = 0;
+    printf("~0 as u32: %u\n", ~x);
+    printf("shifts: %d %d\n", 1 << 4, -16 >> 2);   // 16 -4
+    printf("div/mod: %d %d\n", -7 / 2, -7 % 2);    // -3 -1, like C
+    let f: f32 = 1.5;
+    printf("float: %.2f %.2f\n", f * 2.0, 10.0 / 4.0);
+    printf("casts: %d %d %.1f\n", 3.9 as i32, 300 as u8, 7 as f64);
+    let wide: i64 = a;                             // widening
+    printf("widened: %lld\n", wide * 1000000);
+    printf("precedence: %d %d\n", 1 + 2 * 3, (6 & 3) == 2);
+}

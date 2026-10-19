@@ -1,0 +1,33 @@
+// #run code reading globals and constants that hold slices: the elements
+// must outlive the initializer that made them
+import "std/io";
+
+struct Table { keys: []u32; names: []string; }
+struct Defaults { xs: []u16 = .[4, 5, 6]; }
+
+fn make() -> Table {
+    let keys = new([]u32, 3);
+    keys[0] = 7; keys[1] = 8; keys[2] = 9;
+    let names = new([]string, 3);
+    names[0] = "seven"; names[1] = "eight"; names[2] = "nine";
+    return Table.{ .keys = keys, .names = names };
+}
+
+const SMALL: []u32 = .[1, 2, 3];
+const LITERAL = Table.{ .keys = .[10, 20], .names = .["ten", "twenty"] };
+const BAKED = #run make();
+let defaults: Defaults;
+let nested: [][]u8 = .[.[1, 2], .[3]];
+
+fn show() {
+    println("% % %", SMALL[0], SMALL[1], SMALL[2]);
+    println("% % % %", LITERAL.keys[0], LITERAL.keys[1], LITERAL.names[0], LITERAL.names[1]);
+    println("% % %", BAKED.keys[0], BAKED.keys[2], BAKED.names[1]);
+    println("% %", defaults.xs[0], defaults.xs[2]);
+    println("% % %", nested[0][0], nested[0][1], nested[1][0]);
+}
+
+fn main() {
+    #run show();
+    show();
+}

@@ -1,0 +1,25 @@
+// a [..]u8 reads as text with `as string`, a view of its elements, like
+// a []u8; the same at run time and in #run
+import "std/io";
+import "std/array";
+
+fn greeting() -> string {
+    let raw: [..]u8;
+    array_append(&raw, "hello" as []u8);
+    return raw as string;                   // on the heap: it outlives raw
+}
+
+fn length_of(p: *[..]u8) -> isize { return (p.* as string).len; }
+
+const BAKED = #run greeting();
+
+fn main() {
+    let raw: [..]u8;
+    println("[%]", raw as string);          // empty: a null pointer, 0
+    array_append(&raw, "hi" as []u8);
+    println("% %", raw as string, raw);
+    let s: string = raw as string;
+    println("% %", s == "hi", length_of(&raw));
+    println(BAKED);
+    array_free(&raw);
+}

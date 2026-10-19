@@ -1,0 +1,44 @@
+// array_add_new fills an element in place; array_find and
+// array_remove_value compare by value (std/reflect's values_equal)
+import "std/io";
+import "std/array";
+import "std/str";
+
+struct Book { title: string; pages: i64 = 100; tags: [..]string; }
+
+fn names() -> isize {
+    let xs: [..]string;
+    for (s in .["ada", "alan", "grace"]) array_add(&xs, s);
+    array_remove_value(&xs, "alan");
+    return array_find(xs, "grace");
+}
+const AT = #run names();
+
+fn main() {
+    let shelf: [..]Book;
+    let b = array_add_new(&shelf);           // defaults: pages = 100
+    b.title = "SICP";
+    array_add(&b.tags, "lisp");
+    let c = array_add_new(&shelf);
+    c.title = "TAOCP";
+    c.pages = 3000;
+    println("% %", shelf.len, shelf[0]);
+    println("% %", shelf[1].title, shelf[1].pages);
+
+    let xs = array_of(.[5, 3, 5, 9]);
+    println("% % %", array_find(xs, 5), array_find(xs, 9), array_find(xs, 4));
+    println("% %", array_find(xs[1..], 5), array_find(.[1.5, 2.5], 2.5));
+    println("% %", array_remove_value(&xs, 5), xs);  // the first one only
+    println("% %", array_remove_value(&xs, 4), xs);
+
+    // strings by their text, not their address
+    let words = array_of(.["one", "two"]);
+    let built = copy_string("two");
+    println("%", array_find(words, built));
+
+    // structs field by field, through their strings too
+    let one: [..]string;
+    array_add(&one, "lisp");
+    println("%", array_find(shelf, Book.{ .title = "SICP", .tags = one }));
+    println("%", AT);
+}

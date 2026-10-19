@@ -1,0 +1,146 @@
+// tagged enums: variants that hold values, and switches that bind them
+import "std/io";
+import "std/mem";
+import "std/str";
+
+enum Op { Add, Sub, Mul }
+
+enum Expr {
+    Number(i64),                            // one value
+    Binary(op: Op, lhs: *Expr, rhs: *Expr), // fields
+    Negate(*Expr),
+    Nil,                                    // nothing
+}
+
+// a switch that handles every variant needs no `default`, and counts as
+// returning when every case does
+fn eval(e: *Expr) -> i64 {
+    switch (e.*) {
+    case .Number(n): return n;
+    case .Negate(inner): return -eval(inner);
+    case .Binary(b):
+        let l = eval(b.lhs);
+        let r = eval(b.rhs);
+        switch (b.op) {
+        case .Add: return l + r;
+        case .Sub: return l - r;
+        case .Mul: return l * r;
+        }
+    case Expr.Nil: return 0;               // the long form works too
+    }
+}
+
+fn num(v: i64) -> *Expr {
+    let e = new(Expr);
+    e.* = .Number(v);
+    return e;
+}
+
+fn op(o: Op, l: *Expr, r: *Expr) -> *Expr {
+    let e = new(Expr);
+    e.* = Expr.Binary(o, l, r);
+    return e;
+}
+
+// `&x` binds a pointer into the value, to change it in place
+fn add_to_numbers(e: *Expr, amount: i64) {
+    switch (e.*) {
+    case .Number(&n): n.* += amount;
+    case .Binary(&b):
+        add_to_numbers(b.lhs, amount);
+        add_to_numbers(b.rhs, amount);
+    case .Negate(inner): add_to_numbers(inner, amount);
+    default:
+    }
+}
+
+fn describe(e: Expr) -> string {
+    switch (e.tag) {                        // the tag is a plain enum
+    case .Number: return "number";
+    case .Binary, .Negate: return "operation";
+    case .Nil: return "nil";
+    }
+}
+
+// field defaults; a tagged enum inside a struct
+enum Shape { Circle(f64), Rect(w: f64, h: f64 = 1), Dot }
+struct Labeled { label: string; shape: Shape; }
+
+fn area(s: Shape) -> f64 {
+    switch (s) {
+    case .Circle(r): return 3 * r * r;
+    case .Rect(r): return r.w * r.h;
+    case .Dot: return 0;
+    }
+}
+
+// generic: Option and Result
+enum Option($T) { Some(T), None }
+enum Result($T, $E) { Ok(T), Err(E) }
+
+fn find(items: []i32, wanted: i32) -> Option(isize) {
+    for (i in 0..items.len)
+        if (items[i] == wanted)
+            return .Some(i);
+    return .None;
+}
+
+fn unwrap_or(o: Option($T), fallback: T) -> T {
+    switch (o) {
+    case .Some(v): return v;
+    case .None: return fallback;
+    }
+}
+
+fn parse(s: string) -> Result(i64, string) {
+    let n, err = parse_int(s);
+    if (err != .None)
+        return .Err("not a number");
+    return .Ok(n);
+}
+
+// at compile time too: running, and baking the results
+fn tree_value() -> i64 {
+    let e = op(.Mul, num(6), op(.Sub, num(10), num(3)));
+    add_to_numbers(e, 1);
+    return eval(e);                         // 7 * (11 - 4)
+}
+fn shapes() -> []Shape { return clone_slice(Shape.[.Circle(1.5), .Rect(2, 3), .Dot, .Rect(5)]); }
+
+const AT_COMPILE_TIME = #run tree_value();
+const SHAPES = #run shapes();
+const FOUND = #run find(.[1, 2, 3], 3);
+
+fn main() {
+    let e = op(.Add, num(40), op(.Sub, num(5), num(3)));
+    let neg: Expr = .Negate(e);
+    print("%", eval(&neg)); print(" ");
+    add_to_numbers(e, 100);
+    print("%", eval(e)); print(" ");
+    print("%", tree_value()); print(" "); print("%", AT_COMPILE_TIME); println();
+
+    let nothing = Expr.Nil;
+    print(describe(e.*)); print(" "); print(describe(neg)); print(" ");
+    print(describe(nothing)); print(" ");
+    print("%", e.tag == .Binary); print(" "); print("%", nothing.tag == .Number);
+    println();
+
+    for (s in SHAPES) { print("%{.2}", area(s)); print(" "); }
+    let boxed = Labeled.{ .label = "square", .shape = .Rect(2, 2) };
+    print(boxed.label); print("="); print("%{.1}", area(boxed.shape)); println();
+
+    let xs: []i32 = .[4, 8, 15];
+    print("%", unwrap_or(find(xs, 15), 99)); print(" ");
+    print("%", unwrap_or(find(xs, 16), 99)); print(" ");
+    print("%", unwrap_or(FOUND, 0)); print(" ");
+    let name: Option(string) = .Some("ada");
+    print(unwrap_or(name, "nobody")); println();
+
+    for (s in string.["42", "x"]) {
+        switch (parse(s)) {
+        case .Ok(n): print("%", n);
+        case .Err(message): print(message);
+        }
+        println();
+    }
+}

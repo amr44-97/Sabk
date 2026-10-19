@@ -1,0 +1,15 @@
+this runs while compiling
+6765 4096 8
+2 3 5 7 11 13 17 19 23 29 
+hello, world! "quoted"	tab
+1.50
+apple fig pear 
+3 2 1 
+ace 14 3 true
+1.0 2.5
+20 42 1.50
+1 2 1
+72 4 -128 -2147483648 1 -1 -3 254 -56 -103 
+abcde
+#if can use #run
+[exit 0]

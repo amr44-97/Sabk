@@ -1,0 +1,18 @@
+None true true
+None true AlreadyExists
+None false true
+true None
+None None
+false true
+None true
+code 0 signal 0 None
+code 3 signal 0 None
+code 137 signal 9 None
+code 0 signal 0 NotFound
+code 0 signal 0 NotFound
+'it'\''s $HOME' 0 None
+7
+4
+true true
+true
+[exit 0]

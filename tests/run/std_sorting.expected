@@ -1,0 +1,11 @@
+random ok sorted ok reversed ok equal ok sawtooth ok 0
+random ok sorted ok reversed ok equal ok sawtooth ok 1
+random ok sorted ok reversed ok equal ok sawtooth ok 2
+random ok sorted ok reversed ok equal ok sawtooth ok 15
+random ok sorted ok reversed ok equal ok sawtooth ok 17
+random ok sorted ok reversed ok equal ok sawtooth ok 100
+random ok sorted ok reversed ok equal ok sawtooth ok 5000
+apple apples banana fig pear 
+5 0 7 -1
+0 1 2 3 -1.00 0.00 2.50 9.75 
+[exit 0]

@@ -1,0 +1,5 @@
+zeroed: 0 0
+allocations before: 0
+allocations after: 2
+explicit allocator: 42
+[exit 0]

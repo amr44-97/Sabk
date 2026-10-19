@@ -1,0 +1,18 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn count(s: string, c: u8) -> isize {
+    let n = 0;
+    for (ch in s) if (ch == c) n++;
+    return n;
+}
+
+fn main() {
+    let s: string = "tab\there, quote\" backslash\\ hex\x41 end";
+    printf("%s|\n", s.ptr);
+    printf("len %td, spaces %td\n", s.len, count(s, ' '));
+    let multi: string = "line one
+line two";
+    printf("%s\n", multi.ptr);
+    printf("%c%c%c\n", 'o', 'k', '\x21');
+    printf("trigraph-safe ??= and %%\n");
+}

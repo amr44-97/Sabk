@@ -1,0 +1,4 @@
+parsed 42
+main's defer ran
+error: IoError.NotFound
+[exit 1]

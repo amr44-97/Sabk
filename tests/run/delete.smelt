@@ -1,0 +1,49 @@
+// delete(x) frees what a string, slice, growable array, Map or Builder
+// holds; #if (T == Map) asks whether T is any Map
+import "std/io";
+import "std/mem";
+import "std/array";
+import "std/map";
+import "std/str";
+
+fn kind($T: Type) -> string {
+    #if (T == Map) return "a Map";
+    else #if (T == map.Map) return "never: the same test";
+    else #if (T == [..]i64) return "a [..]i64";
+    else return "something else";
+}
+
+// only the #if branch taken runs its #run: code() for i64 never runs
+fn code() -> string { println("code() ran"); return "return 2;"; }
+fn pick(x: $T) -> i64 {
+    #if (T == i64)
+        return 1;
+    else
+        #insert #run code();
+}
+
+fn build() -> i64 {
+    let xs: [..]i64;
+    array_add(&xs, 4);
+    let n = xs[0];
+    delete(xs);
+    return n;
+}
+const AT_COMPILE_TIME = #run build();
+
+fn main() {
+    let name = copy_string("ada");
+    let nums = clone_slice(.[1, 2, 3]);
+    let xs = array_of(.[4, 5]);
+    let m: Map(string, i32);           // zero: ready to use
+    map_put(&m, "a", 1);
+    let b = make_builder();
+    builder_append(&b, "hi");
+    println("% % % % % %", name, nums, xs, m.entries.len, builder_string(&b), AT_COMPILE_TIME);
+    delete(name);
+    delete(nums);
+    delete(xs);
+    delete(m);
+    delete(b);
+    println("% % % %", kind(Map(string, i64)), kind([..]i64), kind(i64), pick(5 as i64));
+}

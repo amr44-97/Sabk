@@ -8,9 +8,11 @@
 #                                  tests/resolve/std), must exit 0
 #   types/   smelt --types file    stdout (every module and instance, with
 #                                  types; with tests/resolve/std), exit 0
-#   warnings/ smelt --types file   stderr (the warnings), must exit 0
-#   errors/  smelt --types file    stderr, must exit non-zero (the errors up
-#                                  to the checker's; std is ./std)
+#   warnings/ smelt --check file   stderr (the warnings), must exit 0
+#   run/     smelt --run file      the program's output and exit code (with
+#                                  ./std); a `// args: a b` line passes
+#                                  arguments
+#   errors/  smelt --emit-c file   stderr, must exit non-zero (std is ./std)
 #
 # usage: tests/run.sh [--update] [filter]
 #   --update  rewrite the .expected files from the current output
@@ -45,8 +47,13 @@ for src in tests/*/*.smelt; do
   parser) actual=$(build/smelt --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
   resolve) actual=$(build/smelt --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
   types)  actual=$(build/smelt --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  warnings) actual=$(build/smelt --types --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code == 0)) ;;
-  errors) actual=$(build/smelt --types --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
+  warnings) actual=$(build/smelt --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  errors) actual=$(build/smelt --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
+  run)    # a `// args: a b c` line gives the program its arguments (quoted
+          # as in a shell)
+          eval "args=($(grep -m1 '^// args:' "$src" | sed 's|^// args: *||'))"
+          actual=$(build/smelt --run --std std "$src" -- "${args[@]}" 2>&1); code=$?
+          actual+=$'\n'"[exit $code]"; ok=1 ;;
   *) echo "unknown suite: $suite"; exit 1 ;;
   esac
 

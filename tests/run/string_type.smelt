@@ -1,0 +1,68 @@
+// string: a view of text, laid out like []u8 but its own type
+import "std/io";
+import "std/fmt";
+import "std/mem";
+import "std/str";
+
+fn keyword(word: string) -> i32 {
+    switch (word) {                     // by content; needs no case for all
+    case "fn": return 1;
+    case "let", "const": return 2;
+    default: return 0;
+    }
+}
+
+fn count_keywords(words: []string) -> isize {
+    let n = 0;
+    for (w in words) {
+        switch (w) {
+        case "skip": continue;          // the loop's continue
+        case "stop": break;             // leaves the switch only
+        default: n += keyword(w);
+        }
+    }
+    return n;
+}
+
+fn summary() -> string {
+    let parts = split("fn,let,x,const", ",");
+    return tformat("% %", count_keywords(parts), join(parts, " | "));
+}
+
+const AT_COMPILE_TIME = #run summary();
+
+fn main() {
+    let s = "hello";                    // a literal is a string
+    let t: string = "hel";
+    println("% % % %", s == "hello", s != t, s[0..3] == t, "a" == "a");
+
+    // writable: it's a view, like any slice
+    let buffer = new([]u8, 5);
+    copy_bytes(buffer, s as []u8);      // text and bytes convert with `as`
+    let view = buffer as string;
+    view[0] = 'J';
+    println("% %", view, s);
+
+    // text and bytes are the same memory; either way takes `as`, as in Jai
+    let raw = "Hello, World!" as []u8;
+    let tail = raw[7..] as string;
+    println("% % %", tail, raw[7..12] as string == "World", "x" != raw as string);
+
+    // text prints as text, bytes as numbers
+    println("% %", "hi", "hi" as []u8);
+    println("%", string.["a\"b", "c"]);
+
+    println("% % %", keyword("let"), keyword("x"), count_keywords(.["fn", "skip", "fn", "stop", "let"]));
+    println(summary());
+    println(AT_COMPILE_TIME);
+
+    // temp strings: nothing to free one by one
+    with_temp_allocator() {
+        let line = tformat("% + % = %", 1, 2, 3);
+        println("%", line);
+    }
+    free_all(context.temp_allocator);
+
+    let words = split("a::b::", "::");
+    println("% % [%]", words.len, words, join(words, "-"));
+}

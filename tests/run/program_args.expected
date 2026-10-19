@@ -1,0 +1,5 @@
+3 arguments: ["input.txt", "--verbose", "two words"]
+the program is a path: true
+the compiler saw 3 too
+an option: --verbose
+[exit 0]

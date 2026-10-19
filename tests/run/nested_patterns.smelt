@@ -1,0 +1,63 @@
+// patterns inside variants (following pointers; null matches none), guards,
+// and is with nested patterns, at run time and in #run
+import "std/io";
+import "std/mem";
+
+enum Op { Add, Mul }
+enum Expr {
+    Number(i64),
+    Binary(op: Op, lhs: *Expr, rhs: *Expr),
+    Negate(*Expr),
+    Nil,
+}
+const MAX = 100;
+
+fn num(n: i64) -> *Expr { return new(Expr.Number(n)); }
+
+fn simplify(e: *Expr) -> Expr {
+    switch (e.*) {
+    case .Binary{op: .Mul, lhs: .Number(0)}:      return .Number(0);
+    case .Binary{op: .Add, lhs, rhs: .Number(0)}: return lhs.*;
+    case .Negate(.Negate(inner)):                 return inner.*;
+    case .Number(n) if (n > MAX):                 return .Number(MAX);
+    default:                                      return e.*;
+    }
+}
+
+fn kind(e: Expr) -> string {
+    return k: switch (e) {
+    case .Number(0): "zero";
+    case .Number(1..=9): "digit";
+    case .Number(n) if (n < 0): "negative";
+    case .Number(_): "number";
+    case .Binary{op: .Mul}: "product";
+    case .Binary(_): "sum";
+    case .Negate(.Number(_)): "negated number";
+    case .Negate(_): "negation";
+    case .Nil: "nil";
+    };
+}
+
+fn compute() -> i64 {
+    let zero = Expr.Binary(.Mul, num(0), num(7));
+    let s = simplify(&zero);
+    let total: i64 = 0;
+    if (s is .Number(n)) total += n + 1;
+    let deep = Expr.Negate(new(Expr.Negate(num(5))));
+    if (simplify(&deep) is .Number(m)) total += m * 10;
+    if (deep is .Negate(.Negate(.Number(v)))) total += v * 100;
+    return total;
+}
+const COMPUTED = #run compute();
+
+fn main() {
+    let x = Expr.Binary(.Add, num(3), num(0));
+    let big = Expr.Number(500);
+    println("% % %", simplify(&x), simplify(&big), compute());
+    println("% %", COMPUTED, kind(.Number(0)));
+    for (e in Expr.[.Number(5), .Number(-3), .Number(42), .Binary(.Mul, num(1), num(2)), .Binary(.Add, num(1), num(2)), .Negate(num(1)), .Negate(new(Expr.Nil)), .Nil])
+        print("% / ", kind(e));
+    println();
+    let broken = Expr.Negate(null);
+    println("%", kind(broken));          // a null pointer matches no pattern inside
+}

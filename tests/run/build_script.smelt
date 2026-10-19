@@ -1,0 +1,25 @@
+// build scripts: top-level #run code, run once the program checks, that
+// sets how it's built (std/build)
+import "std/io";
+import "std/build";
+import "lib/needs_libm";
+
+extern fn sqrt(x: f64) -> f64;
+extern fn helper_twice(x: i32) -> i32;
+
+#run configure();
+#run println("a second step, after the first");
+
+fn configure() {
+    link_library("m");
+    add_c_file("lib/build_helper.c");     // relative to this file
+    add_c_flags("-DSMELT_TEST=1");
+    let kind = "debug";
+    if (is_release())
+        kind = "release";
+    println("building a % program", kind);
+}
+
+fn main() {
+    println("% % %", sqrt(16.0), cbrt(27.0), helper_twice(21));
+}

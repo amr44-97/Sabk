@@ -1,0 +1,29 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn sum(items: []i32) -> i32 {
+    let total: i32 = 0;
+    for (x in items) { total += x; }
+    return total;
+}
+
+fn fill(arr: *[5]i32) {
+    for (i in 0..arr.len) { arr.*[i] = (i * i) as i32; }
+}
+
+fn main() {
+    let arr: [5]i32 = .[1, 2, 3, 0, 0];
+    printf("len %td, sum %d\n", arr.len, sum(&arr));
+    let copy = arr;           // arrays are values
+    fill(&arr);
+    printf("filled sum %d, copy sum %d\n", sum(&arr), sum(&copy));
+    let s: []i32 = &arr;
+    printf("slice len %td, s[4] = %d\n", s.len, s[4]);
+    let grid: [2][3]u8;
+    grid[1][2] = 7;
+    printf("grid %d\n", grid[1][2]);
+    let text: string = "hello";
+    printf("text len %td, first %c\n", text.len, text[0]);
+    let i = 5;
+    printf("about to index out of bounds\n");
+    printf("%d\n", s[i]);
+}

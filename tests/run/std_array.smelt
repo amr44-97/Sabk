@@ -1,0 +1,59 @@
+// [..]T and std/array: growing, inserting, removing, and other allocators
+import "std/io";
+import "std/array";
+import "std/mem";
+import "std/os";
+
+struct Point { x: isize; y: isize; }
+
+fn show(xs: []isize) {                 // a [..]isize goes here as a view
+    print("[");
+    for (i in 0..xs.len) {
+        if (i > 0) print(" ");
+        print("%", xs[i]);
+    }
+    print("] len ");
+    print("%", xs.len);
+    println();
+}
+
+fn main() {
+    let xs: [..]isize;                 // zero: ready to use
+    for (i in 0..5) array_add(&xs, i * 10);
+    show(xs);                          // [0 10 20 30 40]
+    array_insert(&xs, 0, -1);
+    array_insert(&xs, 3, 15);
+    array_insert(&xs, xs.len, 99);
+    show(xs);                          // [-1 0 10 15 20 30 40 99]
+    print("%", array_remove(&xs, 1)); print(" ");
+    print("%", array_remove_unordered(&xs, 0)); print(" ");
+    print("%", array_pop(&xs)); println();
+    show(xs);                          // [99 10 15 20 30]
+    let more = isize.[7, 8, 9];
+    array_append(&xs, more);
+    xs[0] = 4;
+    show(xs);                          // [4 10 15 20 30 7 8 9]
+    for (i in 0..1000) array_add(&xs, i);
+    print("%", xs.len); print(" ");
+    print("%", xs.cap >= xs.len); println();
+    xs.len = 2;                        // keeps the first two, and the memory
+    show(xs);
+    array_clear(&xs);
+    show(xs);
+    array_free(&xs);
+
+    // in an arena, with structs: set the allocator before the first add
+    let arena = arena_init(256);
+    defer arena_destroy(&arena);
+    let points: [..]Point;
+    points.allocator = arena_allocator(&arena);
+    array_reserve(&points, 2);
+    for (i in 0..50) array_add(&points, Point.{ .x = i, .y = i * i });
+    print("%", points[49].y); print(" ");
+    print("%", points.cap); println();
+
+    let words = array_of(.["one", "two"]);
+    print(array_pop(&words)); print(" ");
+    print(array_pop(&words)); println();
+    array_pop(&words);                 // empty: panics
+}

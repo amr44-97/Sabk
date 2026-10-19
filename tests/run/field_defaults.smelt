@@ -1,0 +1,41 @@
+// a type's field defaults apply wherever a value of it is made without
+// saying what it is, and new() can take the value to start with
+import "std/io";
+import "std/fmt";
+import "std/array";
+
+struct Spec { width: i32 = 8; precision: i32 = -1; }
+struct Outer { name: string; spec: Spec; many: [3]Spec; }  // defaults inside
+enum Shape { Rect(w: f64 = 1, h: f64 = 2), Dot }         // the first variant's
+struct Point { x: i32; y: i32; }                         // none: just zeros
+
+let global: Outer;
+
+fn made() -> string {
+    let a: Spec;                          // a variable
+    let p = new(Spec);                    // allocated
+    let many = new([]Spec, 2);            // each element
+    let o = Outer.{ .name = "o" };        // a field left out of a literal
+    let s: Shape;
+    let zero: Point;
+    return format("% | % | % | % | % | % | % | % | %", a, p.*, many[1], o.spec,
+                  o.many[2], global.spec, s, zero, Spec.{ .width = 2 });
+}
+
+fn with_values() -> string {
+    let q = new(Point.{ .x = 1, .y = 2 });  // new with the value to start with
+    let r: *Spec = new(.{ .width = 3 });    // its type from the context
+    let arr = new(i32.[5, 6]);
+    let list: [..]*Spec;
+    array_add(&list, new(Spec.{ .precision = 2 }));
+    return format("% | % | % | %", q.*, r.*, arr.*, list[0].*);
+}
+
+const AT_COMPILE_TIME = #run made();
+
+fn main() {
+    println(made());
+    println(AT_COMPILE_TIME);
+    println(with_values());
+    println(#run with_values());
+}

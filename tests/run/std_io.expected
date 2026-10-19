@@ -1,0 +1,14 @@
+to stderr
+print and printf stay in order
+-3 18446744073709551615 2.5 false
+line one
+line two
+18 bytes
+read a missing file: NotFound
+read a directory: IsDirectory
+read through a file: NotDirectory
+write in a missing directory: NotFound
+delete a missing file: NotFound
+message: no such file or directory
+while compiling: NotFound
+[exit 0]

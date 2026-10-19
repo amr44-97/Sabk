@@ -1,0 +1,14 @@
+// set_bounds_checks(.Always): #no_bounds_check functions are checked too,
+// to find a bug one hides
+import "std/io";
+import "std/build";
+
+#run set_bounds_checks(.Always);
+
+fn peek(xs: []i32, i: isize) -> i32 #no_bounds_check { return xs[i]; }
+
+fn main() {
+    let all: [5]i32 = .[1, 2, 3, 4, 5];
+    println("%", peek(all[0..2], 1));
+    println("%", peek(all[0..2], 3));       // checked after all: panics
+}

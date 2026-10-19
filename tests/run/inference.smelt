@@ -1,0 +1,77 @@
+import "std/io";
+import "std/array";
+import "std/map";
+
+fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
+fn zero_of($T: Type) -> T { let z: T; return z; }
+
+fn type_name($T: Type) -> string {
+    #if (T == isize) return "isize";
+    else #if (T == i32) return "i32";
+    else #if (T == u8) return "u8";
+    else #if (T == f64) return "f64";
+    else #if (T == string) return "string";
+    else #if (T == bool) return "bool";
+    else return "something else";
+}
+fn kind(x: $T) -> string { return type_name(T); }
+
+struct Box($T) { value: T; }
+struct Pair($A, $B) { first: A; second: B; }
+struct Bag($T) { items: []T; count: i32; }
+
+// a growable array with room for `capacity`; T comes from where it's used
+fn make_array($T: Type, capacity: isize = 0) -> [..]T {
+    let xs: [..]T;
+    array_reserve(&xs, capacity);
+    return xs;
+}
+
+fn total(xs: [..]f32) -> f32 {
+    let sum: f32 = 0;
+    for (x in xs) sum += x;
+    return sum;
+}
+fn fresh() -> [..]u8 { return make_array(); }       // the return type decides
+
+fn main() {
+    // `$T: Type` arguments left out: the context says what T is
+    let xs: [..]i32 = make_array();
+    let names: [..]string = make_array(16);            // 16 is the capacity
+    array_add(&xs, 4);
+    array_add(&names, "ada");
+    print("%", names.cap); print(" ");
+    let z: f64 = zero_of();
+    print("%{.1}", z); print(" ");
+    let ages: Map(string, i32) = make_map();
+    map_put(&ages, "ada", 36);
+    print("%", map_get(&ages, "ada") or_else 0); print(" ");
+    let f: [..]f32 = make_array();
+    array_add(&f, 1.5);
+    array_add(&f, 2.0);
+    print("%{.1}", total(f)); print(" ");
+    print("%{.1}", total(make_array())); println();  // a parameter's type decides
+    let u = fresh();
+    array_add(&u, 7);
+    print("%", u[0]); println();
+
+    // the arguments decide first; the context only fills in what they don't
+    let small: u8 = max(1, 2);                       // untyped: the context, u8
+    let a: i32 = 5;
+    let wide: i64 = max(a, 3);                       // typed: i32, then widened
+    print("%", small); print(" "); print("%", wide); println();
+
+    // generic struct literals without their types
+    let b = Box.{ .value = 1.5 };
+    let p = Pair.{ .first = 1, .second = "two" };
+    let q = Pair.{ true, 2.5 };
+    let tiny: Box(u8) = Box.{ .value = 7 };          // untyped: the context
+    let nested = Box.{ .value = Box.{ .value = 1 } };
+    let bag = Bag.{ .items = i32.[1, 2, 3] };        // T from []T
+    println(kind(b.value));
+    print(kind(p.first)); print(" "); println(kind(p.second));
+    print(kind(q.first)); print(" "); println(kind(q.second));
+    println(kind(tiny.value));
+    println(kind(nested.value.value));
+    print(kind(bag.items[0])); print(" "); print("%", bag.items.len); println();
+}

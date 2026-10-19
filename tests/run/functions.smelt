@@ -1,0 +1,43 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+extern fn qsort(base: *void, count: usize, size: usize, cmp: *void);
+
+type BinOp = fn(i32, i32) -> i32;
+
+fn add(a: i32, b: i32) -> i32 { return a + b; }
+fn mul(a: i32, b: i32) -> i32 { return a * b; }
+fn fold(items: []i32, start: i32, op: BinOp) -> i32 {
+    let acc = start;
+    for (x in items) acc = op(acc, x);
+    return acc;
+}
+fn greet(name: *u8, punctuation: *u8 = "!", times: i32 = 1) {
+    for (i in 0..times) printf("hello %s%s ", name, punctuation);
+    printf("\n");
+}
+fn fib(n: i32) -> i64 {
+    if (n < 2) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+
+// called by C's qsort, so it uses the C calling convention
+extern fn compare(a: *void, b: *void) -> i32 {
+    let x = (a as *i32).*;
+    let y = (b as *i32).*;
+    if (x < y) return -1;
+    if (x > y) return 1;
+    return 0;
+}
+
+fn main() {
+    let nums = i32.[4, 1, 5, 2, 3];
+    printf("sum %d, product %d\n", fold(&nums, 0, add), fold(&nums, 1, mul));
+    let ops = BinOp.[add, mul];
+    printf("table %d %d\n", ops[0](6, 7), ops[1](6, 7));
+    greet("world");
+    greet("you", "?");
+    greet("again", ".", 2);
+    printf("fib(30) = %lld\n", fib(30));
+    qsort(&nums, nums.len as usize, sizeof(i32), compare);   // a C function pointer
+    for (x in nums) printf("%d ", x);
+    printf("\n");
+}

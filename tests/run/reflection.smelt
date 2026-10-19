@@ -1,0 +1,88 @@
+// compile-time reflection: code written from type information by #run and
+// compiled with #insert, at the top level or once per generic instance
+import "std/io";
+import "std/fmt";
+import "std/map";
+import "std/reflect";
+import "std/str";
+
+struct Point { x: i32; y: i32; }
+struct Size { w: f64; h: f64; }
+
+// top level: a function per type, named after it
+fn make_setter(t: *TypeInfo) -> string {
+    let b = make_builder();
+    for (f in t.fields)
+        builder_print(&b, "fn set_%_%(p: *%, value: %) { p.% = value; }\n",
+                      t.name, f.name, t.name, f.info.name, f.name);
+    return builder_string(&b);
+}
+
+#insert #run make_setter(type_info(Point));
+#insert #run make_setter(type_info(Size));
+
+// generic: the body is made for each T; this one adds up a struct's
+// numeric fields, whatever they're called
+fn sum_fields(v: $T) -> f64 {
+    #insert #run sum_code(type_info(T));
+}
+
+fn sum_code(t: *TypeInfo) -> string {
+    let b = make_builder();
+    builder_append(&b, "return 0");
+    for (f in t.fields)
+        if (f.info.kind == .Int || f.info.kind == .Float)
+            builder_print(&b, " + v.% as f64", f.name);
+    builder_append(&b, ";");
+    return builder_string(&b);
+}
+
+struct Mixed { count: i32; label: string; ratio: f64; flag: bool; }
+
+// std/reflect: equality and hashing for any type, by value
+enum Op { Add, Mul }
+enum Expr { Number(i64), Binary(op: Op, lhs: *Expr, rhs: *Expr), Name(string), Nil }
+struct Record {
+    name: string;
+    at: Point;
+    tags: []string;
+    scores: [3]i32;
+    last: Expr;
+}
+
+fn record(tag: string) -> Record {
+    let tags = new([]string, 2);          // a slice literal would die here
+    tags[0] = "x";
+    tags[1] = copy_string(tag);
+    return .{ .name = "ada", .at = .{1, 2}, .tags = tags,
+              .scores = .[1, 2, 3], .last = .Name("n") };
+}
+
+fn main() {
+    let p = Point.{ .x = 1, .y = 2 };
+    set_Point_y(&p, 20);
+    let s = Size.{ .w = 1, .h = 1 };
+    set_Size_w(&s, 2.5);
+    println("% %", p, s);
+
+    println("% % %", sum_fields(p), sum_fields(s),
+            sum_fields(Mixed.{ .count = 3, .label = "x", .ratio = 0.5, .flag = true }));
+
+    let a = record("y");
+    let b = record("y");                    // equal text, different memory
+    let c = record("z");
+    println("% % %", values_equal(a, b), values_equal(a, c),
+            hash_value(a) == hash_value(b));
+    let left = Expr.Number(1);
+    println("% % % %", values_equal(Expr.Nil, Expr.Nil),
+            values_equal(Expr.Nil, Expr.Number(1)),
+            values_equal(Expr.Binary(.Add, &left, &left), Expr.Binary(.Add, &left, &left)),
+            values_equal(Expr.Binary(.Add, &left, &left), Expr.Binary(.Mul, &left, &left)));
+    println("% %", values_equal(0.0, -0.0), hash_value(0.0) == hash_value(-0.0));
+
+    // so a map takes struct keys as they are
+    let names = make_map(Record, string);
+    map_put(&names, a, "first");
+    map_put(&names, c, "second");
+    println("% % %", map_get(&names, b) or_else "?", map_get(&names, c) or_else "?", names.entries.len);
+}

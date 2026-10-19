@@ -1,0 +1,20 @@
+early(true):
+  inner defer
+  defer 2
+  defer 1
+  -> 1
+early(false):
+  end of body
+  defer 2
+  defer 1
+  -> 0
+loop:
+  body 0
+  end of iteration 0
+  end of iteration 1
+  body 2
+  end of iteration 2
+  end of iteration 3
+return value computed before defers:
+  -> 1
+[exit 0]

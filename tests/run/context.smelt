@@ -1,0 +1,33 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+let allocations: i32 = 0;
+
+// an allocator that counts and forwards to the default one
+fn counting(data: *void, mode: AllocatorMode, size: isize, align: isize, old: *void, old_size: isize) -> *void {
+    if (mode == AllocatorMode.Alloc) allocations++;
+    let inner = data as *Allocator;
+    return inner.procedure(inner.data, mode, size, align, old, old_size);
+}
+
+struct Point { x: i32; y: i32; }
+
+fn make_point() -> *Point { return new(Point); }
+
+fn main() {
+    let p = new(Point);
+    printf("zeroed: %d %d\n", p.x, p.y);
+    printf("allocations before: %d\n", allocations);
+
+    let base = context.allocator;
+    {
+        context.allocator = Allocator.{ .procedure = counting, .data = &base };
+        let a = new(Point);
+        let b = make_point();        // callees see the changed context
+        a.x = 5;
+    }
+    let c = make_point();            // restored after the block
+    printf("allocations after: %d\n", allocations);
+    let d = new(i32, base);
+    d.* = 42;
+    printf("explicit allocator: %d\n", d.*);
+}

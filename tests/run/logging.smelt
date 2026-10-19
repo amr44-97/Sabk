@@ -1,0 +1,34 @@
+// context.logger: where log() goes (stderr by default), and
+// context.panic_handler: what panic and assert call
+import "std/io";
+import "std/logging";
+import "std/os";
+
+fn parse_port(text: string) -> i32 {
+    log(.Warning, "`%` isn't a number", text);   // the caller decides where
+    return 0;
+}
+
+// a test's handler: report the failure; returning still stops the program
+fn report(data: *void, what: string, message: string, location: string) {
+    println("caught: % (%) at line %", message, what, location[location.len - 6..]);
+}
+
+fn main() {
+    parse_port("90x");                           // "warning: ..." on stderr
+    {
+        let lines: [..]string;
+        context.logger = capture_logger(&lines); // this block only
+        parse_port("abc");
+        log(.Info, "% items", 2);
+        println("captured % lines: %", lines.len, lines);
+    }
+    {
+        context.logger = silent_logger();
+        parse_port("nothing printed");
+    }
+    log(.Error, "back to stderr");
+    context.panic_handler = PanicHandler.{ .procedure = report };
+    assert(1 + 1 == 3);
+    println("never printed");
+}

@@ -1,32 +1,28 @@
-// smelt: the Smelt compiler, written in Smelt.
-//
-//   smelt --tokens file.smelt     print the tokens of a file
-//   smelt --ast file.smelt        print its syntax tree
-//   smelt --resolve file.smelt    print every module's tree, with names
-//                                 linked to their declarations
-//   smelt --types file.smelt      print every module's tree with types and
-//                                 constants, then every generic instance
-//   --std <dir>                   the standard library (default: std next
-//                                 to the compiler)
-//
-// The rest of the compiler is still the C++ one in ../the-compiler.
+// smelt: the Smelt compiler, written in Smelt. See print_usage() for what
+// it does; ../the-compiler/docs/reference.md describes the language.
 
-import "std/io";
-import "std/os";
-import "std/fmt";
-import "std/path";
-import "std/str";
 import "std/array";
 import "std/build";
+import "std/fmt";
+import "std/fs";
+import "std/io";
+import "std/os";
+import "std/path";
+import "std/process";
+import "std/str";
+import "std/time";
+import "ast";
+import "check";
+import "codegen";
+import "generics";
+import "lexer";
+import "module";
+import "parser";
+import "resolve";
 import "source";
 import "token";
-import "lexer";
-import "parser";
-import "ast";
-import "module";
-import "resolve";
-import "check";
-import "generics";
+import "types";
+import "vm";
 
 // the VM's way to C, and libffi
 #run configure();
@@ -38,48 +34,306 @@ fn configure() {
 
 extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
 
-enum Mode { None, Tokens, Ast, Resolve, Types }
+enum Mode { Build, Run, EmitC, Check, Tokens, Ast, Resolve, Types }
 
-fn usage() -> i32 {
-    eprintln("usage: smelt --tokens|--ast|--resolve|--types [--std <dir>] <file>");
+/* ------------------------------------------------------------------ stats */
+
+// --stats: how long each phase took, in milliseconds
+struct Phase {
+    name: string;
+    ms: f64;
+}
+
+let show_stats = false;
+let phase_times: [..]Phase;
+let phase_start: i64 = 0;
+let functions_total: isize = 0;
+let functions_emitted: isize = 0;
+
+fn end_phase(name: string) {
+    let now = now_ns();
+    array_add(&phase_times, Phase.{ .name = name, .ms = ((now - phase_start) as f64) / 1000000.0 });
+    phase_start = now;
+}
+
+struct InstanceGroup {
+    templ: *Node;
+    list: [..]*Node;
+}
+
+fn print_stats(c: *Checker) {
+    if (!show_stats)
+        return;
+    let total = 0.0;
+    eprint("phases:\n");
+    for (p in phase_times) {
+        eprint(tformat("  %{<26} %{8.1f} ms\n", p.name, p.ms));
+        total += p.ms;
+    }
+    eprint(tformat("  %{<26} %{8.1f} ms\n", "total", total));
+    if (functions_total > 0)
+        eprint(tformat("functions: % of % written out, the rest unused\n", functions_emitted, functions_total));
+    if (c == null)
+        return;
+    // instances per generic function or struct, most first
+    let groups: [..]InstanceGroup;
+    for (instance in c.instances) {
+        let found: *InstanceGroup = null;
+        for (k in 0..groups.len)
+            if (groups[k].templ == instance.generic)
+                found = &groups[k];
+        if (found == null) {
+            found = array_add_new(&groups);
+            found.templ = instance.generic;
+        }
+        array_add(&found.list, instance);
+    }
+    // most first, keeping the order of those with as many
+    for (k in 1..groups.len) {
+        let j = k;
+        while (j > 0 && groups[j - 1].list.len < groups[j].list.len) {
+            let swap = groups[j - 1];
+            groups[j - 1] = groups[j];
+            groups[j] = swap;
+            j--;
+        }
+    }
+    eprint(tformat("generic instances: %\n", c.instances.len));
+    for (group in groups) {
+        let line: [..]u8;
+        print_to(&line, "  %{<26} %{3}:", group.templ.tok.text, group.list.len);
+        for (k in 0..group.list.len) {
+            if (k >= 6)
+                break;
+            append_string(&line, " (");
+            let instance_args = group.list[k].instance_args;
+            for (a in 0..instance_args.len) {
+                if (a > 0)
+                    append_string(&line, ", ");
+                append_string(&line, type_name(instance_args[a]));
+            }
+            append_string(&line, ")");
+        }
+        if (group.list.len > 6)
+            print_to(&line, " and % more", group.list.len - 6);
+        array_add(&line, '\n');
+        eprint(line as string);
+    }
+}
+
+/* --------------------------------------------------------------- building */
+
+// --release: an optimized build without debug info, keeping only the code
+// that's used
+let release = false;
+
+// --sanitize: built with AddressSanitizer, which reports a use of freed
+// memory (and of what the temp allocator and arenas took back) where it
+// happens, at the Smelt line
+let sanitize = false;
+
+// Compiles C source into an executable with $CC (default: cc). The C goes
+// in a directory of its own, so no file of the user's is ever overwritten;
+// it's kept there if the C compiler fails.
+fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
+    let dir, err = make_temp_dir("smelt-build");
+    if (err != .None) {
+        eprintln("mkdtemp: %", system_error_text(err));
+        return false;
+    }
+    let c_path = tformat("%/program.c", dir);
+    let written = write_file(c_path, c_source);
+    if (written != .None) {
+        eprintln("%: %", c_path, system_error_text(written));
+        return false;
+    }
+
+    let cc = get_env("CC") or_else "";
+    if (cc.len == 0)
+        cc = "cc";
+    // -fwrapv: signed overflow wraps; -w: the generated code isn't the
+    // user's to fix. A release build is optimized, and the linker drops
+    // every function and piece of data nothing uses.
+    let flags: [..]u8;
+    append_string(&flags, if (release) "-O2 -ffunction-sections -fdata-sections -Wl,--gc-sections" else "-g");
+    // and what build scripts asked for (std/build): their flags as written,
+    // C files to compile along, libraries after everything that uses them
+    if (sanitize)
+        append_string(&flags, " -fsanitize=address -fno-omit-frame-pointer");
+    for (extra in build.c_flags)
+        print_to(&flags, " %", extra);
+    let command: [..]u8;
+    print_to(&command, "% -std=c11 -fwrapv -fno-strict-aliasing -w % -o % %", cc, flags as string,
+             shell_quote(exe_path), shell_quote(c_path));
+    for (file in build.c_files)
+        print_to(&command, " %", shell_quote(file));
+    for (library in build.libraries)
+        print_to(&command, " %", shell_quote(tformat("-l%", library)));
+    phase_start = now_ns();
+    let exit, failed = run_shell(command as string);
+    if (failed != .None || exit.code != 0) {
+        eprintln("[error]: the C compiler failed on %", c_path);
+        return false;
+    }
+    end_phase("C compiler");
+    delete_file(c_path);
+    remove_dir(dir);
+    return true;
+}
+
+/* ---------------------------------------------------------------- the CLI */
+
+fn print_usage(exe: string) -> i32 {
+    eprint(tformat("usage: % [options] <file> [-- args...]\n", exe));
+    eprint("  (default)    build an executable named after <file>\n");
+    eprint("  -o <path>    name the executable\n");
+    eprint("  --run        build and run it, exiting with its exit code\n");
+    eprint("  --release    build optimized, without debug info\n");
+    eprint("  --sanitize   build with AddressSanitizer: a use of freed or\n");
+    eprint("               reused memory stops the program with a report\n");
+    eprint("  --bounds-checks on|off|always\n");
+    eprint("               index and slice checks: as written (where\n");
+    eprint("               #no_bounds_check turns them off), none, or all\n");
+    eprint("  -- args...   the program's arguments (with --run), which\n");
+    eprint("               args() also returns while compiling\n");
+    eprint("  --emit-c     print the generated C (--lines: with #line\n");
+    eprint("               directives mapping it to the Smelt lines)\n");
+    eprint("  --check      only check the program for errors\n");
+    eprint("  --stats      print phase times and generic instances to stderr\n");
+    eprint("  --tokens     print the tokens of <file>\n");
+    eprint("  --ast        print the syntax tree of <file> (no imports)\n");
+    eprint("  --resolve    print the syntax tree of every module with names\n");
+    eprint("               linked to their declarations\n");
+    eprint("  --types      print the syntax tree of every module with types and\n");
+    eprint("               constant values\n");
+    eprint("  --std <dir>  standard library directory (default: std next to the compiler)\n");
     return 1;
 }
 
 fn main() -> i32 {
     let argv = args();
-    let mode = Mode.None;
+    let exe = argv[0];
+    let mode = Mode.Build;
+    let out_path = "";
+    let std_dir = path_normalize(path_join(path_dir(exe), "std"));
     let path = "";
-    let std_dir = path_normalize(path_join(path_dir(argv[0]), "std"));
+    let program_args: [..]string; // after `--`: the program's (and args() in #run)
+    let lines = false;            // --emit-c with #line directives
+    let bounds_checks = vm.BoundsChecks.On;
+    let bounds_given = false;     // --bounds-checks wins over a build script's
+
     let i: isize = 1;
     while (i < argv.len) {
         let arg = argv[i];
         i++;
-        if (arg == "--tokens")
+        if (arg == "--") {
+            array_append(&program_args, argv[i..]);
+            break;
+        }
+        if (arg == "--tokens") {
             mode = .Tokens;
-        else if (arg == "--ast")
+        } else if (arg == "--ast") {
             mode = .Ast;
-        else if (arg == "--resolve")
+        } else if (arg == "--resolve") {
             mode = .Resolve;
-        else if (arg == "--types")
+        } else if (arg == "--types") {
             mode = .Types;
-        else if (arg == "--std" && i < argv.len) {
+        } else if (arg == "--run") {
+            mode = .Run;
+        } else if (arg == "--emit-c") {
+            mode = .EmitC;
+        } else if (arg == "--check") {
+            mode = .Check;
+        } else if (arg == "--lines") {
+            lines = true;
+        } else if (arg == "--release") {
+            release = true;
+        } else if (arg == "--sanitize") {
+            sanitize = true;
+        } else if (arg == "--bounds-checks" && i < argv.len) {
+            let which = argv[i];
+            i++;
+            if (which == "on")
+                bounds_checks = .On;
+            else if (which == "off")
+                bounds_checks = .Off;
+            else if (which == "always")
+                bounds_checks = .Always;
+            else
+                return print_usage(exe);
+            bounds_given = true;
+        } else if (arg == "--stats") {
+            show_stats = true;
+        } else if (arg == "-o" && i < argv.len) {
+            out_path = argv[i];
+            i++;
+        } else if (arg == "--std" && i < argv.len) {
             std_dir = argv[i];
             i++;
-        } else if (arg.len > 0 && arg[0] == '-' || path.len > 0)
-            return usage();
-        else
+        } else if ((arg.len > 0 && arg[0] == '-') || path.len > 0) {
+            return print_usage(exe);
+        } else {
             path = arg;
+        }
     }
-    if (mode == .None || path.len == 0)
-        return usage();
+    if (path.len == 0)
+        return print_usage(exe);
+
+    if (mode == .Tokens || mode == .Ast) {
+        let src, err = load_source(path);
+        if (err != .None) {
+            eprintln("%: %", path, system_error_text(err));
+            return 1;
+        }
+        let tokens, ok = lex(&src);
+        if (!ok)
+            return 1;
+        if (mode == .Tokens) {
+            dump_tokens(tokens);
+            return 0;
+        }
+        let root, errors = parse_file(&src, tokens);
+        dump(root);
+        return if (errors > 0) 1 else 0;
+    }
+
+    phase_start = now_ns();
+    let r = make_resolver(std_dir);
+    // made first: `#insert #run f();` checks and runs code while resolving
+    let c = make_checker(&r);
+    r.checker = &c;
+    c.build.base_dir = path_dir(path);
+    c.build.release = release; // build scripts see it, and can't undo it
+    // args() while compiling: the program's name, then its arguments
+    array_add(&c.build.program_args, if (out_path.len == 0) path_stem(path) else out_path);
+    array_append(&c.build.program_args, program_args);
+    if (!resolve_program(&r, path))
+        return 1;
+    end_phase("parse and resolve");
+
+    if (mode == .Resolve) {
+        for (m in r.modules) {
+            println("MODULE %", m.path);
+            dump(m.root);
+        }
+        return 0;
+    }
+
+    if (!check_program(&c))
+        return 1;
+    end_phase("type check");
+
+    // build scripts set the defaults; the command line wins
+    let build = &c.build;
+    if (release)
+        build.release = true; // a script can't turn off --release
+    release = build.release;
+    if (out_path.len > 0)
+        build.output = out_path;
+    if (bounds_given)
+        build.bounds_checks = bounds_checks;
 
     if (mode == .Types) {
-        let r = make_resolver(std_dir);
-        let c = make_checker(&r);
-        r.checker = &c;
-        set_build_defaults(&c, path);
-        if (!resolve_program(&r, path) || !check_program(&c))
-            return 1;
         for (m in r.modules) {
             println("MODULE %", m.path);
             dump(m.root);
@@ -90,44 +344,58 @@ fn main() -> i32 {
         }
         return 0;
     }
+    if (mode == .Check) {
+        print_stats(&c);
+        return 0;
+    }
 
-    if (mode == .Resolve) {
-        let r = make_resolver(std_dir);
-        // `#insert` and top-level `#if`s check code while resolving
-        let c = make_checker(&r);
-        r.checker = &c;
-        set_build_defaults(&c, path);
-        if (!resolve_program(&r, path))
+    let g = make_codegen(&r, &c);
+    g.line_directives = mode != .EmitC || lines;
+    let c_source = generate(&g);
+    if (c_source.len == 0)
+        return 1;
+    functions_total = g.functions_total;
+    functions_emitted = g.functions_emitted;
+    end_phase("generate C");
+    if (mode == .EmitC) {
+        print(c_source);
+        print_stats(&c);
+        return 0;
+    }
+
+    if (mode == .Run) {
+        let dir, err = make_temp_dir("smelt-run");
+        if (err != .None) {
+            eprintln("mkdtemp: %", system_error_text(err));
             return 1;
-        for (m in r.modules) {
-            println("MODULE %", m.path);
-            dump(m.root);
         }
-        return 0;
+        let program = tformat("%/program", dir);
+        let ok = compile_c(c_source, program, build);
+        let command: [..]u8;
+        append_string(&command, shell_quote(program));
+        for (arg in program_args)
+            print_to(&command, " %", shell_quote(arg));
+        let exit: Exit;
+        if (ok) {
+            let ran, failed = run_shell(command as string);
+            exit = ran;
+            if (failed != .None)
+                exit.code = -1;
+        }
+        delete_file(program);
+        remove_dir(dir);
+        if (!ok)
+            return 1;
+        print_stats(&c);
+        return exit.code;
     }
 
-    let src, err = load_source(path);
-    if (err != .None) {
-        eprintln("%: %", path, system_error_text(err));
-        return 1;
-    }
-    let tokens, ok = lex(&src);
-    if (!ok)
-        return 1;
-    if (mode == .Tokens) {
-        dump_tokens(tokens);
-        return 0;
-    }
-    let root, errors = parse_file(&src, tokens);
-    dump(root);
-    return if (errors > 0) 1 else 0;
-}
-
-// what build scripts start from: relative paths are relative to the main
-// file's directory, and args() while compiling is the program's name
-fn set_build_defaults(c: *Checker, path: string) {
-    c.build.base_dir = path_dir(path);
-    array_add(&c.build.program_args, path_stem(path));
+    let exe_path = build.output;
+    if (exe_path.len == 0)
+        exe_path = path_stem(path);
+    let built = compile_c(c_source, exe_path, build);
+    print_stats(&c);
+    return if (built) 0 else 1;
 }
 
 fn dump_tokens(tokens: []Token) {

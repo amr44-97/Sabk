@@ -1,0 +1,3 @@
+[error]: `link_library` is part of the build API: it only works in `#run` code, while compiling, but the program calls it at [tests/errors/build_api_at_run_time.smelt:5:5]
+     5 |     link_library("m");
+       |     ^

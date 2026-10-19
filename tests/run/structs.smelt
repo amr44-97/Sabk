@@ -1,0 +1,29 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+struct Vec2 { x: f32; y: f32 = 10.0; }
+struct Node { value: i32; next: *Node; }
+union Bits { f: f32; u: u32; }
+
+fn length2(v: *Vec2) -> f32 { return v.x * v.x + v.y * v.y; }
+fn scale(v: Vec2, k: f32) -> Vec2 { return Vec2.{ v.x * k, v.y * k }; }
+
+fn main() {
+    let v = Vec2.{ .x = 3.0 };
+    printf("default field: %.1f %.1f\n", v.x, v.y);
+    let w = scale(v, 2.0);
+    printf("by value: %.1f %.1f (v still %.1f)\n", w.x, w.y, v.x);
+    printf("through pointer: %.1f\n", length2(&w));
+
+    let c = Node.{ .value = 3 };
+    let b = Node.{ .value = 2, .next = &c };
+    let a = Node.{ .value = 1, .next = &b };
+    let sum = 0;
+    for (let n = &a; n != null; n = n.next) { sum += n.value; }
+    printf("list sum: %td\n", sum);
+    a.next.next.value = 30;
+    printf("write through: %d\n", c.value);
+
+    let bits = Bits.{ .f = 1.0 };
+    printf("union: 0x%x\n", bits.u);
+    printf("sizes: %td %td %td\n", sizeof(Vec2), sizeof(Node), sizeof(Bits));
+}

@@ -1,0 +1,100 @@
+// formatted printing: `%` takes the next value, of any type
+import "std/io";
+import "std/fmt";
+import "std/str";
+
+enum Color { Red, Green }
+struct Point { x: f64; y: f64; }
+enum Shape { Circle(f64), Rect(w: f64, h: f64), Dot, At(Point) }
+struct Person {
+    name: string;
+    age: i32;
+    tags: []string;
+    favorite: Color;
+    home: *Point;
+}
+union Bits { f: f32; u: u32; }
+
+// a function taking any number of values, passing them on with `..`
+fn log(level: string, fmt: string, args: ..Any) {
+    print("[%] ", level);
+    println(fmt, ..args);
+}
+
+fn sum(xs: ..i32) -> i32 {
+    let total: i32 = 0;
+    for (x in xs)
+        total += x;
+    return total;
+}
+
+// type_info: what printing uses, and anyone can
+fn field_names($T: Type) -> string {
+    let b = make_builder();
+    for (f in type_info(T).fields)
+        builder_print(&b, "%:% ", f.name, f.info.name);
+    return builder_string(&b);
+}
+
+fn describe(x: $T) { println("a % holding %", type_info(T).name, x); }
+
+fn summary() -> string {
+    let shapes: []Shape = .[.Circle(2), .Rect(3, 4.5), .Dot];
+    return format("% % %", shapes, 1.0 as f32 / 3, -7 as i8);
+}
+
+const SUMMARY = #run summary();             // formatting at compile time
+
+fn main() {
+    // numbers, bools, strings
+    println("% % % % %", 42, -9223372036854775807 as i64 - 1, 18446744073709551615 as u64, true, 'x');
+    println("% % % % %", 0.1, 2.5, 1.0e20, 1.0 / 3, 0.1 as f32);
+    println("%-%", "text", "");
+
+    // aggregates: nested strings are quoted, pointers aren't followed
+    let p = Point.{ .x = 1.5, .y = -2 };
+    let ada = Person.{ .name = "ada", .age = 36, .tags = .["math", "q\"uote\n"], .favorite = .Green };
+    println("%", ada);
+    println("% % %", u8.[1, 2, 3], i16.[-1, 2], []i32.[.[1], .[]]);
+    println("% % % %", Shape.Circle(2), Shape.Rect(3, 4), Shape.Dot, Shape.At(p));
+    println("% % %", Color.Red, 7 as Color, Bits.{ .u = 1 });
+    println("% %", null as *i32, type_info(Point).name);
+    let held: Any = p;
+    println("an Any: %", held);
+
+    // the format itself
+    println("100%% sure, % left", 3);
+    // formats only known at run time aren't checked by the compiler, so
+    // mistakes show in the output
+    let missing = "missing: % %";
+    let extra = "extra:";
+    println(missing, 1);
+    println(extra, 1, 2);
+    println("no values: 100%");
+
+    // options: %{[align][+][0][width][.precision][kind]}
+    println("[%{8}|%{<8}|%{^8}]", 42, "ab", "mid");
+    println("[%{08.3} %{x} %{X} %{b} %{o} %{x}]", 3.14159, 255, 3054, 5, 8, -255);
+    println("[%{+} %{05} %{+05} %{c}]", 7, -42, 42, 'A');
+    println("[%{e} %{.2e} %{f} %{.0} %{.2f}]", 12345.678, 0.000123, 1.5, 2.5, 7);
+    println("[%{.1}] [%{.3}] [%{6.2}] [%{^9}]", p, "abcdef", "héllo", "héllo");
+    println("[%{>9}] [%{<4}]", i32.[1, 2], true);
+    let bad = "[%{zz}] [%{.}] [%{}]";
+    println(bad, 1, 2, 3);
+    let spec: FormatSpec;
+    if (parse_format_spec(">6.1", &spec)) {
+        let b = make_builder();
+        append_formatted(&b, 2.25, spec);
+        println("[%]", builder_string(&b));
+    }
+
+    log("info", "% + % = %", 1, 2, 1 + 2);
+    println("% % %", sum(), sum(1, 2, 3), sum(...[4, 5]));
+    print(field_names(Person));
+    println();
+    describe(2.5);
+    let points: []Point = .[p];
+    describe(points);
+    println(SUMMARY);
+    println("%", summary());
+}

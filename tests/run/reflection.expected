@@ -1,0 +1,7 @@
+{x = 1, y = 20} {w = 2.5, h = 1}
+21 3.5 3.5
+true false true
+true false true false
+true true
+first second 2
+[exit 0]

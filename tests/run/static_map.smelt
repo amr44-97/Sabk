@@ -1,0 +1,44 @@
+// maps made by #run and baked into the program
+import "std/io";
+import "std/map";
+
+enum Token { Name, If, Else, While }
+struct Point { x: i32; y: i32; }
+
+const KEYWORDS = #run static_map(.[
+    Pair.{ "if", Token.If },
+    Pair.{ "else", Token.Else },
+    Pair.{ "while", Token.While },
+]);
+
+// the later "ada" wins
+let ages = #run static_map(.[Pair.{ "ada", 36 }, Pair.{ "bob", 41 }, Pair.{ "ada", 37 }]);
+
+const PLACES = #run static_map(.[
+    Pair.{ Point.{ 0, 0 }, "origin" },
+    Pair.{ Point.{ 1, 2 }, "there" },
+]);
+
+const NO_PAIRS: []Pair(string, i32) = .[];
+const EMPTY = #run static_map(NO_PAIRS);
+
+fn kind(word: string) -> Token {
+    return static_map_get(KEYWORDS, word) or_else Token.Name;
+}
+
+fn show() {
+    println("% % % %", kind("if"), kind("else"), kind("while"), kind("whale"));
+    println("% % %", static_map_get(ages, "ada") or_else -1, ages.entries.len,
+            static_map_has(ages, "eve"));
+    println("% %", static_map_get(PLACES, Point.{ 1, 2 }) or_else "?",
+            static_map_get(PLACES, Point.{ 2, 1 }) or_else "?");
+    println("% %", EMPTY.entries.len, static_map_has(EMPTY, "x"));
+    for (e in KEYWORDS.entries)
+        print("%=% ", e.key, e.value);
+    println("");
+}
+
+fn main() {
+    #run show();
+    show();
+}

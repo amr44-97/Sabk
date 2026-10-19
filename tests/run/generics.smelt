@@ -1,0 +1,103 @@
+import "std/io";
+import "std/mem";
+import "std/os";
+import "lib/generic_lib";
+
+// ---- inference
+fn max(a: $T, b: T) -> T {
+    if (a > b) return a;
+    return b;
+}
+
+fn first(items: []$T) -> T { return items[0]; }
+
+fn apply(f: fn($A) -> $B, value: A) -> B { return f(value); }
+fn halve(x: i32) -> f64 { return x as f64 / 2.0; }
+
+// ---- explicit types, and a generic struct
+struct List($T) {
+    items: []T;
+    count: isize;
+}
+
+fn make_list($T: Type, capacity: isize = 4) -> List(T) {
+    return List(T).{ .items = new([]T, capacity) };
+}
+
+fn push(list: *List($T), item: T) {
+    if (list.count == list.items.len) {
+        let bigger = new([]T, list.items.len * 2 + 1);
+        for (i in 0..list.count) bigger[i] = list.items[i];
+        free(list.items.ptr);
+        list.items = bigger;
+    }
+    list.items[list.count] = item;
+    list.count++;
+}
+
+fn contents(list: *List($T)) -> []T { return list.items[..list.count]; }
+
+// ---- generic structs that point to themselves, and recursion
+struct Node($T) {
+    value: T;
+    next: *Node(T);
+}
+
+fn length(node: *Node($T)) -> i32 {
+    if (node == null) return 0;
+    return 1 + length(node.next);
+}
+
+// ---- a generic calling a generic, with a macro inside
+fn largest(items: []$T) -> T {
+    let best = first(items);
+    for (x in items) best = max(best, x);
+    assert(best >= items[0]);
+    return best;
+}
+
+struct Point { x: i32; y: i32; }
+type Points = List(Point);
+
+fn size_of($T: Type) -> isize { return sizeof(T); }
+
+fn main() {
+    // inference: the typed argument decides, untyped constants follow it
+    let small: u8 = 200;
+    print("%", max(3, 9)); print("%{c}", ' ');
+    print("%", max(100, small)); print("%{c}", ' ');        // T = u8, not isize
+    let wide: i64 = 5;
+    print("%", max(wide, 10)); println();
+    print("%{.1}", apply(halve, 7)); println();
+
+    let numbers = make_list(i32);
+    for (i in 0..10) push(&numbers, (i * i) as i32);
+    for (n in contents(&numbers)) { print("%", n); print("%{c}", ' '); }
+    println();
+    print("%", largest(contents(&numbers))); println();
+
+    let words = make_list(string, 1);
+    push(&words, "generic");
+    push(&words, "lists");
+    for (w in contents(&words)) { print(w); print("%{c}", ' '); }
+    println();
+
+    let points: Points = make_list(Point);
+    push(&points, Point.{ .x = 1, .y = 2 });
+    print("%", contents(&points)[0].y); println();
+
+    let c = Node(u8).{ .value = 3 };
+    let b = Node(u8).{ .value = 2, .next = &c };
+    let a = Node(u8).{ .value = 1, .next = &b };
+    print("%", length(&a)); println();
+
+    let stack: Stack(f32);
+    stack_push(&stack, 1.5);
+    stack_push(&stack, 2.5);
+    print("%{.1}", stack_pop(&stack)); print("%{c}", ' ');
+    print("%{.1}", stack_pop(&stack)); println();
+
+    print("%", size_of(Point)); print("%{c}", ' ');
+    print("%", size_of(string)); print("%{c}", ' ');
+    print("%", size_of(*List(i64))); println();
+}

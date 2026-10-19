@@ -1,0 +1,10 @@
+16 0.0 36 3.5 0.0
+7
+2 5
+f64
+isize string
+bool f64
+u8
+isize
+i32 3
+[exit 0]

@@ -1,0 +1,37 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn early(flag: bool) -> i32 {
+    defer printf("  defer 1\n");
+    defer printf("  defer 2\n");
+    if (flag) {
+        defer printf("  inner defer\n");
+        return 1;
+    }
+    printf("  end of body\n");
+    return 0;
+}
+
+fn main() {
+    printf("early(true):\n");
+    let r = early(true);
+    printf("  -> %d\n", r);
+    printf("early(false):\n");
+    r = early(false);
+    printf("  -> %d\n", r);
+
+    printf("loop:\n");
+    for (i in 0..4) {
+        defer printf("  end of iteration %td\n", i);
+        if (i == 1) continue;
+        if (i == 3) break;
+        printf("  body %td\n", i);
+    }
+    printf("return value computed before defers:\n");
+    let x: i32 = 1;
+    printf("  -> %d\n", value_then_defer(&x));
+}
+
+fn value_then_defer(p: *i32) -> i32 {
+    defer p.* = 100;
+    return p.*;
+}

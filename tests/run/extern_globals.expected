@@ -1,0 +1,5 @@
+written by fwrite to stdout
+environment: true true (while compiling: true)
+optind starts at 1
+and is now 5
+[exit 0]

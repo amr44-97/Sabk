@@ -1,0 +1,28 @@
+// extern let: variables C defines, under their C names
+import "std/io";
+
+extern let stdout: *void;         // C's FILE *stdout
+extern let environ: **u8;          // the environment, NULL-terminated
+extern let optind: i32;            // getopt's: one we can write to
+
+extern fn fwrite(data: *void, size: usize, count: usize, file: *void) -> usize;
+
+fn environment_size() -> isize {
+    let n = 0;
+    while (environ[n] != null)
+        n++;
+    return n;
+}
+
+// while compiling, the compiler's own variables
+const HAS_ENVIRONMENT = #run environment_size() > 0;
+
+fn main() {
+    let text = "written by fwrite to stdout\n";
+    fwrite(text.ptr, 1, text.len as usize, stdout);
+    println("environment: % % (while compiling: %)", environment_size() > 0,
+            environ != null, HAS_ENVIRONMENT);
+    println("optind starts at %", optind);
+    optind = 5;
+    println("and is now %", optind);
+}

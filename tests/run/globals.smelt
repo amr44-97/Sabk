@@ -1,0 +1,23 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+struct Pair { a: i32; b: i32 = 9; }
+
+const N = 3;
+const PRIMES: [N + 1]i32 = .[2, 3, 5, 7];
+const ORIGIN = Pair.{ .a = 1 };
+const NAME: string = "globals";
+let counter: i32 = 10;
+let table: [4]u8;
+let handler: fn(i32) -> i32 = double_it;
+
+fn double_it(x: i32) -> i32 { return x * 2; }
+fn bump() { counter++; table[counter % 4] = counter as u8; }
+
+fn main() {
+    bump();
+    bump();
+    printf("counter %d, table %d %d %d %d\n", counter, table[0], table[1], table[2], table[3]);
+    printf("primes %d..%d, origin %d %d\n", PRIMES[0], PRIMES[3], ORIGIN.a, ORIGIN.b);
+    printf("%s %td\n", NAME.ptr, NAME.len);
+    printf("handler %d\n", handler(21));
+}

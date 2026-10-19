@@ -1,0 +1,133 @@
+import "lib/macrolib";
+extern fn printf(fmt: *u8, ...) -> i32;
+extern fn exit(code: i32);
+
+// ---- Code arguments, #text and #location
+fn assert(cond: Code) #expand {
+    if (!(#insert cond)) {
+        printf("%s: assertion failed: %s\n", #location(cond), #text(cond));
+        exit(3);
+    }
+}
+
+// ---- a trailing block fills the last Code parameter
+fn twice(body: Code) #expand {
+    #insert body;
+    #insert body;
+}
+
+// ---- backtick: the caller's variables and scope
+fn bump(amount: isize) #expand { `counter += amount; }
+
+fn scoped(name: *u8) #expand {
+    printf("enter %s\n", name);
+    `defer printf("leave %s\n", name);
+}
+
+fn declare_answer() #expand { `let answer = 42; }
+
+// ---- custom iteration, like Jai's for_expansion
+struct List { items: [6]i32; count: i32; }
+
+fn each(list: *List, body: Code) #expand {
+    for (i in 0..list.count) {
+        `let it = list.items[i];
+        `let it_index = i;
+        #insert body;
+    }
+}
+
+// ---- value-returning macros: `return` gives the value,
+// a backticked return returns from the caller
+fn max_of(a: i32, b: i32) -> i32 #expand {
+    if (a > b) return a;
+    return b;
+}
+
+fn check(code: i32) -> i32 #expand {
+    if (code < 0) `return code;
+    return code * 10;
+}
+
+fn run_checks(x: i32, y: i32) -> i32 {
+    let a = check(x);
+    let b = check(y);
+    return a + b;
+}
+
+// ---- hygiene: the macro's names never meet the caller's
+fn swap_ints(a: Code, b: Code) #expand {
+    let tmp = #insert a;
+    #insert a = #insert b;
+    #insert b = tmp;
+}
+
+fn with_allocator(alloc: Allocator, body: Code) #expand {
+    context.allocator = alloc;
+    #insert body;
+}
+
+let allocations = 0;
+fn counting(data: *void, mode: AllocatorMode, size: isize, align: isize, old: *void, old_size: isize) -> *void {
+    if (mode == AllocatorMode.Alloc) allocations++;
+    let inner = data as *Allocator;
+    return inner.procedure(inner.data, mode, size, align, old, old_size);
+}
+
+// ---- macros calling macros, and passing Code on
+fn twice_each(list: *List, body: Code) #expand {
+    each(list) { #insert body; }
+    each(list) { #insert body; }
+}
+
+fn main() -> i32 {
+    let counter = 0;
+    bump(5);
+    bump(counter);                       // the argument is evaluated once
+    printf("counter = %td\n", counter);   // 10
+
+    twice() { counter++; }
+    printf("counter = %td\n", counter);   // 12
+
+    {
+        scoped("block");
+        printf("inside\n");
+    }
+
+    declare_answer();
+    printf("answer = %td\n", answer);
+
+    let list = List.{ .items = .[3, 1, 4, 1, 5, 9], .count = 6 };
+    let sum = 0;
+    each(&list) {
+        if (it == 5) break;              // stops the iteration
+        sum += it;
+        printf("item %d = %d\n", it_index, it);
+    }
+    printf("sum before 5 = %td\n", sum);
+
+    let calls = 0;
+    twice_each(&list) { calls++; }
+    printf("twice_each ran the body %td times\n", calls);
+
+    printf("max = %d\n", max_of(3, 8) + max_of(10, 2));
+    printf("checks: %d %d\n", run_checks(1, 2), run_checks(1, -7));
+
+    let tmp = 1;                         // same name as the macro's local
+    let other = 2;
+    swap_ints(tmp, other);
+    printf("swapped: tmp = %td, other = %td\n", tmp, other);
+
+    let base = context.allocator;
+    with_allocator(Allocator.{ .procedure = counting, .data = &base }) {
+        let p = new(i32);
+        let q = new(i32);
+    }
+    let r = new(i32);
+    printf("counted allocations: %td\n", allocations);
+
+    macrolib.trace(counter + 1);
+    assert(counter == 12);
+    assert(sum == 100);
+    return 0;
+}

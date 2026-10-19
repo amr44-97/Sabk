@@ -7,19 +7,17 @@ It's a redesign as well as a port: the inside (tokens, the syntax tree,
 the dumps) may change, while what users see stays the same: programs'
 output, error messages, and the command line. `#run` keeps the bytecode VM.
 
-Done so far: the lexer (`smelt --tokens file`), the parser (`smelt --ast
-file`), the resolver (`smelt --resolve file`), which loads the imports,
-links names to their declarations and expands macros, and the type checker
-(`smelt --types file`), with its escaping-memory errors and memory-trap
-warnings, and the VM that runs `#run` code while compiling. What's left is
-the C backend and the driver around it.
-`std` is a link to `../the-compiler/std` for now.
+It's complete: it compiles Smelt programs as the C++ compiler does, with
+the same command line, and it compiles itself. `std` is a link to
+`../the-compiler/std` for now.
 
 ```
 make            build build/smelt with ../the-compiler/smelt (SMELT=...)
 make test       the golden tests in tests/
 make compare    --tokens, --ast, --resolve and --types on every .smelt
                 file in ../the-compiler, against the C++ compiler's
+make bootstrap  the compiler builds itself, twice: stage 2 and stage 3
+                must write the same C
 ```
 
 ## Layout
@@ -47,6 +45,8 @@ make compare    --tokens, --ast, --resolve and --types on every .smelt
 | `src/lower.smelt` | checked code to the VM's bytecode |
 | `src/vm.smelt` | the VM: running bytecode, calling C, baking `#run` results |
 | `src/vm_ffi.c` | libffi and dlsym, whose types differ between platforms |
+| `src/codegen.smelt` | the checked program as C |
+| `src/runtime_start.c`, `src/runtime_new.c` | the runtime's C, pieces of every program's C (baked in by `#run`) |
 
 ## Differences from the C++ compiler
 
@@ -72,8 +72,11 @@ make compare    --tokens, --ast, --resolve and --types on every .smelt
   and every step returns false up to `vm_evaluate`, which reports it.
   Lowering stops emitting once it has failed.
 - `make compare` matches the C++ compiler on every file, in all four
-  modes. tests/errors holds the C++ error tests, run with `--types`, but
-  for the 3 that need the C backend.
+  modes, and tests/ holds every C++ test suite (run, errors, warnings
+  too), which pass.
+- `--emit-c` writes the same C as the C++ compiler, but for float
+  constants: the C++ one printed them from `long double` with 21 digits,
+  this one prints the 17 that read back as the same `f64`.
 - Float constants are `f64`, not `long double`: `1e400` reads as `inf`
   (the C++ lexer kept `1e+400`). A literal out of `f64`'s range should be
   an error, once there's a parser to report it.

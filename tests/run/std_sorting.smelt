@@ -1,0 +1,75 @@
+import "std/io";
+import "std/array";
+import "std/os";
+import "std/sorting";
+import "std/str";
+
+let seed: u64 = 12345;
+fn random() -> u64 {
+    seed = seed * 6364136223846793005 + 1442695040888963407;
+    return seed >> 33;
+}
+
+fn checksum(items: []i64) -> u64 {
+    let sum: u64 = 0;
+    for (x in items) sum += (x as u64) * (x as u64) + 17;
+    return sum;
+}
+
+fn greater(a: i64, b: i64) -> bool { return a > b; }
+
+// sorts `items`, then checks it's ordered and still the same elements
+fn check(name: string, items: []i64) {
+    let before = checksum(items);
+    sort(items);
+    assert(is_sorted(items));
+    assert(checksum(items) == before);
+    sort_by(items, greater);
+    assert(is_sorted_by(items, greater));
+    reverse(items);
+    assert(is_sorted(items));
+    print(name);
+    print(" ok ");
+}
+
+enum Suit { Clubs, Diamonds, Hearts, Spades }
+
+fn main() {
+    let sizes = isize.[0, 1, 2, 15, 17, 100, 5000];
+    for (n in sizes) {
+        let xs: [..]i64;
+        for (i in 0..n) array_add(&xs, (random() % 1000) as i64 - 500);
+        check("random", xs);
+        // the shapes that make naive quicksorts quadratic
+        for (i in 0..n) xs[i] = i;
+        check("sorted", xs);
+        for (i in 0..n) xs[i] = n - i;
+        check("reversed", xs);
+        for (i in 0..n) xs[i] = 7;
+        check("equal", xs);
+        for (i in 0..n) xs[i] = i % 3;
+        check("sawtooth", xs);
+        print("%", n);
+        println();
+        array_free(&xs);
+    }
+
+    let names = string.["pear", "apple", "fig", "apples", "banana"];
+    sort_by(&names, string_less);
+    for (name in names) { print(name); print(" "); }
+    println();
+
+    let primes = i32.[2, 3, 5, 7, 11, 13, 17, 19];
+    print("%", binary_search(&primes, 13)); print(" ");
+    print("%", binary_search(&primes, 2)); print(" ");
+    print("%", binary_search(&primes, 19)); print(" ");
+    print("%", binary_search(&primes, 4)); println();
+
+    let suits = Suit.[Suit.Spades, Suit.Clubs, Suit.Hearts, Suit.Diamonds];
+    sort(&suits);
+    for (s in suits) { print("%", s as i64); print(" "); }
+    let floats = f64.[2.5, -1.0, 9.75, 0.0];
+    sort(&floats);
+    for (f in floats) { print("%{.2}", f); print(" "); }
+    println();
+}

@@ -1,0 +1,32 @@
+// void is a real type: zero bytes, one value .{}, allowed where a type is
+// (variables, fields, parameters, generics); C's void spells only results
+import "std/io";
+
+struct Tagged($T) { id: i32; value: T; }
+struct Marker { done: void; }
+
+let calls = 0;
+fn note() { calls += 1; }
+fn take(x: void, n: i32) -> i32 { return n * 2; }
+fn same(x: $T) -> T { return x; }
+fn finish() { return note(); }               // a void result, returned
+
+fn sizes() -> isize {
+    let v: void;
+    let w = note();                           // a call's void result
+    v = w;
+    let t = Tagged(void).{ .id = 7 };
+    t.value = .{};
+    let p = &t.value;                         // an address, of nothing
+    return sizeof(void) + sizeof(Marker) * 10 + sizeof(Tagged(void)) * 100 + calls * 1000;
+}
+
+fn main() {
+    println("%", sizes());
+    println("%", #run sizes());
+    println("% %", take(.{}, 21), take(note(), 1));
+    let nothing: void;
+    let s = same(nothing);                    // T = void
+    finish();
+    println("% %", calls, s);
+}

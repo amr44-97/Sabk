@@ -1,0 +1,18 @@
+// args(): the program's path, then its arguments
+// args: input.txt --verbose "two words"
+import "std/io";
+import "std/os";
+import "std/str";
+
+// while compiling: the program's name, then what follows `--`
+const ARGS_WHILE_COMPILING = #run args().len;
+
+fn main() {
+    let a = args();
+    println("% arguments: %", a.len - 1, a[1..]);
+    println("the program is a path: %", a[0].len > 0);
+    println("the compiler saw % too", ARGS_WHILE_COMPILING - 1);
+    for (arg in a[1..])
+        if (starts_with(arg, "--"))
+            println("an option: %", arg);
+}

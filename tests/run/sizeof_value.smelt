@@ -1,0 +1,41 @@
+// sizeof(value): the size of the value's type, as in C; the value isn't
+// evaluated
+import "std/io";
+
+struct Vec3 { x: f32; y: f32; z: f32; }
+struct Pair { a: u8; b: i64; }
+
+let calls = 0;
+fn bump() -> i16 { calls += 1; return 1; }
+
+fn size_in(p: *Pair) -> isize { return sizeof(p.*); }
+
+fn size_at_compile_time() -> isize {
+    let v: Vec3;
+    return sizeof(v) + sizeof(v.x);
+}
+
+fn main() {
+    let b: u8 = 1;
+    let v: Vec3;
+    let p = Pair.{ .a = 1, .b = 2 };
+    let nums: [5]i32;
+    let s = "hello";
+    println("% % % %", sizeof(b), sizeof(v), sizeof(p), sizeof(nums));
+    println("% % %", sizeof(v.x), sizeof(nums[0]), sizeof(s));   // a field, an element
+    println("% %", sizeof(&p), sizeof(size_in(&p)));              // a pointer, a result
+    println("%", size_in(&p));                                    // through a pointer
+    println("% %", sizeof(1), sizeof(1.5));                       // untyped: their defaults
+    println("%", sizeof(b + b));                                  // an expression's type
+
+    // the value isn't evaluated: bump() isn't called
+    let n = sizeof(bump());
+    println("% calls=%", n, calls);
+
+    // a constant, like sizeof(T)
+    const SIZE = sizeof(p);
+    let buf: [SIZE]u8;
+    println("% %", SIZE, buf.len);
+
+    println("%", #run size_at_compile_time());
+}

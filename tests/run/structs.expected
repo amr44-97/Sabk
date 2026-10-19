@@ -1,0 +1,8 @@
+default field: 3.0 10.0
+by value: 6.0 20.0 (v still 3.0)
+through pointer: 436.0
+list sum: 6
+write through: 30
+union: 0x3f800000
+sizes: 8 16 4
+[exit 0]

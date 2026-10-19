@@ -1,0 +1,90 @@
+import "std/io";
+import "std/map";
+import "std/mem";
+import "std/os";
+import "std/str";
+
+struct Point { x: i32; y: i32; }
+fn hash_point(p: Point) -> u64 { return hash_key(p.x) ^ (hash_key(p.y) * 31); }
+fn same_point(a: Point, b: Point) -> bool { return a.x == b.x && a.y == b.y; }
+
+let seed: u64 = 99;
+fn random(limit: u64) -> u64 {
+    seed = seed * 6364136223846793005 + 1442695040888963407;
+    return (seed >> 33) % limit;
+}
+
+fn main() {
+    // counting words: string keys, insertion order
+    let counts = make_map(string, i32);
+    for (w in string.["the", "cat", "sat", "on", "the", "mat", "the", "end"]) {
+        let c = map_find(&counts, w);
+        if (c != null) c.* += 1;
+        else map_put(&counts, w, 1);
+    }
+    for (e in counts.entries) { print(e.key); print("="); print("%", e.value); print(" "); }
+    println();
+    assert((map_get(&counts, "the") or_else 0) == 3 && (map_get(&counts, "dog") or_else 0) == 0);
+    assert(map_remove(&counts, "cat") && !map_remove(&counts, "cat"));
+    for (e in counts.entries) { print(e.key); print(" "); }  // "end" took cat's place
+    println();
+
+    // 20000 random operations, each checked against a plain array
+    let m = make_map(isize, isize);
+    let model: [500]isize;
+    for (i in 0..500) model[i] = -1;
+    let present = 0;
+    for (step in 0..20000) {
+        let key = random(500) as isize;
+        let op = random(3);
+        if (op == 0) {
+            if (model[key] < 0) present++;
+            model[key] = step;
+            map_put(&m, key, step);
+        } else if (op == 1) {
+            let was = model[key] >= 0;
+            assert(map_remove(&m, key) == was);
+            if (was) present--;
+            model[key] = -1;
+        }
+        let v = map_find(&m, key);
+        if (model[key] < 0) assert(v == null);
+        else assert(v != null && v.* == model[key]);
+        assert(m.entries.len == present);
+    }
+    for (k in 0..500) assert(map_has(&m, k) == (model[k] >= 0));
+    print("random operations ok, "); print("%", present); println(" keys left");
+
+    // floats: 0.0 and -0.0 are the same key
+    let f = make_map(f64, i32);
+    map_put(&f, 0.0, 1);
+    map_put(&f, -0.0, 2);
+    print("%", f.entries.len); print(" "); print("%", map_get(&f, 0.0) or_else 0); println();
+
+    // a map can bring its own hash and equality; this one lives in an arena
+    let arena = arena_init();
+    defer arena_destroy(&arena);
+    let grid = make_map(Point, string, arena_allocator(&arena), hash_point, same_point);
+    map_put(&grid, Point.{ .x = 1, .y = 2 }, "tree");
+    map_put(&grid, Point.{ .x = 2, .y = 1 }, "rock");
+    print(map_get(&grid, Point.{ .x = 2, .y = 1 }) or_else "?"); print(" ");
+    print(map_get(&grid, Point.{ .x = 5, .y = 5 }) or_else "?"); println();
+
+    map_clear(&m);
+    assert(m.entries.len == 0 && !map_has(&m, 3));
+    map_put(&m, 3, 30);
+    print("%", map_get(&m, 3) or_else 0); println();
+    map_free(&m);
+    map_free(&counts);
+
+    // a zero Map is empty and ready to use: std/reflect hashes its keys
+    let zero: Map(i32, i32);
+    assert(map_find(&zero, 1) == null && !map_remove(&zero, 1));
+    map_put(&zero, 1, 10);
+    map_put(&zero, 2, 20);
+    let words: Map(string, i32);
+    map_put(&words, "ada", 36);
+    println("% % %", map_get(&zero, 2) or_else 0, zero.entries.len, map_get(&words, "ada") or_else 0);
+    map_free(&zero);
+    map_free(&words);
+}

@@ -1,0 +1,18 @@
+load /tmp/the-compiler-error-values-good.conf:
+  ok: demo on port 9000 with 4 workers
+load /tmp/the-compiler-error-values-number.conf:
+  `90x` isn't a number: Invalid
+  failed: BadNumber
+load /tmp/the-compiler-error-values-key.conf:
+  failed: UnknownKey
+load /no/such/config:
+  can't read /no/such/config: no such file or directory
+  failed: CantRead
+workers from the environment: 2
+port or a default: 80
+copy: None
+copy a missing file: NotFound
+the copy has 48 bytes (None)
+average: 5 true
+average with a bad number: false
+[exit 0]

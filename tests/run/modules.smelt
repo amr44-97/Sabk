@@ -1,0 +1,11 @@
+import "../resolve/lib/util";
+import "lib/helper";
+extern fn printf(fmt: *u8, ...) -> i32;
+
+fn main() -> i32 {
+    printf("%d %d %d\n", util.helper(), util.LIMIT, util.Color.Green as i32);
+    printf("%d\n", helper.twice(21));
+    let g = helper.greeting;
+    printf("%s (%td)\n", g.ptr, g.len);
+    return helper.counter;
+}

@@ -1,0 +1,42 @@
+import "std/io";
+
+fn sum(items: []i32) -> i32 {
+    let total: i32 = 0;
+    for (x in items) total += x;
+    return total;
+}
+
+fn main() {
+    let arr = i32.[1, 2, 3, 4, 5, 6];
+    io.print("%", sum(arr[1..4]));  io.println();     // 2+3+4 = 9
+    io.print("%", sum(arr[..2]));   io.println();     // 3
+    io.print("%", sum(arr[4..]));   io.println();     // 11
+    io.print("%", sum(arr[..]));    io.println();     // 21
+
+    let s: []i32 = arr[..];
+    let middle = s[2..5];
+    middle[0] = 100;                                 // writes through to arr
+    io.print("%", arr[2]);          io.println();     // 100
+    io.print("%", middle[1..].len as i64); io.println(); // 2
+
+    let p = &arr[0];                                 // a raw pointer
+    io.print("%", sum(p[3..6]));    io.println();     // 4+5+6 = 15
+
+    let text: string = "hello, world";
+    io.println(text[7..]);                           // world
+    io.println("literal"[3..]);                      // eral
+
+    let numbers = new([]i64, 4);
+    for (i in 0..numbers.len) numbers[i] = (i * 10) as i64;
+    io.print("%", numbers[3]);      io.println();     // 30
+    let none = new([]u8, 0);
+    io.print("%", none.len);       io.println();     // 0
+
+    let empty = s[6..];                              // len 6..6 is fine
+    io.print("%", empty.len);      io.println();
+
+    let lo = 4;
+    let hi = 2;
+    io.println("about to slice backwards");
+    io.print("%", s[lo..hi].len);
+}

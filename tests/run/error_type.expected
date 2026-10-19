@@ -1,0 +1,16 @@
+{port = 9} None: fine
+{port = 80} ParseError.Invalid: not a number
+{port = 80} ConfigError.BadLine: a line without =
+{port = 80} ConfigError.UnknownKey: something else
+  check_file's defer
+IoError.NotFound no such file
+  check_file's defer
+None
+true true false true
+a directory
+true 3 true
+{what = "read", err = IoError.IsDirectory} None IoError.IsDirectory
+{port = 1}
+ParseError.Invalid Own.Bad true 7 not a number (at compile time)
+ParseError.Invalid Own.Bad true 7 not a number (at run time)
+[exit 0]

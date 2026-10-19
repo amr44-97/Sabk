@@ -1,0 +1,71 @@
+// std/checked: arithmetic that reports overflow, the same at run time and
+// while compiling
+import "std/io";
+import "std/fmt";
+import "std/str";
+import "std/checked";
+
+// each result, or "overflow"
+fn signed(b: *Builder, ok: bool, value: i64) {
+    if (ok) builder_print(b, "% ", value); else builder_append(b, "overflow ");
+}
+fn unsigned(b: *Builder, ok: bool, value: u64) {
+    if (ok) builder_print(b, "% ", value); else builder_append(b, "overflow ");
+}
+
+fn signed_cases() -> string {
+    let b = make_builder();
+    let r: i64;
+    let ok: bool;
+    r, ok = add_i64(I64_MAX, 1);       signed(&b, ok, r);
+    r, ok = add_i64(-5, 3);            signed(&b, ok, r);
+    r, ok = sub_i64(I64_MIN, 1);       signed(&b, ok, r);
+    r, ok = sub_i64(3, 5);             signed(&b, ok, r);
+    r, ok = mul_i64(I64_MIN, -1);      signed(&b, ok, r);
+    r, ok = mul_i64(3037000500, 3037000500); signed(&b, ok, r);
+    r, ok = mul_i64(-4, 6);            signed(&b, ok, r);
+    r, ok = div_i64(I64_MIN, -1);      signed(&b, ok, r);
+    r, ok = div_i64(7, 0);             signed(&b, ok, r);
+    r, ok = div_i64(-7, 2);            signed(&b, ok, r);
+    r, ok = rem_i64(I64_MIN, -1);      signed(&b, ok, r);
+    r, ok = rem_i64(-7, 2);            signed(&b, ok, r);
+    r, ok = neg_i64(I64_MIN);          signed(&b, ok, r);
+    r, ok = neg_i64(5);                signed(&b, ok, r);
+    r, ok = shl_i64(1, 62);            signed(&b, ok, r);
+    r, ok = shl_i64(1, 63);            signed(&b, ok, r);
+    r, ok = shl_i64(-1, 63);           signed(&b, ok, r);
+    return builder_string(&b);
+}
+
+fn unsigned_cases() -> string {
+    let b = make_builder();
+    let r: u64;
+    let ok: bool;
+    r, ok = add_u64(U64_MAX, 1);       unsigned(&b, ok, r);
+    r, ok = add_u64(1, 2);             unsigned(&b, ok, r);
+    r, ok = sub_u64(1, 2);             unsigned(&b, ok, r);
+    r, ok = sub_u64(5, 2);             unsigned(&b, ok, r);
+    r, ok = mul_u64(4294967296, 4294967296); unsigned(&b, ok, r);
+    r, ok = mul_u64(4294967295, 4294967297); unsigned(&b, ok, r);
+    r, ok = div_u64(1, 0);             unsigned(&b, ok, r);
+    r, ok = rem_u64(7, 0);             unsigned(&b, ok, r);
+    r, ok = shl_u64(1, 64);            unsigned(&b, ok, r);
+    r, ok = shl_u64(3, 62);            unsigned(&b, ok, r);
+    return builder_string(&b);
+}
+
+fn ranges() -> string {
+    return tformat("% % % % % %", fits_signed(127, 8), fits_signed(128, 8), fits_signed(-128, 8),
+                   fits_unsigned(255, 8), fits_unsigned(256, 8), fits_unsigned(U64_MAX, 64));
+}
+
+const SIGNED_WHILE_COMPILING = #run signed_cases();
+const UNSIGNED_WHILE_COMPILING = #run unsigned_cases();
+
+fn main() {
+    println(signed_cases());
+    println(SIGNED_WHILE_COMPILING);
+    println(unsigned_cases());
+    println(UNSIGNED_WHILE_COMPILING);
+    println(ranges());
+}

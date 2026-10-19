@@ -1,0 +1,30 @@
+// only code reachable from main is compiled to C; these functions are
+// reached in roundabout ways, so they must still be there
+import "std/io";
+
+fn doubled(x: i32) -> i32 { return x * 2; }
+fn tripled(x: i32) -> i32 { return x * 3; }
+fn negated(x: i32) -> i32 { return -x; }
+fn identity(x: $T) -> T { return x; }
+fn only_at_compile_time() -> i32 { return 7; }
+fn never_called() { println("unreachable"); }
+
+let chosen: fn(i32) -> i32 = doubled;           // a global's initializer
+struct Ops { apply: fn(i32) -> i32 = tripled; } // a field's default
+fn apply(x: i32, f: fn(i32) -> i32 = negated) -> i32 { return f(x); } // a default
+
+extern fn qsort(base: *void, count: usize, size: usize, compare: *void);
+extern fn compare(a: *i32, b: *i32) -> i32 { return a.* - b.*; } // called by C
+
+const SEVEN = #run only_at_compile_time();
+
+fn main() {
+    let ops: Ops = .{};
+    let generic: fn(i32) -> i32 = identity;          // an instance as a value
+    println("% % % % %", chosen(5), ops.apply(5), apply(5), generic(5), SEVEN);
+    let xs = i32.[3, 1, 2];
+    qsort(&xs, 3, 4, compare);
+    println("%", xs);
+    #if (false)
+        never_called();
+}

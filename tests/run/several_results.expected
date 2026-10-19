@@ -1,0 +1,29 @@
+  (twice(10) done)
+  (twice(-5) done)
+  (twice(1000) done)
+17 / 5 = 3 rem 2
+min -1 max 7 ok true
+empty ok: false
+swapped: 2 1
+xs: [14, 2, 2]
+n 7 wide 3
+  (twice(10) done)
+twice(10) = 40 None
+  (twice(60) done)
+twice(60) = 0 TooBig
+  (twice(-1) done)
+twice(-1) = 0 Negative
+both: smelt smelt true
+both missing: false
+or_else: fallback
+or_else: smelt
+chain: smelt
+pass: 3 2
+ok_only: None TooBig
+run: 32012131 32012131
+compile time: 100118
+first: a 2.5
+  (twice(3) done)
+  (twice(12) done)
+call_twice: 48 None
+[exit 0]

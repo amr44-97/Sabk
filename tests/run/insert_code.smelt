@@ -1,0 +1,90 @@
+// #insert of a string: code made while compiling, compiled in its place
+import "std/fmt";
+import "std/io";
+import "std/str";
+
+// top level: declarations, usable anywhere in the program
+fn getters(names: []string) -> string {
+    let b = make_builder();
+    for (name in names) {
+        builder_append(&b, "fn get_");
+        builder_append(&b, name);
+        builder_append(&b, "() -> string { return \"");
+        builder_append(&b, name);
+        builder_append(&b, "\"; }\n");
+    }
+    return builder_string(&b);
+}
+
+#insert #run getters(.["alpha", "beta"]);
+
+// statements: what they declare is visible after them
+fn unrolled(n: i32) -> string {
+    let b = make_builder();
+    for (i in 0..n) {
+        builder_append(&b, "total += ");
+        builder_print(&b, "%", i as i64);
+        builder_append(&b, ";\n");
+    }
+    return builder_string(&b);
+}
+
+fn decl_line(name: string, value: i64) -> string {
+    let b = make_builder();
+    builder_append(&b, "let ");
+    builder_append(&b, name);
+    builder_append(&b, " = ");
+    builder_print(&b, "%", value);
+    builder_append(&b, ";");
+    return builder_string(&b);
+}
+
+// expressions, from #run or a constant string
+fn product() -> string { return "6 * 7"; }
+const SQUARE = "x * x";
+let answer = #insert #run product();
+enum Level { Low = #insert "10", High }
+
+// inside a macro the code is the macro's: `hidden` stays hygienic, a
+// backtick declares into the caller
+fn declare_shown() #expand {
+    #insert #run decl_line("hidden", 1);
+    #insert "`let shown = hidden + 99;";
+}
+
+// generated code can insert more
+fn nested() -> string { return "#insert \"let deep = 5;\"; let deeper = deep * 2;"; }
+
+// a generator can use functions whose own bodies are generated
+fn eleven() -> i64 {
+    #insert "return 11;";
+}
+fn from_eleven() -> string { return decl_line("eleven_twice", eleven() * 2); }
+
+fn main() {
+    println(get_alpha());
+    println(get_beta());
+
+    let total = 0;
+    #insert #run unrolled(5);
+    print("%", total); println();
+
+    #insert "let made = 42;";
+    print("%", made); println();
+
+    let x = 7;
+    print("%", #insert (SQUARE)); print(" ");
+    print("%", answer); print(" ");
+    print("%", Level.High as i64); println();
+
+    if (true) #insert "println(\"in an if\");";
+
+    declare_shown();
+    print("%", shown); println();
+
+    #insert #run nested();
+    print("%", deeper); println();
+
+    #insert #run from_eleven();
+    print("%", eleven_twice); println();
+}

@@ -1,0 +1,15 @@
+9
+3
+11
+21
+100
+2
+15
+world
+eral
+30
+0
+0
+about to slice backwards
+tests/run/slices.smelt:41:20: panic: slice [4..2] starts after it ends
+[exit 134]

@@ -1,0 +1,11 @@
+// integer division by zero panics, saying where; the minimum / -1 wraps
+import "std/io";
+
+fn divide(a: i64, b: i64) -> i64 { return a / b; }
+
+fn main() {
+    let min = -9223372036854775807 as i64 - 1;
+    println("% %", divide(min, -1), divide(7, 2));
+    let count = 0;
+    println("%", divide(10, count));
+}

@@ -1,0 +1,38 @@
+// `let x: T = ---;` leaves a local as it is: no zeroing, no field defaults.
+// The program has to write it before reading it; #run fills it with 0xAA,
+// so a read before the write shows
+import "std/io";
+
+struct Point { x: i32 = 5; y: i32 = 6; }
+
+fn checksum(n: isize) -> u32 {
+    let buf: [4096]u8 = ---;                // written before it's read
+    for (i in 0..n) buf[i] = i as u8;
+    let total: u32 = 0;
+    for (i in 0..n) total += buf[i];
+    return total;
+}
+
+fn untouched() -> [3]u32 {
+    let x: u32 = ---;
+    let p: Point = ---;                     // not even its defaults
+    return .[x, p.x as u32, p.y as u32];
+}
+
+fn main() {
+    println("%", checksum(100));
+    let p: Point = ---;
+    p.x = 1;
+    p.y = 2;
+    println("% %", p.x, p.y);
+    for (i in 0..3) {
+        let row: [3]i64 = ---;              // every time round
+        for (j in 0..3) row[j] = i * j;
+        print("% ", row);
+    }
+    println("");
+
+    // while compiling, the bytes are 0xAA
+    let seen = #run untouched();
+    println("%{x}", seen);
+}

@@ -1,0 +1,15 @@
+// fn main() -> Error: a failure that reaches main is printed with its enum
+// and variant once main has returned (its defers have run), and the
+// program exits with 1
+import "std/io";
+import "std/mem";
+import "std/str";
+
+fn main() -> Error {
+    defer println("main's defer ran");
+    let n = parse_int("42") or_return;              // a ParseError
+    println("parsed %", n);
+    let text = read_file("/no/such/file") or_return; // an IoError
+    defer free(text.ptr);
+    println("not reached");
+}

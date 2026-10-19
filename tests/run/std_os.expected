@@ -1,0 +1,5 @@
+0 false
+a fallback
+before the panic
+tests/run/std_os.smelt:14:15: panic: count is too big
+[exit 134]

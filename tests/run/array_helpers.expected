@@ -1,0 +1,10 @@
+2 {title = "SICP", pages = 100, tags = ["lisp"]}
+TAOCP 3000
+0 3 -1
+1 1
+true [3, 5, 9]
+false [3, 5, 9]
+1
+0
+1
+[exit 0]

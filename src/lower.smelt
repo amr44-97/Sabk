@@ -831,7 +831,7 @@ fn for_in(l: *Lower, n: *Node) {
 /* --------------------------------------------------------------- switches */
 
 // does a pattern bind a pointer into what it matches (`&x`)?
-fn binds_by_ref(p: *Node) -> bool {
+pub fn binds_by_ref(p: *Node) -> bool {
     switch (p.kind) {
     case .Binding{by_ref}: return by_ref;
     case .FieldPattern{pattern}: return binds_by_ref(pattern);
@@ -973,13 +973,13 @@ fn switch_in_order(l: *Lower, n: *Node, clauses: []*Node, complete: bool, result
     end_loop(l, here(l));
 }
 
-fn pattern_parts(p: *Node) -> (*Node, []*Node, bool) {
+pub fn pattern_parts(p: *Node) -> (*Node, []*Node, bool) {
     if (p.kind is .VariantPattern{variant, bindings, by_fields})
         return variant, bindings, by_fields;
     return null, .[], false;
 }
 
-fn item_field_name(item: *Node) -> string {
+pub fn item_field_name(item: *Node) -> string {
     switch (item.kind) {
     case .Binding{field}: return if (field != null) field.tok.text else "";
     case .FieldPattern{field}: return if (field != null) field.tok.text else "";
@@ -1037,7 +1037,7 @@ fn match_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32, fails: *[..]isize) {
     }
 }
 
-fn pattern_of(item: *Node) -> *Node {
+pub fn pattern_of(item: *Node) -> *Node {
     if (item.kind is .FieldPattern{pattern})
         return pattern;
     return null;
@@ -1776,7 +1776,7 @@ fn array_literal(l: *Lower, n: *Node, t: *Type) -> u32 {
 }
 
 // is `n` the same whenever it's evaluated: a constant or a literal?
-fn is_fixed(n: *Node) -> bool {
+pub fn is_fixed(n: *Node) -> bool {
     if (n.cval.kind != .None)
         return true;
     switch (n.kind.tag) {
@@ -1787,7 +1787,7 @@ fn is_fixed(n: *Node) -> bool {
 
 // can evaluating `n` change memory that another part reads (a call, a
 // macro, new)?
-fn has_call(n: *Node) -> bool {
+pub fn has_call(n: *Node) -> bool {
     if (n == null)
         return false;
     switch (n.kind.tag) {

@@ -1,0 +1,43 @@
+// #nodiscard: a call's result can't be dropped by accident; `_ =` drops
+// one on purpose, in the program and in #run code
+import "std/io";
+
+enum SaveError { None, Full }
+
+fn save(n: i64) -> SaveError #nodiscard {
+    if (n > 2) return .Full;
+    println("saved %", n);
+    return .None;
+}
+
+fn counts() -> (i64, i64) #nodiscard { return 3, 4; }
+
+fn doubled(x: i64) -> i64 #nodiscard #expand { return x * 2; }
+
+fn checks() -> i64 #nodiscard #no_bounds_check {   // any order
+    let xs = i64.[1, 2];
+    return xs[1];
+}
+
+fn at_compile_time() -> i64 {
+    _ = save(1);
+    _ = counts();
+    return checks();
+}
+
+const K = #run at_compile_time();
+
+fn main() {
+    let err = save(1);
+    println("%", err);
+    if (save(5) != .None) println("full");
+    _ = save(2);                     // dropped on purpose
+    let a, b = counts();
+    _ = counts();                    // all of its results
+    let _, c = counts();
+    _ = doubled(4);
+    let x = 7;
+    _ = x + 1;                       // any value
+    defer _ = save(0);
+    println("% % % % % %", a, b, c, doubled(x), checks(), K);
+}

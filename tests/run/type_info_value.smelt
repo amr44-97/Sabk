@@ -1,0 +1,20 @@
+// type_info(value), like sizeof(value): the TypeInfo of the value's type;
+// the value isn't evaluated
+import "std/io";
+
+struct Point { x: i32; y: i32; }
+
+fn noisy() -> i64 { println("evaluated!"); return 1; }
+fn type_name(v: $T) -> string { return type_info(v).name; }
+fn at_compile_time() -> string { let p: Point; return type_info(p.y).name; }
+
+const BAKED = #run at_compile_time();
+
+fn main() {
+    let p = Point.{ .x = 1 };
+    let xs = i64.[1, 2, 3];
+    println("% % % %", type_info(p).name, type_info(xs).name,
+            type_info(p.x).name, type_info(5).name);
+    println("% %", type_info(p) == type_info(Point), type_info(noisy()).name);
+    println("% % %", type_name(2.5), type_name("text"), BAKED);
+}

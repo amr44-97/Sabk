@@ -1,0 +1,24 @@
+// generic code in another module, using one of the module's private helpers
+fn double_size(n: isize) -> isize { return n * 2; }
+
+pub struct Stack($T) {
+    items: []T;
+    count: isize;
+}
+
+pub fn stack_push(stack: *Stack($T), item: T) {
+    if (stack.count == stack.items.len) {
+        let capacity = double_size(stack.items.len);
+        if (capacity < 4) capacity = 4;
+        let bigger = new([]T, capacity);
+        for (i in 0..stack.count) bigger[i] = stack.items[i];
+        stack.items = bigger;
+    }
+    stack.items[stack.count] = item;
+    stack.count++;
+}
+
+pub fn stack_pop(stack: *Stack($T)) -> T {
+    stack.count--;
+    return stack.items[stack.count];
+}

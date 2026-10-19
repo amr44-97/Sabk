@@ -1,0 +1,1 @@
+fn main(argc: i32) -> u8 { return 0; }

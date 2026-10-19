@@ -1,0 +1,43 @@
+// top-level #if: the branch taken is part of the module, picked by
+// constants known at compile time such as OS, ARCH and POINTER_SIZE
+import "std/io";
+
+#if (OS == .Windows) {
+    extern fn Sleep(ms: u32);
+} else {
+    extern fn usleep(us: u32) -> i32;
+}
+
+fn nap() {
+    #if (OS == .Windows) Sleep(1);       // Sleep is only declared on Windows,
+    else usleep(1000);                   // which is fine in a branch not taken
+}
+
+// a layout that depends on the target
+#if (POINTER_SIZE == 8) {
+    struct Header { tag: u32; next: *void; }
+    const LAYOUT = "64-bit";
+} else {
+    struct Header { tag: u32; pad: u32; next: *void; }
+    const LAYOUT = "32-bit";
+}
+
+// a chain, decided by a constant of the program's own
+const LEVEL = 2;
+#if (LEVEL == 1) {
+    fn level() -> string { return "one"; }
+} else #if (LEVEL == 2) {
+    fn level() -> string { return "two"; }
+    #if (LEVEL > 1) {                    // nested: decided once this is taken
+        pub fn verbose() -> bool { return true; }
+    }
+} else {
+    fn level() -> string { return "many"; }
+}
+
+fn main() {
+    nap();
+    println("% %", OS != .Other || OS == .Other, ARCH == ARCH);
+    println("% %", (LAYOUT == "64-bit") == (sizeof(*void) == 8), sizeof(Header) == 2 * POINTER_SIZE);
+    println("% %", level(), verbose());
+}

@@ -1,0 +1,46 @@
+// a.ptr on a fixed array is &a[0], a *T; p.ptr on a *[N]T is the same
+import "std/io";
+extern fn memset(memory: *void, value: i32, size: usize) -> *void;
+
+struct Grid { cells: [4]u8; }
+
+let table: [3]i32 = .[7, 8, 9];
+
+fn fill(p: *[4]u8, value: u8) {
+    memset(p.ptr, value as i32, p.len as usize);   // through the pointer
+}
+
+fn sum(p: *i32, n: isize) -> i32 {
+    let total: i32 = 0;
+    for (i in 0..n) total += p[i];
+    return total;
+}
+
+fn at_compile_time() -> i32 {
+    let xs: [3]i32 = .[1, 2, 3];
+    xs.ptr[1] = 20;
+    return sum(xs.ptr, xs.len);
+}
+
+fn main() {
+    let xs: [5]i32 = .[1, 2, 3, 4, 5];
+    println("% %", xs.ptr == &xs[0], sum(xs.ptr, xs.len));
+    xs.ptr[2] = 30;                           // writes the array
+    println("%", xs);
+
+    let g: Grid;
+    fill(&g.cells, 9);                        // a field's array
+    g.cells.ptr[0] = 1;
+    println("%", g.cells);
+
+    println("%", sum(table.ptr, table.len));  // a global
+
+    // an array of arrays: ptr points at the first row
+    let rows: [2][3]i32 = .[.[1, 2, 3], .[4, 5, 6]];
+    let r = rows.ptr;
+    println("% %", r[1], r.*[2]);              // the second row, an element of the first
+    let p = &rows;
+    println("%", p.ptr == r);
+
+    println("%", #run at_compile_time());
+}

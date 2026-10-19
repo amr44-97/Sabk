@@ -1,0 +1,121 @@
+// How failures look with several results: std's functions return their
+// value and what went wrong (an IoError, a ParseError, or a bool), and
+// or_return / or_else pass them on or replace them.
+import "std/fmt";
+import "std/io";
+import "std/mem";
+import "std/os";
+import "std/str";
+
+struct Config {
+    name: string = "server";
+    port: i64 = 8080;
+    workers: i64 = 1;
+}
+
+// read_file fails with an IoError and parse_int with a ParseError, so a
+// function that can fail both ways says so in an enum of its own
+enum ConfigError { None, CantRead, BadLine, UnknownKey, BadNumber }
+
+fn parse_config(text: string) -> (Config, ConfigError) {
+    let config: Config;
+    for (raw in split(text, "\n", context.temp_allocator)) {
+        let line = trim(raw);
+        if (line.len == 0 || line[0] == '#')
+            continue;
+        let key, value, found = cut(line, "=");
+        if (!found)
+            return config, .BadLine;
+        key, value = trim(key), trim(value);
+        switch (key) {
+        case "name":
+            config.name = copy_string(value);
+        case "port", "workers":
+            let n, err = parse_int(value);
+            if (err != .None) {
+                println("  `%` isn't a number: %", value, err);
+                return config, .BadNumber;
+            }
+            if (key == "port") config.port = n; else config.workers = n;
+        default:
+            return config, .UnknownKey;
+        }
+    }
+    return config, .None;
+}
+
+fn load_config(path: string) -> (Config, ConfigError) {
+    let text, err = read_file(path);
+    if (err != .None) {
+        println("  can't read %: %", path, io_error_message(err));
+        return .{}, .CantRead;
+    }
+    defer free(text.ptr);
+    return parse_config(text);
+}
+
+// the same error type all the way: or_return passes it on unchanged
+fn copy_file(from: string, to: string) -> IoError {
+    let data = read_file(from) or_return;
+    defer free(data.ptr);
+    write_file(to, data) or_return;
+    return .None;
+}
+
+// a bool says "it worked" too: or_return returns false
+fn sum_numbers(texts: []string) -> (i64, bool) {
+    let total: i64 = 0;
+    for (t in texts) {
+        let n, err = parse_int(t);
+        if (err != .None)
+            return 0, false;
+        total += n;
+    }
+    return total, true;
+}
+
+fn average(texts: []string) -> (i64, bool) {
+    let total = sum_numbers(texts) or_return;
+    return total / texts.len as i64, true;
+}
+
+const DIR = "/tmp/the-compiler-error-values";
+
+fn main() {
+    let good = tformat("%-good.conf", DIR);
+    let bad_number = tformat("%-number.conf", DIR);
+    let bad_key = tformat("%-key.conf", DIR);
+    write_file(good, "# a config\nname = demo\nport = 9000\n\nworkers = 4\n");
+    write_file(bad_number, "port = 90x\n");
+    write_file(bad_key, "colour = red\n");
+
+    for (path in string.[good, bad_number, bad_key, "/no/such/config"]) {
+        println("load %:", path);
+        let config, err = load_config(path);
+        if (err == .None)
+            println("  ok: % on port % with % workers", config.name, config.port,
+                    config.workers);
+        else
+            println("  failed: %", err);
+    }
+
+    // a fallback instead of an error
+    let workers = parse_int(get_env("THE_COMPILER_WORKERS") or_else "2") or_else 1;
+    println("workers from the environment: %", workers);
+    println("port or a default: %", parse_int("not a port") or_else 80);
+
+    let copy = tformat("%-copy.conf", DIR);
+    println("copy: %", copy_file(good, copy));
+    println("copy a missing file: %", copy_file("/no/such/config", copy));
+    let copied, copy_err = read_file(copy);
+    println("the copy has % bytes (%)", copied.len, copy_err);
+    free(copied.ptr);
+
+    let avg, ok = average(.["3", "4", "8"]);
+    println("average: % %", avg, ok);
+    let _, ok2 = average(.["3", "four"]);
+    println("average with a bad number: %", ok2);
+
+    for (path in string.[good, bad_number, bad_key, copy])
+        delete_file(path);
+}

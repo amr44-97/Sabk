@@ -1,0 +1,66 @@
+import "std/io";
+import "std/mem";
+import "std/os";
+import "std/str";
+
+struct Point { x: i64; y: i64; }
+
+fn main() {
+    // alloc / resize / free on the heap
+    let p = alloc(16) as *[4]i32;
+    p.*[3] = 7;
+    let grown = resize(p, 16, 64) as *[16]i32;
+    assert(grown.*[3] == 7);    // kept
+    assert(grown.*[15] == 0);   // new bytes are zero
+    free(grown);
+
+    // bytes
+    let buffer = new([]u8, 8);
+    set_bytes(buffer, 'a');
+    copy_bytes(buffer[2..], "XYZ" as []u8);
+    println(buffer as string);                     // aaXYZaaa
+    copy_bytes(buffer[1..], buffer);                    // overlapping
+    println(buffer as string);                     // aaaXYZaa
+    assert(equal(buffer[3..6] as string, "XYZ"));
+    assert(!equal(buffer as string, "aaaXYZa"));
+    free(buffer.ptr);
+
+    // an arena with small blocks, so allocations cross blocks
+    let arena = arena_init(64);
+    defer arena_destroy(&arena);
+    let blocks = 0;
+    let last: *Point = null;
+    with_allocator(arena_allocator(&arena)) {
+        for (i in 0..20) {
+            let point = new(Point);
+            point.x = i;
+            assert((point as usize) % 8 == 0);    // aligned
+            last = point;
+        }
+        let big = new([]u8, 1000);                    // bigger than a block
+        assert(big.len == 1000 && big[999] == 0);
+    }
+    for (let b = arena.blocks; b != null; b = b.previous) blocks++;
+    print("points made, last x = ");
+    print("%", last.x);
+    print(", more than one block: ");
+    print("%", blocks > 1);
+    println();
+
+    arena_reset(&arena);
+    let kept = 0;
+    for (let b = arena.blocks; b != null; b = b.previous) kept++;
+    print("blocks after reset: ");
+    print("%", kept);
+    println();
+
+    // the temp allocator
+    with_temp_allocator() {
+        let scratch = new([]u8, 100);
+        scratch[99] = 1;
+    }
+    let t = alloc(32, 16, context.temp_allocator);
+    assert(t != null);
+    free_all(context.temp_allocator);
+    println("temp allocator ok");
+}

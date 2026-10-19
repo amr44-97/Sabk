@@ -1,0 +1,16 @@
+import "std/io";
+import "std/os";
+
+fn main() {
+    let unset, found = get_env("THE_COMPILER_SURELY_UNSET");
+    println("% %", unset.len, found);
+    println("%", get_env("THE_COMPILER_SURELY_UNSET") or_else "a fallback");
+    let path, has_path = get_env("PATH");
+    assert(has_path && path.len > 0);
+    assert(1 + 1 == 2);
+    println("before the panic");
+    let count = 3;
+    if (count > 2)
+        panic("count is too big");
+    println("not reached");
+}

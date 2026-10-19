@@ -1,0 +1,19 @@
+counter = 10
+counter = 12
+enter block
+inside
+leave block
+answer = 42
+item 0 = 3
+item 1 = 1
+item 2 = 4
+item 3 = 1
+sum before 5 = 9
+twice_each ran the body 12 times
+max = 18
+checks: 30 -7
+swapped: tmp = 2, other = 1
+counted allocations: 2
+[lib] counter + 1
+tests/run/macros.smelt:131:12: assertion failed: sum == 100
+[exit 3]

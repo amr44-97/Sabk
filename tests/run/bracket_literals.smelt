@@ -1,0 +1,103 @@
+// .[a, b, c]: the context's array or slice, or an array of what the
+// elements agree on; T.[a, b] names the element type; and arrays going
+// where slices are expected
+import "std/io";
+import "std/array";
+import "std/mem";
+import "std/str";
+
+struct Point { x: i64; y: i64; }
+struct Rows { cells: [3]i64; }
+
+fn sum(xs: []i64) -> i64 {
+    let total: i64 = 0;
+    for (x in xs) total += x;
+    return total;
+}
+
+fn zero(xs: []i64) { for (i in 0..xs.len) xs[i] = 0; }
+
+fn largest(xs: []$T) -> T {
+    let best = xs[0];
+    for (x in xs) if (x > best) best = x;
+    return best;
+}
+
+fn count_all(args: ..$T) -> isize { return args.len; }
+fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
+
+// the context decides before the literal's own defaults: T = i32
+fn keep() -> []i32 { return clone_slice(.[1, 2, 3]); }
+
+fn three() -> [3]i64 { return .[7, 8, 9]; }
+
+const DAYS = .["mon", "tue", "wed"];         // [3]string
+let first_days: []string = DAYS;             // a view of the constant
+
+fn joined(words: []string) -> string {
+    let b = make_builder();
+    for (w in words) builder_append(&b, w);
+    return builder_string(&b);
+}
+
+// the same in the program and while compiling
+fn compute() -> i64 {
+    let grid = .[.[1, 2, 3], .[4, 5, 6]];
+    let a: [3]i64 = .[1, 2, 3];
+    zero(a);
+    return sum(.[10, 20]) + largest(.[3, 9, 4]) + grid[1][2] * 100 + sum(a) +
+           sum(three()) * 1000;
+}
+const COMPUTED = #run compute();
+const LATER = #run DAYS[1..].len;          // constants can be sliced
+
+fn main() {
+    // from the context
+    let a: [3]i32 = .[1, 2, 3];
+    let s: []i64 = .[4, 5];
+    let empty: []i32 = .[];
+    println("% % % %", a, s, empty.len, sum(.[1, 2, 3]));
+
+    // from the elements
+    let xs = .[1, 2, 3];                     // [3]isize
+    let fs = .[1, 2.5];                      // [2]f64
+    let ws = .["mon", "tue"];                // [2]string
+    let wide = .[1, xs[0]];                  // the typed element decides
+    let ps = .[Point.{ .x = 1 }, .{ .y = 2 }]; // the typed one types the .{}
+    let grid = .[.[1, 2, 3], .[4, 5, 6]];    // [2][3]isize
+    let mixed = .[.[1, 2], .[1.5, 2]];       // [2][2]f64
+    println("% % % % % % %", xs, fs, ws, wide, ps, grid, mixed);
+    println("% % %", .[10, 20][1], .[30][0], largest(.[3, 9, 4]));
+    for (w in .["a", "b"]) print("%", w);
+    println();
+
+    // the element type named: T.[...] is a [N]T
+    let named = i32.[1, 2, 3];                   // [3]i32
+    let pairs = [2]i64.[.[1, 2], .[3, 4]];       // [2][2]i64: two [2]i64
+    let one = Point.{ .x = 7 };
+    let refs = (*Point).[&one, &one];            // [2]*Point
+    let boxed = new(i64.[5, 6]);                 // a *[2]i64
+    println("% % % % %", named, pairs, refs[1].x, boxed.*, count_all(...[7, 8]));
+    free(boxed);
+
+    // arrays as slices: views, not copies
+    let b: [3]i64 = .[1, 2, 3];
+    let copy = b;
+    zero(b);
+    let view: []i64 = b;
+    view[0] = 5;
+    println("% % %", b, copy, sum(b));
+    let r = Rows.{ .cells = .[1, 1, 1] };
+    println("% % %", sum(r.cells), sum(three()), joined(DAYS));
+    println("% %", first_days, count_all(1, 2, 3));
+    const LOCAL = .[1, 2, 3];
+    println("% % %", DAYS[1..], LOCAL[..2], LATER);
+
+    // the T of a generic call comes from the other arguments first
+    let slices: [..][]i32;
+    array_add(&slices, .[1, 2]);
+    println("%", slices);
+    println("% % %", keep(), max(1, 2), largest(.[1.5, 2])); // an Any context says nothing
+
+    println("% %", compute(), COMPUTED);
+}

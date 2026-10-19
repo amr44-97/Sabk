@@ -1,0 +1,67 @@
+// p.* is what p points at; p[i] is the i-th value from p, whatever its
+// type: for a *[N]T that's the i-th array, as in C
+import "std/io";
+import "std/array";
+import "std/mem";
+
+struct Node { value: i64; next: *Node; }
+
+// the n values that start at p, for any T: arrays too
+fn show(p: *$T, n: isize) {
+    for (i in 0..n) print("% ", p[i]);
+    println();
+}
+
+fn fill(row: *[3]i64, v: i64) {
+    for (i in 0..row.len) row.*[i] = v;      // .len follows the pointer
+}
+
+fn bump(p: *i64) { p.*= p.* + 1; }           // `.*=` is `.*` then `=`
+
+fn compute() -> i64 {
+    let grid: [2][3]i64;
+    fill(&grid[0], 1);
+    fill(&grid[1], 2);
+    let p = &grid[0];
+    let rows = p[0..2];                      // [][3]i64: two arrays
+    let total: i64 = 0;
+    for (row in rows) for (x in row) total += x;
+    let second = p[1];                       // the array after grid[0]
+    p.*[2] = 40;
+    return total * 100 + second[0] * 10 + grid[0][2];
+}
+const COMPUTED = #run compute();
+
+fn main() {
+    // a growable array of arrays: array_add writes xs.ptr[xs.len], a *[2]i64
+    let pairs: [..][2]i64;
+    for (i in 0..3) array_add(&pairs, .[i, i * 10]);
+    println("%", pairs);
+
+    // generic code over *T works for arrays
+    let grid: [2][3]i64 = .[.[1, 2, 3], .[4, 5, 6]];
+    show(&grid[0], 2);
+    let xs: [3]i64 = .[7, 8, 9];
+    show(&xs[0], 3);
+
+    // heap rows, as C's `float (*rows)[4]`
+    let rows = alloc(3 * sizeof([4]f32)) as *[4]f32;
+    rows[1] = .[5, 6, 7, 8];                 // row 1
+    rows.*[2] = 9;                           // element 2 of row 0
+    println("% % %", rows.*, rows[1], rows[0..3].len);
+    free(rows);
+
+    // .* in its places
+    let n: i64 = 41;
+    bump(&n);
+    let p = &n;
+    let pp = &p;
+    pp.*.* *= 2;
+    let node = Node.{ .value = 1 };
+    let first = Node.{ .value = 0, .next = &node };
+    println("% % % %", n, pp.*.*, first.next.*.value, (&xs as *[3]i64).*[1]);
+    for (x in (&xs).*) print("% ", x);
+    println();
+
+    println("% %", compute(), COMPUTED);
+}

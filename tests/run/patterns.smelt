@@ -1,0 +1,156 @@
+// patterns: ranges in cases, `is`, naming a variant's fields, switch
+// expressions, and labeled loops and switches
+import "std/io";
+import "std/fmt";
+import "std/str";
+
+enum Op { Add, Sub, Mul }
+enum Expr {
+    Number(i64),
+    Binary(op: Op, lhs: *Expr, rhs: *Expr),
+    Name(string),
+    Nil,
+}
+
+// ranges: ..= includes its end, .. leaves it out (as everywhere)
+fn kind(c: u8) -> string {
+    switch (c) {
+    case 'a'..='z', 'A'..='Z', '_': return "letter";
+    case '0'..='9':                 return "digit";
+    case 0..32:                     return "control";
+    case ' ':                       return "space";
+    default:                        return "other";
+    }
+}
+
+// a switch expression gives a value; it must cover everything
+fn precedence(op: Op) -> i32 {
+    return switch (op) {
+    case .Add, .Sub: 4;
+    case .Mul:       5;
+    };
+}
+
+fn keyword(word: string) -> isize {
+    let k = switch (word) { case "fn": 1; case "let", "const": 2; default: 0; };
+    return k;
+}
+
+// fields by name, with & for a pointer into the value
+fn eval(e: *Expr) -> i64 {
+    switch (e.*) {
+    case .Number(n): return n;
+    case .Binary{op, lhs, rhs}:
+        let l = eval(lhs);
+        let r = eval(rhs);
+        return switch (op) { case .Add: l + r; case .Sub: l - r; case .Mul: l * r; };
+    case .Name(name): return name.len as i64;
+    case .Nil: return 0;
+    }
+}
+
+fn double_numbers(e: *Expr) {
+    switch (e.*) {
+    case .Number(&n): n.* *= 2;
+    case .Binary{lhs: left, rhs: right}:
+        double_numbers(left);
+        double_numbers(right);
+    default:
+    }
+}
+
+fn num(v: i64) -> *Expr { return new(Expr.Number(v)); }
+
+// `is`: one variant, in an if or while; its names exist where it matched
+fn describe(e: *Expr) -> string {
+    if (e.* is .Number(n) && n > 100)
+        return tformat("a big number, %", n);
+    if (e.* is .Number(n))
+        return tformat("a number, %", n);
+    if (e.* is .Binary{op} && op == .Mul)
+        return "a product";
+    if (e.* is .Nil)
+        return "nothing";
+    return "something else";
+}
+
+// labeled loops: break and continue the outer one
+fn find_pair(grid: [][]i32, target: i32) -> string {
+    let found = "none";
+    rows: for (r in 0..grid.len) {
+        for (c in 0..grid[r].len) {
+            if (grid[r][c] < 0)
+                continue rows;               // skip the rest of this row
+            if (grid[r][c] == target) {
+                found = tformat("(%, %)", r, c);
+                break rows;                  // out of both loops
+            }
+        }
+    }
+    return found;
+}
+
+// a labeled switch: `continue name = value` runs it again with the value,
+// a state machine without a loop around it
+enum State { Start, Number, Done }
+
+fn count_numbers(text: string) -> isize {
+    let i = 0;
+    let count = 0;
+    state: switch (State.Start) {
+    case .Start:
+        if (i == text.len) continue state = .Done;
+        if (text[i] is '0'..='9') {
+            count++;
+            continue state = .Number;
+        }
+        i++;
+        continue state = .Start;
+    case .Number:
+        if (i < text.len && text[i] is '0'..='9') {
+            i++;
+            continue state = .Number;
+        }
+        continue state = .Start;
+    case .Done:
+        break state;
+    }
+    return count;
+}
+
+fn everything() -> string {
+    let b = make_builder();
+    for (c in "aZ_7 \t!")
+        builder_print(&b, "% ", kind(c));
+    builder_print(&b, "| % % % % ", precedence(.Add), precedence(.Mul), keyword("let"), keyword("x"));
+
+    let sum = new(Expr.Binary(.Add, num(40), new(Expr.Binary(.Mul, num(1), num(2)))));
+    builder_print(&b, "| % ", eval(sum));
+    double_numbers(sum);
+    builder_print(&b, "% ", eval(sum));
+    builder_print(&b, "| %; %; %; %; % ", describe(num(500)), describe(num(5)),
+                  describe(new(Expr.Binary(.Mul, num(1), num(1)))), describe(new(Expr.Nil)),
+                  describe(new(Expr.Name("x"))));
+
+    // while with `is`: walk until something else
+    let items: []Expr = .[.Number(1), .Number(2), .Nil, .Number(9)];
+    let i = 0;
+    let total: i64 = 0;
+    while (i < items.len && items[i] is .Number(n)) {
+        total += n;
+        i++;
+    }
+    builder_print(&b, "| % ", total);
+
+    let grid: [][]i32 = .[.[1, 2], .[-1, 7], .[3, 7]];
+    builder_print(&b, "| % % ", find_pair(grid, 7), find_pair(grid, 9));
+    builder_print(&b, "| %", count_numbers("a12 b3 45c"));
+    return builder_string(&b);
+}
+
+const AT_COMPILE_TIME = #run everything();
+
+fn main() {
+    println(everything());
+    println(AT_COMPILE_TIME);
+}

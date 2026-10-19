@@ -1,0 +1,60 @@
+// a void result can be left out: -> (void, E) is -> E, a generic's
+// (T, E) matches it with T = void, and a let can still name the void
+import "std/io";
+import "std/map";
+
+enum LoadError { None, Busy }
+
+let attempts = 0;
+
+fn load_text() -> (string, LoadError) {
+    attempts += 1;
+    if (attempts < 2) return "", .Busy;
+    return "hello", .None;
+}
+
+fn flush_cache() -> LoadError {               // the same as -> (void, LoadError)
+    attempts += 1;
+    if (attempts < 5) return .Busy;
+    return .None;
+}
+
+fn spelled() -> (void, LoadError) { return .{}, .None; }
+
+fn retry(times: i32, f: fn() -> ($T, LoadError)) -> (T, LoadError) {
+    let result, err = f();
+    for (i in 1..times) {
+        if (err == .None) break;
+        result, err = f();
+    }
+    return result, err;
+}
+
+fn run() -> LoadError {
+    let text = retry(3, load_text) or_return;    // T = string
+    println("% after % attempts", text, attempts);
+    retry(3, flush_cache) or_return;             // T = void
+    println("flushed after % attempts", attempts);
+    let same: fn() -> LoadError = spelled;       // one signature
+    let nothing, err = spelled();                // the void named too
+    println("% %", err, nothing);
+    return .None;
+}
+
+fn attempts_at_compile_time() -> isize {
+    attempts = 0;
+    retry(3, flush_cache);
+    return attempts;
+}
+
+fn main() {
+    println("%", #run attempts_at_compile_time());   // the VM agrees
+    println("%", run());
+
+    let seen = make_map(string, void);           // a set: no bytes per value
+    map_put(&seen, "apple", .{});
+    map_put(&seen, "pear", .{});
+    map_put(&seen, "apple", .{});
+    let _, found = map_get(&seen, "pear");
+    println("% % % %", seen.entries.len, map_has(&seen, "apple"), map_has(&seen, "fig"), found);
+}

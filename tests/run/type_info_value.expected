@@ -1,0 +1,4 @@
+Point [3]i64 i32 isize
+true i64
+f64 string i32
+[exit 0]

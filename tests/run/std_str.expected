@@ -1,0 +1,36 @@
+[padded]
+Cloned
+to C
+to C
+0
+-7
+9223372036854775807
+-9223372036854775808
+parse "123": 123
+parse "-45": -45
+parse "+6": 6
+parse "9223372036854775807": 9223372036854775807
+parse "-9223372036854775808": -9223372036854775808
+parse "9223372036854775808": OutOfRange
+parse "12a": Invalid
+parse "-": Empty
+parse "": Empty
+uint "18446744073709551615": 18446744073709551615 None
+uint "18446744073709551616": 0 OutOfRange
+uint "-1": 0 Invalid
+float "1.5": 1.5 None
+float "-2e3": -2e+03 None
+float "inf": inf None
+float "1e999": 0 OutOfRange
+float "1.5x": 0 Invalid
+float " 1": 0 Invalid
+float "": 0 Empty
+bool "true": true None
+bool "false": false None
+bool "yes": false Invalid
+cut: [name] [smelt] true
+cut: [no separator] [] false
+x = -12, ok = true, pi = 3.14!
+100
+zero 0
+[exit 0]

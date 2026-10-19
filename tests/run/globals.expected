@@ -1,0 +1,5 @@
+counter 12, table 12 0 0 11
+primes 2..7, origin 1 9
+globals 7
+handler 42
+[exit 0]

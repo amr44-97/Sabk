@@ -1,0 +1,5 @@
+warning: `90x` isn't a number
+captured 2 lines: ["`abc` isn't a number", "2 items"]
+error: back to stderr
+caught: 1 + 1 == 3 (assertion failed) at line :32:12
+[exit 134]

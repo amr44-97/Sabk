@@ -1,0 +1,77 @@
+// [..]T: {ptr, len, cap, allocator}; indexes, slices and loops like a
+// slice, and goes where a []T is expected as a view of its elements
+import "std/io";
+import "std/array";
+import "std/reflect";
+
+struct Shelf { name: string; books: [..]string; }
+
+fn sum(xs: []i64) -> i64 {
+    let total: i64 = 0;
+    for (x in xs) total += x;
+    return total;
+}
+
+// [..]$T and []$T both find T in a growable array
+fn last(xs: [..]$T) -> T { return xs[xs.len - 1]; }
+fn first(xs: []$T) -> T { return xs[0]; }
+
+// a view of the elements outlives the function: they're on the heap
+fn evens(n: i64) -> []i64 {
+    let xs: [..]i64;
+    for (i in 0..n) array_add(&xs, i * 2);
+    return xs;
+}
+
+fn double_all(xs: *[..]i64) {
+    for (i in 0..xs.len) xs.*[i] *= 2;     // xs[i]: an error, whole arrays
+}
+
+fn compute() -> i64 {
+    let xs: [..]i64;
+    for (i in 1..6) array_add(&xs, i);
+    double_all(&xs);
+    let part = xs[1..3];
+    let total = sum(xs) * 100 + sum(part) + last(xs) * 10000 + first(xs) * 1000000;
+    array_free(&xs);
+    return total;
+}
+const COMPUTED = #run compute();
+
+fn main() {
+    let xs: [..]i64;
+    println("% % % % %", xs, xs.len, xs.cap, xs.ptr == null, sizeof([..]i64));
+    for (i in 0..5) array_add(&xs, i + 1);
+    println("% % % %", xs, xs[4], xs[1..3], sum(xs));
+    for (x in xs) print("% ", x * x);
+    println();
+    let view: []i64 = xs;              // a view: writes show in xs
+    view[0] = 100;
+    let copy = xs;                     // the fields only: the same elements
+    copy[1] = 200;
+    println("% % %", xs, last(xs), first(xs));
+    println("% %", type_info([..][]i64).name, type_info([..]i64).kind);
+
+    // the fields can be set
+    xs.len -= 2;
+    println("% %", xs, xs.cap);
+    let at = xs.ptr;
+    println("%", at[1]);
+
+    // in a struct, starting as zero
+    let shelf = Shelf.{ .name = "poetry" };
+    array_add(&shelf.books, "Odes");
+    array_add(&shelf.books, "Elegies");
+    println("% %", shelf, shelf.books.len);
+
+    // arrays of arrays, and through a pointer
+    let grid: [..][3]i64;
+    array_add(&grid, .[1, 2, 3]);
+    array_add(&grid, .[4, 5, 6]);
+    let p = &grid;
+    println("% % %", grid, p.*[1][2], p.len);
+
+    println("% %", evens(4), values_equal(array_of(.[1, 2]), array_of(.[1, 2])));
+    println("% %", compute(), COMPUTED);
+    array_free(&xs);
+}

@@ -1,0 +1,50 @@
+import "std/io";
+import "std/mem";
+import "std/os";
+import "std/str";
+
+fn main() {
+    io.print("print ");
+    io.printf("and printf ");
+    io.println("stay in order");
+    io.print("%", -3);
+    io.print("%{c}", ' ');
+    io.print("%", 18446744073709551615 as u64);
+    io.print("%{c}", ' ');
+    io.print("%{.1}", 2.5);
+    io.print("%{c}", ' ');
+    io.print("%", false);
+    io.println();
+    io.eprintln("to stderr");
+
+    let path = "/tmp/the-compiler-std-io-test.txt";
+    os.assert(io.write_file(path, "line one\n") == .None);
+    os.assert(io.append_file(path, "line two\n") == .None);
+    os.assert(io.file_exists(path));
+    let data, err = io.read_file(path);
+    os.assert(err == .None);
+    io.print(data);
+    io.print("%", data.len);
+    io.println(" bytes");
+    mem.free(data.ptr);
+    os.assert(io.delete_file(path) == .None);
+    os.assert(!io.file_exists(path));
+
+    // what goes wrong, and why
+    let _, missing = io.read_file("/no/such/file");
+    io.println("read a missing file: %", missing);
+    let _, directory = io.read_file("/tmp");
+    io.println("read a directory: %", directory);
+    let _, through = io.read_file("/dev/null/x");
+    io.println("read through a file: %", through);
+    io.println("write in a missing directory: %", io.write_file("/no/such/dir/f", "x"));
+    io.println("delete a missing file: %", io.delete_file(path));
+    io.println("message: %", io.io_error_message(.NotFound));
+    io.println("while compiling: %", MISSING_WHILE_COMPILING);
+}
+
+const MISSING_WHILE_COMPILING = #run missing();
+fn missing() -> io.IoError {
+    let _, err = io.read_file("/no/such/file");
+    return err;
+}

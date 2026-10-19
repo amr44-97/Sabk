@@ -1,0 +1,7 @@
+tab	here, quote" backslash\ hexA end|
+len 36, spaces 4
+line one
+line two
+ok!
+trigraph-safe ??= and %
+[exit 0]

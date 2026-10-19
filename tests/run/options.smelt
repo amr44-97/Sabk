@@ -1,0 +1,62 @@
+// ?T is the prelude's Option(T): a new one is None; `or_else` takes a ?T's
+// value or a fallback, and a pointer or a fallback for null
+import "std/io";
+import "std/map";
+import "std/reflect";
+
+struct Config { port: ?isize; name: ?string; }
+
+fn find(items: []isize, wanted: isize) -> ?isize {
+    for (i in 0..items.len)
+        if (items[i] == wanted)
+            return .Some(i);
+    return .None;
+}
+
+fn first_word(s: string) -> ?string {
+    if (s.len == 0) return .None;
+    for (i in 0..s.len)
+        if (s[i] == ' ')
+            return .Some(s[..i]);
+    return .Some(s);
+}
+
+fn twice(o: ?$T, fallback: T) -> T { return o or_else fallback; }  // generic
+
+let calls = 0;
+fn fallback() -> isize { calls += 1; return -1; }
+
+fn baked() -> isize {
+    let c: Config;
+    let xs = .[4, 5, 6];
+    return (c.port or_else 80) * 1000 + (find(xs, 6) or_else 9) * 10 +
+           (find(xs, 7) or_else 9);
+}
+const BAKED = #run baked();
+
+fn main() {
+    let c: Config;                                   // fields start as None
+    println("% % %", c.port, c.name, c.port or_else 8080);
+    c.port = .Some(9000);
+    println("% %", c.port, c.port or_else 8080);
+    println("%", type_info(?i64).name);
+
+    let xs = .[3, 1, 4];
+    println("% %", find(xs, 4) or_else -1, find(xs, 7) or_else -1);
+    println("[%] [%]", first_word("hello world") or_else "?", first_word("") or_else "?");
+    if (find(xs, 1) is .Some(i)) println("found at %", i);
+
+    // the fallback runs only when it's needed
+    let o: ?isize = .Some(5);
+    println("% % calls %", o or_else fallback(), find(xs, 9) or_else fallback(), calls);
+    println("% %", twice(o, 0), twice(find(xs, 8), 77 as isize));
+
+    // pointers: null takes the fallback
+    let m: Map(string, i64);
+    map_put(&m, "a", 1);
+    let other: i64 = 42;
+    println("% %", (map_find(&m, "a") or_else &other).*, (map_find(&m, "b") or_else &other).*);
+    let nested: ?*i64 = .Some(&other);
+    println("%", (nested or_else null) == &other);
+    println("%", BAKED);
+}

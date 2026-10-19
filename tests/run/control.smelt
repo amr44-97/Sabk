@@ -1,0 +1,40 @@
+extern fn printf(fmt: *u8, ...) -> i32;
+
+enum Op { Add, Sub, Mul = 10 }
+
+fn apply(op: Op, a: i32, b: i32) -> i32 {
+    switch (op) {
+    case Op.Add: return a + b;
+    case Op.Sub: return a - b;
+    default: return a * b;
+    }
+}
+
+fn classify(n: i32) -> *u8 {
+    switch (n) {
+    case 0: return "zero";
+    case 1, 2, 3: return "small";
+    default:
+    }
+    if (n < 0) return "negative";
+    return "big";
+}
+
+fn main() -> i32 {
+    printf("%d %d %d\n", apply(Op.Add, 6, 3), apply(Op.Sub, 6, 3), apply(Op.Mul, 6, 3));
+    printf("Mul = %d\n", Op.Mul as i32);
+    for (let i: i32 = -1; i < 6; i += 2) printf("%d is %s\n", i, classify(i));
+    let n = 0;
+    while (true) { n++; if (n == 5) break; }
+    do { n += 10; } while (n < 30);
+    printf("n = %td\n", n);
+    let count = 0;
+    for (i in 0..10) {
+        switch (i % 3) {
+        case 0: continue;      // continue the loop from inside a switch
+        default: count++;
+        }
+    }
+    printf("count = %td\n", count);
+    return 3;
+}

@@ -1,0 +1,16 @@
+// set_bounds_checks(.Off): no index or slice checks anywhere; division by
+// zero is still checked
+import "std/io";
+import "std/build";
+
+#run set_bounds_checks(.Off);
+
+fn main() {
+    let all: [5]i32 = .[1, 2, 3, 4, 5];
+    let two = all[0..2];
+    println("% %", two[3], two[1..5]);      // past the slice, in the array
+    let i = 4;
+    println("%", all[0..2][i]);
+    let zero = two.len - 2;
+    println("%", 10 / zero);                // panics
+}
