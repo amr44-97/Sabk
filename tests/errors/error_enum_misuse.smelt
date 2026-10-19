@@ -1,0 +1,11 @@
+// a type pattern takes an error enum's value out of an Error: only for
+// error enums, only from an Error, and as a copy
+enum Color { Red }
+enum DiskError: Error { Full }
+fn f(e: Error, d: DiskError) -> bool {
+    if (e is Color(c)) return true;
+    if (d is DiskError(x)) return true;
+    if (e is DiskError(&p)) return true;
+    return false;
+}
+fn main() {}

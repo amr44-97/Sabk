@@ -1814,8 +1814,9 @@ worked. That last value is
 
 - a **`bool`**, `true` when it worked, when there's only one way to fail:
   `get_env` (it isn't set), `map_get` (the key isn't there); or
-- an **enum** whose 0 means it worked and whose other variants say what
-  went wrong. It usually starts with `None`.
+- an **error enum**, `enum IoError: Error { NotFound, ... }`, whose
+  variants say what went wrong. Its `None`, 0, means it worked: it comes
+  from `Error`, so it's there without writing it.
 
 | Function | Fails with |
 |---|---|
@@ -1928,7 +1929,7 @@ $ echo $?
 A function that mixes failures of different enums, its own included:
 
 ```
-enum ConfigError { None, BadLine, UnknownKey }
+enum ConfigError: Error { BadLine, UnknownKey }
 
 fn load_config(path: string) -> (Config, Error) {
     let config: Config;
@@ -1966,15 +1967,29 @@ default:                   "something else";  // an Error can be any enum's
 };
 ```
 
-- **What converts.** Any plain enum with a variant equal to 0 (its
-  success, `None` by custom) converts to `Error` implicitly: at
-  `or_return`, `return`, an assignment, an argument, a comparison, or
-  `as Error`. Its 0 is `Error.None`. A `bool` doesn't, since it doesn't say
-  what failed; neither does a tagged enum.
-- **Nothing converts back.** `let e: IoError = err;` is an error; compare
-  instead. `error_enum(err)` is the `*TypeInfo` of the enum it came from
-  (null for `None`), and `error_value(err)` its variant's value, so
-  `error_enum(err) == type_info(IoError)` asks whether it's an `IoError`.
+- **What converts.** An error enum (`enum IoError: Error { ... }`)
+  converts to `Error` implicitly: at `or_return`, `return`, an
+  assignment, an argument, a comparison, or `as Error`. Its `None` is
+  `Error.None`. A tagged error enum converts by its variant, its payload
+  dropped. A plain enum doesn't, and neither does a `bool`, since it
+  doesn't say what failed.
+- **Back is a checked match.** `let e: IoError = err;` is an error;
+  `err is IoError(e)` is true when `err` came from an `IoError`, and gives
+  it back. `case` takes the same pattern, and the pattern inside matches
+  the variant:
+
+  ```
+  if (err is IoError(io)) println("io: %w", io);
+  switch (err) {
+  case IoError(.NotFound): use_defaults();
+  case ParseError(p):      println("bad number: %w", p);
+  default:                 return err;
+  }
+  ```
+
+  `Error.None` is no enum's: it matches none of these. `error_enum(err)`
+  is the `*TypeInfo` of the enum it came from (null for `None`), and
+  `error_value(err)` its variant's value.
 - **Precise enums stay.** std's functions return `IoError` and
   `ParseError`, so a caller that handles every case still gets an
   exhaustive `switch`. `Error` is for code that combines them.
@@ -1994,9 +2009,8 @@ default:                   "something else";  // an Error can be any enum's
   prelude name.
 
 ```
-let back: IoError = err;   // error: expected `IoError`, found `Error`; an `Error` doesn't
-                           //   turn back into `IoError` on its own: compare it, like
-                           //   `err == IoError.NotFound`
+let back: IoError = err;   // error: expected `IoError`, found `Error`; an `Error` turns
+                           //   back into `IoError` through a check: `if (err is IoError(e))`
 if (err == .NotFound) {}   // error: `.NotFound` doesn't say which enum it's from; an `Error`
                            //   compares with a failure enum's variant written in full,
                            //   like `IoError.NotFound`
@@ -2008,13 +2022,15 @@ let home = get_env("HOME") or_return;   // in a `-> Error` function
 
 ### Your own failures
 
-A function that can fail in several ways declares an enum for them, with
-`None` first. Its callers can switch on it exhaustively, and it passes on
-as an `Error` too. To turn another enum's failure into one of your own
-instead, convert by hand:
+A function that can fail in several ways declares an error enum for them,
+`enum ConfigError: Error { ... }`. Its `None` comes from `Error`: writing
+it is an error. Its callers can switch on it exhaustively, and it passes
+on as an `Error` too. A plain enum isn't a failure: `or_return` and
+`or_else` don't take one, and it doesn't become an `Error`. To turn
+another enum's failure into one of your own instead, convert by hand:
 
 ```
-enum ConfigError { None, CantRead, BadLine, BadNumber }
+enum ConfigError: Error { CantRead, BadLine, BadNumber }
 
 fn load_config(path: string) -> (Config, ConfigError) {
     let config: Config;
@@ -2046,9 +2062,11 @@ fn returns_other() -> (i64, ConfigError) {
 enum. Log them where the failure is found (`log(.Warning, ...)`, through
 `context.logger`, so the caller decides where they go), or return them as
 another result before the failure: `-> (Config, i64, ConfigError)` for
-the line number. A tagged enum can carry them as a value
-(`BadNumber(line: i64)`), and is returned and matched like any value, but
-`or_return` and `or_else` don't take one yet.
+the line number. A tagged error enum carries them as a value
+(`enum ConfigError: Error { BadNumber(line: i64), ... }`): `or_return`
+and `or_else` take it (it failed unless it's `.None`), and `%w` prints it
+whole, `ConfigError.BadNumber(line = 12)`. As an `Error` it keeps only
+which variant it was.
 
 **Dropping a failure is legal**, as in C: `write_file(path, data);`
 ignores the `IoError`, and `let data, _ = read_file(path);` names that it

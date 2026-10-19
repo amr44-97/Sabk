@@ -46,6 +46,69 @@ pub fn string_literal_text(e: *Node) -> string {
     return text;
 }
 
+// IoError(e): an Error's value as the error enum it came from
+pub fn is_type_pattern(p: *Node) -> bool {
+    if (p.kind is .VariantPattern{variant})
+        return variant.decl != null && variant.decl.kind.tag == .Enum;
+    return false;
+}
+
+// the error enum a type pattern names
+pub fn type_pattern_enum(p: *Node) -> *Type {
+    if (p.kind is .VariantPattern{variant})
+        return variant.decl.ty;
+    return null;
+}
+
+fn check_type_pattern(c: *Checker, p: *Node, t: *Type, subject: *Node, in_is: bool) -> Matched {
+    let m: Matched;
+    let variant: *Node = null;
+    let items: []*Node;
+    if (p.kind is .VariantPattern{variant: v, bindings})
+        variant, items = v, bindings;
+    let et = decl_type(c, variant.decl);
+    let name = variant.tok.text;
+    if (et.kind == .Error) {
+        fail_bindings(c, p);
+        return m;
+    }
+    if (!et.is_error_enum) {
+        error(c, variant.tok, tformat("`%(...)` takes an error enum's value out of an `Error`, and `%` isn't one; for a variant, write `.Name(...)`",
+                                      name, name));
+        fail_bindings(c, p);
+        return m;
+    }
+    if (t == et) {
+        let example = enum_variants(et.decl)[if (enum_variants(et.decl).len > 1) 1 else 0].tok.text;
+        error(c, variant.tok, tformat("this is already %; match its variants directly, like `.%`", qt(et), example));
+        fail_bindings(c, p);
+        return m;
+    }
+    if (!t.is_failure) {
+        error(c, variant.tok, tformat("`%(...)` takes % out of an `Error`, but this is %", name, qt(et), qt(t)));
+        fail_bindings(c, p);
+        return m;
+    }
+    error_id(c, p, et);
+    for (item in items) {
+        switch (item.kind) {
+        case .Binding{by_ref}:
+            if (by_ref) {
+                error(c, item.tok, tformat("`&%` would point into the %, which is made from the `Error` here; bind a copy", item.tok.text, qt(et)));
+                item.ty = c.types.error;
+            } else {
+                item.ty = et;
+            }
+            item.check_state = 2;
+        case .FieldPattern{pattern}: // IoError(.NotFound)
+            item.ty = et;
+            check_pattern(c, pattern, et, null, in_is);
+        default:
+        }
+    }
+    return m;
+}
+
 // does it check what a variant holds?
 pub fn has_subpatterns(p: *Node) -> bool {
     switch (p.kind) {
@@ -83,6 +146,9 @@ pub fn check_pattern(c: *Checker, p: *Node, t: *Type, subject: *Node, in_is: boo
         return m;
     let tagged: *Type = if (t.is_tagged) t else null;
     let values = if (tagged != null) tagged.fields[0].ty else t; // what's compared
+
+    if (is_type_pattern(p))
+        return check_type_pattern(c, p, t, subject, in_is);
 
     if (p.kind is .Range{lo, hi, inclusive}) {
         if (values.kind != .Int) {
@@ -570,6 +636,7 @@ pub fn check_switch(c: *Checker, n: *Node, is_expr: bool, expected: *Type) -> *T
     let default_case: *Node = null;
     let result = expected;
     let broken = false; // a pattern with errors: no "doesn't handle" too
+    let typed = false;  // a case of IoError(e): an Error's, tested in order
     let in_order = false;
     for (clause in clauses) {
         let patterns, guard, body = case_parts(clause);
@@ -586,7 +653,9 @@ pub fn check_switch(c: *Checker, n: *Node, is_expr: bool, expected: *Type) -> *T
             broken = broken || c.error_count != before;
             // a case with a guard, or patterns inside a variant, doesn't
             // cover all of its variant: Maranget's check below handles those
-            if (guard != null || has_subpatterns(p)) {
+            if (guard != null || has_subpatterns(p) || is_type_pattern(p)) {
+                if (is_type_pattern(p))
+                    typed = true;
                 in_order = true;
                 set_in_order(n);
                 continue;
@@ -655,7 +724,7 @@ pub fn check_switch(c: *Checker, n: *Node, is_expr: bool, expected: *Type) -> *T
     let fallback = if (result != null) result else c.types.error;
 
     // cases that can never be reached, among those Maranget's check sees
-    if (in_order && !broken && values.kind != .Error)
+    if (in_order && !broken && values.kind != .Error && !typed)
         unreachable_cases(c, clauses, t);
 
     // without a `default`, a switch on an enum must handle every variant,

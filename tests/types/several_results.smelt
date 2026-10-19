@@ -1,5 +1,5 @@
 // the types of several results, and of what takes them apart
-enum Error { None, Bad }
+enum CheckError: Error { Bad }
 
 fn divide(a: i64, b: i64) -> (i64, i64) { return a / b, a % b; }
 
@@ -11,12 +11,12 @@ fn first(xs: []$T) -> (T, bool) {
     return xs[0], true;
 }
 
-fn parse(s: string) -> (u8, Error) {
+fn parse(s: string) -> (u8, CheckError) {
     if (s.len == 0) return 0, .Bad;
     return s[0], .None;
 }
 
-fn twice(s: string) -> (u16, Error) {
+fn twice(s: string) -> (u16, CheckError) {
     let c = parse(s) or_return;
     return c as u16 * 2, .None;
 }

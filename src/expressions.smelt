@@ -33,6 +33,8 @@ pub fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
         return true;
     if (to == c.any_type && to != null)
         return from.kind != .Void && from.kind != .GenericFn;
+    if (to.is_failure && from.is_tagged && from.is_error_enum) // by its tag
+        return true;
     switch (from.kind) {
     case .UntypedInt:
         if (to.kind == .Int)
@@ -74,12 +76,7 @@ pub fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
 
 // a plain enum with a 0 variant (its success) becomes an Error
 pub fn widens_to_error(from: *Type) -> bool {
-    if (from.kind != .Enum || from.is_failure || from.part.len > 0)
-        return false;
-    for (v in enum_variants(from.decl))
-        if (v.cval.kind == .Int && i128_is_zero(v.cval.i))
-            return true;
-    return false;
+    return from.is_error_enum; // enum IoError: Error, tagged or not
 }
 
 // the number an enum's Errors carry, given the first time one is made; 0
@@ -179,15 +176,17 @@ pub fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
             hint = tformat("; the same memory converts with `% as string`", text_of(e));
         } else if (to.is_string && from.kind == .Array && from.elem == c.types.u8) {
             hint = tformat("; view it as text with `%[..] as string`", text_of(e));
-        } else if (to.is_failure && from.is_tagged) {
-            hint = "; a tagged enum doesn't become an `Error`, only a plain enum with a variant equal to 0, like `None`";
-        } else if (to.is_failure && from.kind == .Enum) {
-            hint = "; only an enum with a variant equal to 0 (its success, like `None`) becomes an `Error`";
+        } else if (to.is_failure && (from.is_tagged || from.kind == .Enum)) {
+            hint = tformat("; only an error enum becomes an `Error`: declare it `enum %: Error { ... }`", from.name);
         } else if (from.is_failure && to.kind == .Enum) {
             let variants = enum_variants(to.decl);
             let example = if (variants.len > 1) variants[1].tok.text else "None";
-            hint = tformat("; an `Error` doesn't turn back into % on its own: compare it, like `% == %.%`",
-                           qt(to), text_of(e), to.name, example);
+            let name = if (to.part.len > 0) to.decl.tok.text else to.name;
+            hint = if (to.is_error_enum)
+                       tformat("; an `Error` turns back into % through a check: `if (% is %(%))`", qt(to), text_of(e), name,
+                               if (text_of(e) == "e") "err" else "e")
+                   else tformat("; an `Error` doesn't turn into %: compare it, like `% == %.%`",
+                                qt(to), text_of(e), to.name, example);
         }
         error(c, e.tok, tformat("expected %, found %{}%", qto, qfrom, hint));
         explain_pointer_index(c, e);
@@ -683,18 +682,16 @@ struct NodeKindNew {
 // that says whether it failed? A bool (false: it failed) or an enum (any
 // value but 0: it failed, and says how).
 fn check_failure_flag(c: *Checker, n: *Node, t: *Type, what: string) -> bool {
-    if (t.kind == .Bool || t.kind == .Error)
+    if (t.kind == .Bool || t.kind == .Error || t.is_failure || t.is_error_enum)
         return true;
-    if (t.kind == .Enum) {
-        for (v in enum_variants(t.decl))
-            if (v.cval.kind == .Int && i128_is_zero(v.cval.i))
-                return true;
-        error(c, n.tok, tformat("% treats %'s 0 as success, but % has no variant equal to 0; add one first, like `None`",
-                                q(what), qt(t), qt(t)));
+    if (t.kind == .Enum || (t.is_tagged && !is_option(c, t))) {
+        let name = if (t.part.len > 0) t.decl.tok.text else t.name;
+        error(c, n.tok, tformat("% needs a failure, and % is a plain enum; to fail with it, make it an error enum: `enum %: Error { ... }`",
+                                q(what), qt(t), name));
         return false;
     }
     let hint = if (is_option(c, t)) "; a missing value isn't a failure: give a fallback with `or_else`, or match it with `is .Some(x)`" else "";
-    error(c, n.tok, tformat("% needs the last value to say whether it failed: a `bool` (false: it failed) or an enum (anything but its 0: it failed); found %{}%",
+    error(c, n.tok, tformat("% needs the last value to say whether it failed: a `bool` (false: it failed) or an error (anything but `.None`: it failed); found %{}%",
                             q(what), qt(t), hint));
     return false;
 }

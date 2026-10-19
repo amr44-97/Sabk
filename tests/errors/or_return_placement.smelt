@@ -1,5 +1,5 @@
 // or_return returns from the function it's written in
-enum Fail { None, Bad }
+enum Fail: Error { Bad }
 fn get() -> (i64, Fail) { return 1, .None; }
 
 fn twice(body: Code) #expand {

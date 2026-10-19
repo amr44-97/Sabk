@@ -587,6 +587,14 @@ fn check_enum(c: *Checker, d: *Node) {
     }
 
     t.elem = if (backing != null) type_from_node(c, backing) else c.types.i32;
+    if (t.elem.is_failure) {
+        // enum IoError: Error: its values fit an Error's 32 bits for the
+        // variant, and it converts to Error
+        t.elem = c.types.u32;
+        t.is_error_enum = true;
+        if (tagged != null)
+            tagged.is_error_enum = true;
+    }
     if (t.elem.kind != .Int) {
         if (t.elem.kind != .Error)
             error(c, backing.tok, tformat("an enum's backing type must be an integer type, not %", qt(t.elem)));

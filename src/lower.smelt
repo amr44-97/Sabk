@@ -1008,6 +1008,21 @@ fn item_at(l: *Lower, p: *Node, item: *Node, tagged: *Type, at_slot: u32) -> u32
 // followed, and a null one doesn't match
 fn match_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32, fails: *[..]isize) {
     let t = concrete(l.vm, pt);
+    if (is_type_pattern(p)) { // IoError(e): the Error came from IoError
+        let et = type_pattern_enum(p);
+        let e = load(l, at_slot, t);
+        let high = alloc_slot(l, 8, 8);
+        bin(l, .U64, .Shr, high, e, u64_slot(l, 32));
+        let same = alloc_slot(l, 1, 1);
+        let id = map_get(&l.c.error_ids, et) or_else 0;
+        cmp(l, .U64, .Eq, same, high, u64_slot(l, id as u64));
+        array_add(fails, jump(l, .Jz, same));
+        let _, items, _ = pattern_parts(p);
+        for (item in items)
+            if (item.kind.tag == .FieldPattern)
+                match_at(l, pattern_of(item), et, addr_frame(l, error_as(l, e, et)), fails);
+        return;
+    }
     if (!t.is_tagged) {
         let same = matches(l, p, t, load(l, at_slot, t));
         array_add(fails, jump(l, .Jz, same));
@@ -1048,6 +1063,16 @@ pub fn pattern_of(item: *Node) -> *Node {
 // the names `p` binds, from the value at the address in `at_slot`
 fn bind_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32) {
     let t = concrete(l.vm, pt);
+    if (is_type_pattern(p)) {
+        let et = type_pattern_enum(p);
+        let _, items, _ = pattern_parts(p);
+        for (item in items) {
+            if (item.kind.tag == .FieldPattern || item.tok.text == "_")
+                continue;
+            map_put(&l.locals, item, error_as(l, load(l, at_slot, t), et));
+        }
+        return;
+    }
     let variant, items, _ = pattern_parts(p);
     if (variant == null || !t.is_tagged)
         return;
@@ -1192,8 +1217,10 @@ fn convert(l: *Lower, value: u32, from: *Type, to: *Type) -> u32 {
         emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = from.elem.len });
         return s;
     }
-    if (to.is_failure && from != to) { // a failure enum -> Error
-        let low = conv(l, conv(l, value, kind_of(from), .U32), .U32, .U64);
+    if (to.is_failure && from != to) { // a failure enum -> Error (a tagged one by its tag)
+        let tag_type = if (from.is_tagged) from.fields[0].ty else from;
+        let tag = if (from.is_tagged) value + from.fields[0].offset as u32 else value;
+        let low = conv(l, conv(l, tag, kind_of(tag_type), .U32), .U32, .U64);
         let out = u64_slot(l, 0); // its 0 is Error's 0
         let nonzero = alloc_slot(l, 1, 1);
         cmp(l, .U64, .Ne, nonzero, low, u64_slot(l, 0));
@@ -1402,7 +1429,7 @@ fn inner(l: *Lower, n: *Node) -> u32 {
             base = address(l, e);
         else
             value = expr(l, e);
-        if (has_subpatterns(p)) { // patterns inside the variant
+        if (has_subpatterns(p) || is_type_pattern(p)) { // patterns inside the variant, or IoError(e)
             let at_slot = if (by_ref) base else addr_frame(l, value);
             let same = alloc_slot(l, 1, 1);
             let fails: [..]isize;
@@ -1479,6 +1506,10 @@ fn failed_slot(l: *Lower, values: u32, t: *Type) -> u32 {
     if (t.is_tuple) {
         flag += t.fields[t.fields.len - 1].offset as u32;
         flag_type = t.fields[t.fields.len - 1].ty;
+    }
+    if (flag_type.is_tagged) { // a tagged error enum: its tag
+        flag += flag_type.fields[0].offset as u32;
+        flag_type = flag_type.fields[0].ty;
     }
     let out = alloc_slot(l, 1, 1);
     let k = kind_of(flag_type);
@@ -1618,6 +1649,18 @@ fn member_offset(l: *Lower, t: *Type, n: *Node) -> u64 {
         return fl.offset;
     fail(l, n.tok, tformat("no field `%`", field_name));
     return 0;
+}
+
+// an Error (in slot `e`) as error enum `et`: the variant in its low 32
+// bits; a tagged one holds nothing more
+fn error_as(l: *Lower, e: u32, et: *Type) -> u32 {
+    let low = conv(l, e, .U64, .U32);
+    if (!et.is_tagged)
+        return low;
+    let slot = alloc(l, et);
+    zero(l, slot, vm_size_of(l.vm, et));
+    move(l, slot + et.fields[0].offset as u32, low, 4);
+    return slot;
 }
 
 // fails unless the tag in slot `tag` is x.V's variant

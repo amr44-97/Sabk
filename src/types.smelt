@@ -63,6 +63,9 @@ pub struct Type {
     // apart right away, never stored or passed as one
     is_tuple: bool;
     is_failure: bool;       // the prelude's `Error`
+    // `enum IoError: Error { ... }`: an error enum, which converts to
+    // Error (the Enum, or a tagged one's Struct)
+    is_error_enum: bool;
     fields: [..]Field;      // Struct, Union
 
     // layout, computed by the checker on demand

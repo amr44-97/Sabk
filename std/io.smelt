@@ -75,8 +75,7 @@ fn write_text(file: *void, s: string) {
 
 // Why a file operation failed; None when it didn't. `%` prints its name,
 // io_error_message(e) a description.
-pub enum IoError {
-    None,
+pub enum IoError: Error {
     NotFound,         // no such file, or a directory on the way is missing
     PermissionDenied,
     IsDirectory,      // where a file was expected

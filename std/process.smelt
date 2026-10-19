@@ -16,8 +16,7 @@ import "std/mem";
 import "std/str";
 import "std/array";
 
-pub enum ProcessError {
-    None,
+pub enum ProcessError: Error {
     NotFound,   // no such program (run_command looks in $PATH)
     CantStart,  // out of processes or memory, or not allowed to run it
 }

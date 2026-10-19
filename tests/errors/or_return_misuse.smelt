@@ -1,7 +1,7 @@
 // what or_return and or_else need
-enum Fail { None, Bad }
+enum Fail: Error { Bad }
 enum NoZero { A = 1, B = 2 }
-enum Other { None, Worse }
+enum Other: Error { Worse }
 
 fn get() -> (i64, Fail) { return 1, .None; }
 fn get_other() -> (i64, Other) { return 1, .None; }

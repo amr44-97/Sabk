@@ -1,0 +1,3 @@
+// an error enum's None comes from Error: writing it is an error
+enum E: Error { None, Bad }
+fn main() {}

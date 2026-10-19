@@ -1162,9 +1162,10 @@ fn convert(g: *CodeGen, value: string, from: *Type, to: *Type) -> string {
         return value;
     if (to.kind == .Slice) // *[N]T -> []T
         return compound(g, to, cat("(", value, ")->data, ", unum(from.elem.len)));
-    if (to.is_failure && from != to) { // a failure enum -> Error
+    if (to.is_failure && from != to) { // a failure enum -> Error (a tagged one by its tag)
         let id = map_get(&g.c.error_ids, from) or_else 0;
-        return cat("((", c_type(g, to), ")rt_error(", unum(id as u64), ", (u64)(", value, ")))");
+        let v = if (from.is_tagged) cat("(", value, ").tag") else value;
+        return cat("((", c_type(g, to), ")rt_error(", unum(id as u64), ", (u64)(", v, ")))");
     }
     return cat("((", c_type(g, to), ")(", value, "))");
 }
@@ -1485,6 +1486,8 @@ fn failed(values: string, t: *Type) -> string {
         flag = cat(flag, "._", num(t.fields.len - 1));
         flag_type = t.fields[t.fields.len - 1].ty;
     }
+    if (flag_type.is_tagged) // a tagged error enum: its tag
+        flag = cat("(", flag, ").tag");
     return if (flag_type.kind == .Bool) cat("!", flag) else cat(flag, " != 0");
 }
 
@@ -2412,6 +2415,16 @@ struct Bind {
 // the C test that `value`, of type `t`, matches `p`: a pattern inside a
 // variant follows a pointer, and a null one doesn't match
 fn match_test(g: *CodeGen, p: *Node, value: string, t: *Type) -> string {
+    if (is_type_pattern(p)) { // IoError(e): the Error came from IoError
+        let et = type_pattern_enum(p);
+        let id = map_get(&g.c.error_ids, et) or_else 0;
+        let test = cat("((u64)(", value, ") >> 32) == ", unum(id as u64));
+        let _, items, _ = pattern_parts(p);
+        for (item in items)
+            if (item.kind.tag == .FieldPattern)
+                test = cat(test, " && ", match_test(g, pattern_of(item), error_as(g, value, et), et));
+        return cat("(", test, ")");
+    }
     if (t.is_tagged) {
         let variant, items, by_fields = pattern_parts(p);
         let head = if (variant != null) variant else p;
@@ -2443,6 +2456,16 @@ fn match_binds(g: *CodeGen, p: *Node, value: string, binds: *[..]Bind) {
     let variant, items, by_fields = pattern_parts(p);
     if (variant == null)
         return;
+    if (is_type_pattern(p)) {
+        let et = type_pattern_enum(p);
+        for (item in items) {
+            if (item.kind.tag == .FieldPattern)
+                match_binds(g, pattern_of(item), error_as(g, value, et), binds);
+            else if (item.tok.text != "_")
+                array_add(binds, Bind.{ .node = item, .from = error_as(g, value, et) });
+        }
+        return;
+    }
     let payload = cat(value, ".payload.", local_name(variant.decl.tok.text));
     for (item in items) {
         let at = if (by_fields) cat(payload, ".", local_name(item_field_name(item))) else payload;
@@ -2471,6 +2494,14 @@ fn declare_bindings(g: *CodeGen, n: *Node) {
     }
 }
 
+// an Error's value as error enum `et`: the variant in its low 32 bits (a
+// tagged one holds nothing more: an Error keeps no payload)
+fn error_as(g: *CodeGen, value: string, et: *Type) -> string {
+    if (et.is_tagged)
+        return compound(g, et, cat(".tag = (u32)(", value, ")"));
+    return cat("((", c_type(g, et), ")(u32)(", value, "))");
+}
+
 // e is pattern: true or false, and on a match the bindings filled in
 fn is_test(g: *CodeGen, n: *Node) -> string {
     let e: *Node = null;
@@ -2478,6 +2509,15 @@ fn is_test(g: *CodeGen, n: *Node) -> string {
     if (n.kind is .Is{value, pattern})
         e, p = value, pattern;
     let t = conv_or_ty(e);
+    if (is_type_pattern(p)) {
+        let s = tmp(g, "is");
+        let binds: [..]Bind;
+        match_binds(g, p, s, &binds);
+        let fill = "";
+        for (b in binds)
+            fill = cat(fill, var_name(g, b.node), " = ", b.from, ", ");
+        return cat("({ ", c_type(g, t), " ", s, " = ", expr(g, e), "; ", match_test(g, p, s, t), " ? (", fill, "1) : 0; })");
+    }
     let tag_type = if (t.is_tagged) t.fields[0].ty else t;
     if (t.is_string)
         return string_equal(g, expr(g, e), expr(g, p));

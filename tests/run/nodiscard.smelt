@@ -2,7 +2,7 @@
 // one on purpose, in the program and in #run code
 import "std/io";
 
-enum SaveError { None, Full }
+enum SaveError: Error { Full }
 
 fn save(n: i64) -> SaveError #nodiscard {
     if (n > 2) return .Full;

@@ -1,0 +1,3 @@
+[error]: an error enum's `None` (no failure) comes from `Error`, at 0: leave it out at [tests/errors/error_enum_none.smelt:2:17]
+     2 | enum E: Error { None, Bad }
+       |                 ^

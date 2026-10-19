@@ -4,7 +4,7 @@
 CC ?= cc
 C_FLAGS = -std=c11 -fwrapv -fno-strict-aliasing -w
 
-smelt: build/stage0 $(wildcard src/*.smelt src/*.c)
+smelt: build/stage0 $(wildcard src/*.smelt src/*.c std/*.smelt)
 	build/stage0 --std std src/main.smelt -o smelt
 
 # the compiler from the seed: what builds the first ./smelt
@@ -19,8 +19,8 @@ test: smelt
 unit: smelt
 	@./smelt --run tests/unit/i128_test.smelt | python3 tests/unit/i128_check.py
 
-# the dumps and messages, against the C++ compiler this one was ported
-# from (../the-compiler, archived), on every .smelt file here
+# the tokens and syntax trees, against the C++ compiler this one was
+# ported from (../the-compiler, archived), on every .smelt file here
 compare: smelt
 	@tests/compare.sh
 

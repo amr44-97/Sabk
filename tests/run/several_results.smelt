@@ -18,15 +18,15 @@ fn min_max(xs: []i32) -> (i32, i32, bool) {
     return lo, hi, true;
 }
 
-enum Error { None, Negative, TooBig }
+enum CheckError: Error { Negative, TooBig }
 
-fn check(x: i64) -> (i64, Error) {
+fn check(x: i64) -> (i64, CheckError) {
     if (x < 0) return 0, .Negative;
     if (x > 100) return 0, .TooBig;
     return x * 2, .None;
 }
 
-fn twice(x: i64) -> (i64, Error) {
+fn twice(x: i64) -> (i64, CheckError) {
     defer println("  (twice(%) done)", x);
     let y = check(x) or_return;
     let z = check(y) or_return;
@@ -46,7 +46,7 @@ fn both(a: string, b: string) -> (string, string, bool) {
 
 fn pass_through(a: i64, b: i64) -> (i64, i64) { return divide(a, b); }
 
-fn ok_only(x: i64) -> Error {
+fn ok_only(x: i64) -> CheckError {
     check(x) or_return;
     return .None;
 }
@@ -118,7 +118,7 @@ fn first(xs: []$T) -> (T, bool) {
     return xs[0], true;
 }
 
-fn call_twice(f: fn(i64) -> (i64, Error), x: i64) -> (i64, Error) {
+fn call_twice(f: fn(i64) -> (i64, CheckError), x: i64) -> (i64, CheckError) {
     let once = f(x) or_return;
     return f(once);
 }

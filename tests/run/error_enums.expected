@@ -1,0 +1,7 @@
+DiskError.None DiskError.ReadOnly
+saved 1
+something else: None
+disk: DiskError.Full
+a bad line | something else: None | disk: DiskError.Full
+not a disk error
+[exit 0]

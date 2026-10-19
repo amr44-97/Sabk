@@ -3,7 +3,7 @@
 import "std/io";
 import "std/map";
 
-enum LoadError { None, Busy }
+enum LoadError: Error { Busy }
 
 let attempts = 0;
 

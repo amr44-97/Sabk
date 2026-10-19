@@ -1,8 +1,9 @@
 MODULE tests/types/several_results.smelt
 ROOT
-  ENUM `Error` : Error
-    ENUM_VARIANT `None` : Error = 0
-    ENUM_VARIANT `Bad` : Error = 1
+  ENUM `CheckError` : CheckError
+    type: TYPE_NAME `Error` -> ENUM `Error` <prelude>:265:10 : Error
+    ENUM_VARIANT `None` : CheckError = 0
+    ENUM_VARIANT `Bad` : CheckError = 1
   FUN_DECL `divide` : fn(i64, i64) -> (i64, i64)
     type: TYPE_TUPLE `(` : (i64, i64)
       TYPE_NAME `i64` -> builtin : i64
@@ -46,10 +47,10 @@ ROOT
     FUN_PARAM `xs`
       type: TYPE_SLICE `[`
         lhs: TYPE_PARAM `T`
-  FUN_DECL `parse` : fn(string) -> (u8, Error)
-    type: TYPE_TUPLE `(` : (u8, Error)
+  FUN_DECL `parse` : fn(string) -> (u8, CheckError)
+    type: TYPE_TUPLE `(` : (u8, CheckError)
       TYPE_NAME `u8` -> builtin : u8
-      TYPE_NAME `Error` -> ENUM `Error` tests/types/several_results.smelt:2:6 : Error
+      TYPE_NAME `CheckError` -> ENUM `CheckError` tests/types/several_results.smelt:2:6 : CheckError
     rhs: BLOCK
       IF
         lhs: EQ_EQ `==` : bool
@@ -57,35 +58,35 @@ ROOT
             lhs: IDENTIFIER `s` -> FUN_PARAM `s` 14:10 : string
           rhs: NUMBER_LITERAL `0` : isize = 0
         rhs: RETURN
-          lhs: VALUES `0` : (u8, Error)
+          lhs: VALUES `0` : (u8, CheckError)
             NUMBER_LITERAL `0` : u8 = 0
-            ENUM_SHORTHAND `.Bad` -> ENUM_VARIANT `Bad` tests/types/several_results.smelt:2:20 : Error = 1
+            ENUM_SHORTHAND `.Bad` -> ENUM_VARIANT `Bad` tests/types/several_results.smelt:2:26 : CheckError = 1
       RETURN
-        lhs: VALUES `[` : (u8, Error)
+        lhs: VALUES `[` : (u8, CheckError)
           INDEX `[` : u8
             lhs: IDENTIFIER `s` -> FUN_PARAM `s` 14:10 : string
             rhs: NUMBER_LITERAL `0` : isize = 0
-          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt:2:14 : Error = 0
+          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt #insert:2:18 : CheckError = 0
     FUN_PARAM `s` : string
       type: TYPE_NAME `string` -> builtin : string
-  FUN_DECL `twice` : fn(string) -> (u16, Error)
-    type: TYPE_TUPLE `(` : (u16, Error)
+  FUN_DECL `twice` : fn(string) -> (u16, CheckError)
+    type: TYPE_TUPLE `(` : (u16, CheckError)
       TYPE_NAME `u16` -> builtin : u16
-      TYPE_NAME `Error` -> ENUM `Error` tests/types/several_results.smelt:2:6 : Error
+      TYPE_NAME `CheckError` -> ENUM `CheckError` tests/types/several_results.smelt:2:6 : CheckError
     rhs: BLOCK
       VAR_DECL `c` : u8
         lhs: OR_RETURN : u8
-          lhs: CALL `(` : (u8, Error)
-            lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, Error)
+          lhs: CALL `(` : (u8, CheckError)
+            lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, CheckError)
             IDENTIFIER `s` -> FUN_PARAM `s` 19:10 : string
       RETURN
-        lhs: VALUES `*` : (u16, Error)
+        lhs: VALUES `*` : (u16, CheckError)
           MUL `*` : u16
             lhs: CAST : u16
               type: TYPE_NAME `u16` -> builtin : u16
               lhs: IDENTIFIER `c` -> VAR_DECL `c` 20:9 : u8
             rhs: NUMBER_LITERAL `2` : u16 = 2
-          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt:2:14 : Error = 0
+          ENUM_SHORTHAND `.None` -> ENUM_VARIANT `None` tests/types/several_results.smelt #insert:2:18 : CheckError = 0
     FUN_PARAM `s` : string
       type: TYPE_NAME `string` -> builtin : string
   FUN_DECL `main` : fn()
@@ -134,8 +135,8 @@ ROOT
         lhs: VALUES `small`
           IDENTIFIER `small` -> VAR_DECL `small` 31:9 : u8
           IDENTIFIER `_`
-        rhs: CALL `(` : (u8, Error)
-          lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, Error)
+        rhs: CALL `(` : (u8, CheckError)
+          lhs: IDENTIFIER `parse` -> FUN_DECL `parse` tests/types/several_results.smelt:14:4 : fn(string) -> (u8, CheckError)
           STRING_LITERAL `"a"` : string
       ASSIGN `=`
         lhs: VALUES `wide`

@@ -6,8 +6,8 @@ import "std/io";
 import "std/mem";
 import "std/str";
 
-enum ConfigError { None, BadLine, UnknownKey }
-enum Own { None, Bad = 7 }
+enum ConfigError: Error { BadLine, UnknownKey }
+enum Own: Error { Bad = 7 }
 
 struct Config { port: i64 = 80; }
 struct Result { what: string; err: Error; }

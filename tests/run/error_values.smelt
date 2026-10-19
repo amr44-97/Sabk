@@ -15,7 +15,7 @@ struct Config {
 
 // read_file fails with an IoError and parse_int with a ParseError, so a
 // function that can fail both ways says so in an enum of its own
-enum ConfigError { None, CantRead, BadLine, UnknownKey, BadNumber }
+enum ConfigError: Error { CantRead, BadLine, UnknownKey, BadNumber }
 
 fn parse_config(text: string) -> (Config, ConfigError) {
     let config: Config;

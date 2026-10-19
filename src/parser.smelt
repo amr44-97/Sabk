@@ -426,8 +426,19 @@ fn enum_decl(p: *Parser) -> *Node {
         backing = type_(p);
     expect(p, .LBrace, "`{` to start the variants");
     let variants: [..]*Node;
+    // enum IoError: Error { ... }: an error enum, whose None (no failure)
+    // comes from Error, at 0
+    let error_enum = backing != null && backing.kind.tag == .TypeName && backing.tok.text == "Error" &&
+                     type_args_count(backing) == 0;
+    if (error_enum) {
+        let none = backing.tok;
+        none.text = "None";
+        array_add(&variants, new_node(none, .Variant(null, null, null)));
+    }
     while (!at(p, .RBrace)) {
         let variant = expect(p, .Identifier, "a variant name");
+        if (error_enum && variant.text == "None")
+            fail(p, variant, "an error enum's `None` (no failure) comes from `Error`, at 0: leave it out");
         let payload: *Node = null;
         let fields: *Node = null;
         let value: *Node = null;
@@ -460,6 +471,12 @@ fn enum_decl(p: *Parser) -> *Node {
     }
     expect(p, .RBrace, "`,` or `}` after the variant");
     return new_node(name, .Enum(backing, variants, params, false));
+}
+
+fn type_args_count(n: *Node) -> isize {
+    if (n.kind is .TypeName{args})
+        return args.len;
+    return 0;
 }
 
 fn type_alias(p: *Parser) -> *Node {
@@ -910,7 +927,8 @@ fn pattern_inner(p: *Parser, min_prec: isize) -> *Node {
         k = 1;
         while (at(p, .Period, k) && at(p, .Identifier, k + 1))
             k += 2;
-        if (k < 3)
+        // IoError(e): an error enum's value out of an Error
+        if (k < 3 && !(k == 1 && at(p, .LParen, 1)))
             k = 0;
     }
     if (k > 0 && (at(p, .LBrace, k) || at(p, .LParen, k))) {

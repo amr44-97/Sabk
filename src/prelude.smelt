@@ -252,15 +252,15 @@ pub const OS = OperatingSystem.@OS@;
 pub const ARCH = Architecture.@ARCH@;
 pub const POINTER_SIZE = sizeof(*void);
 
-// ---- Error: one type every failure enum converts to
+// ---- Error: one type every error enum converts to
 //
-// A failure enum (an enum with a 0 variant, None by custom) converts to
-// Error implicitly, so `or_return` passes failures of any enum on from a
-// function returning Error, and `fn main() -> Error` reports what failed.
-// The value is which enum it came from (a number the compiler gives each
-// one, in the high 32 bits) and the variant's value (the low 32); each
-// enum's 0 is Error's 0, None. Nothing converts back on its own: compare,
-// `err == IoError.NotFound`.
+// An error enum, `enum IoError: Error { NotFound, ... }`, has Error's None
+// at 0 and converts to Error implicitly, so `or_return` passes failures of
+// any enum on from a function returning Error, and `fn main() -> Error`
+// reports what failed. The value is which enum it came from (a number the
+// compiler gives each one, in the high 32 bits) and the variant's value
+// (the low 32); each enum's None is Error's None. Back is a checked match:
+// `if (err is IoError(e))`, `case IoError(.NotFound):`.
 
 pub enum Error: u64 { None }
 

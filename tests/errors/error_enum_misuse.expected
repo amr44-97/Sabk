@@ -1,0 +1,9 @@
+[error]: `Color(...)` takes an error enum's value out of an `Error`, and `Color` isn't one; for a variant, write `.Name(...)` at [tests/errors/error_enum_misuse.smelt:6:14]
+     6 |     if (e is Color(c)) return true;
+       |              ^
+[error]: this is already `DiskError`; match its variants directly, like `.Full` at [tests/errors/error_enum_misuse.smelt:7:14]
+     7 |     if (d is DiskError(x)) return true;
+       |              ^
+[error]: `&p` would point into the `DiskError`, which is made from the `Error` here; bind a copy at [tests/errors/error_enum_misuse.smelt:8:25]
+     8 |     if (e is DiskError(&p)) return true;
+       |                         ^

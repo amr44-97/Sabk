@@ -1,5 +1,5 @@
 // a void result can be left out, but the rest still has to match
-enum E { None, Bad }
+enum E: Error { Bad }
 fn note() {}
 fn flush() -> (void, E) { return .{}, .None; }
 fn f() -> (void, E) {

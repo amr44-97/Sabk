@@ -1,0 +1,49 @@
+// enum E: Error { ... }: an error enum, None (no failure) at 0 without
+// writing it; it converts to Error (a tagged one by its tag), and an Error
+// gives it back through a checked match, is E(e) or case E(e):
+import "std/io";
+import "std/fmt";
+
+enum DiskError: Error { Full, ReadOnly }
+enum ConfigError: Error { BadLine(line: isize), Missing(string) }
+
+fn write_block(n: i32) -> DiskError {
+    if (n > 2) return .Full;
+    return .None;
+}
+
+fn parse(n: isize) -> (i32, ConfigError) {
+    if (n < 0) return 0, .BadLine(n);
+    return n as i32, .None;
+}
+
+fn save(n: i32) -> Error {
+    write_block(n) or_return;               // a DiskError, as an Error
+    let v = parse(n as isize) or_return;    // a tagged ConfigError, by its tag
+    println("saved %", v);
+    return .None;
+}
+
+fn what(e: Error) -> string {
+    if (e is DiskError(d))
+        return tformat("disk: %w", d);
+    switch (e) {
+    case ConfigError(.BadLine): return "a bad line";
+    case ConfigError(c): return tformat("config: %w", c);
+    default: return tformat("something else: %w", e);
+    }
+}
+
+fn first_failure() -> Error { return save(5); }
+const KIND = #run what(first_failure());
+
+fn main() {
+    println("%w %w", DiskError.None, DiskError.ReadOnly);
+    println("%", what(save(1)));
+    println("%", what(save(5)));
+    let c: ConfigError = .BadLine(3);
+    let e: Error = c;
+    println("% | % | %", what(e), what(.None), KIND);
+    if (e !is DiskError(_))
+        println("not a disk error");
+}

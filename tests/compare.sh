@@ -4,7 +4,10 @@
 # C++ one it was ported from ($OLD, by default ../the-compiler/smelt,
 # archived). Output and exit code must match, error messages included.
 #
-# usage: tests/compare.sh [--tokens|--ast|--resolve|--types]   (all by default)
+# usage: tests/compare.sh [--tokens|--ast|--resolve|--types]
+#   (--tokens and --ast by default: since std's error enums, the C++
+#   compiler can't compile what imports std, so the later modes only
+#   compare the files that don't)
 
 cd "$(dirname "$0")/.." || exit 1
 make -s smelt || exit 1
@@ -30,10 +33,17 @@ known=" tests/resolve/macro_labels.smelt
   tests/errors/parse_old_literals.smelt tests/run/null_pointer.smelt
   tests/run/option_wrap.smelt tests/errors/option_wrap.smelt
   tests/run/variant_access.smelt tests/errors/variant_access.smelt
-  tests/errors/variant_access_run.smelt tests/errors/tagged_enum_misuse.smelt "
+  tests/errors/variant_access_run.smelt tests/errors/tagged_enum_misuse.smelt
+  tests/run/error_enums.smelt tests/errors/error_enum_misuse.smelt
+  tests/errors/error_enum_none.smelt tests/errors/error_type.smelt
+  tests/errors/or_return_misuse.smelt tests/types/several_results.smelt
+  tests/run/several_results.smelt std/io.smelt std/process.smelt std/str.smelt
+  tests/errors/nodiscard.smelt tests/errors/or_return_placement.smelt
+  tests/errors/void_results.smelt tests/run/error_type.smelt
+  tests/run/error_values.smelt tests/run/nodiscard.smelt tests/run/void_results.smelt "
 
 modes=("$@")
-((${#modes[@]})) || modes=(--tokens --ast --resolve --types)
+((${#modes[@]})) || modes=(--tokens --ast)
 same=0
 differ=0
 for mode in "${modes[@]}"; do

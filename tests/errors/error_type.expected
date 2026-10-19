@@ -1,7 +1,10 @@
-[error]: expected `IoError`, found `Error`; an `Error` doesn't turn back into `IoError` on its own: compare it, like `e == IoError.NotFound` at [tests/errors/error_type.smelt:11:25]
+[error]: the value of `Huge` (5000000000) doesn't fit in `u32` at [tests/errors/error_type.smelt:7:19]
+     7 | enum Big: Error { Huge = 5000000000 }
+       |                   ^
+[error]: expected `IoError`, found `Error`; an `Error` turns back into `IoError` through a check: `if (e is IoError(err))` at [tests/errors/error_type.smelt:11:25]
     11 |     let back: IoError = e;                 // doesn't narrow
        |                         ^
-[error]: expected `IoError`, found `Error`; an `Error` doesn't turn back into `IoError` on its own: compare it, like `e == IoError.NotFound` at [tests/errors/error_type.smelt:12:11]
+[error]: expected `IoError`, found `Error`; an `Error` turns back into `IoError` through a check: `if (e is IoError(err))` at [tests/errors/error_type.smelt:12:11]
     12 |     takes(e);
        |           ^
 [error]: `.NotFound` doesn't say which enum it's from; an `Error` compares with a failure enum's variant written in full, like `IoError.NotFound` at [tests/errors/error_type.smelt:13:14]
@@ -10,10 +13,10 @@
 [error]: `or_return` can't pass a `bool` on as an `Error`: a `bool` doesn't say what failed; check it with `if`, or give a fallback with `or_else` at [tests/errors/error_type.smelt:14:32]
     14 |     let home = get_env("HOME") or_return;  // a bool says nothing
        |                                ^
-[error]: expected `Error`, found `Shape`; a tagged enum doesn't become an `Error`, only a plain enum with a variant equal to 0, like `None` at [tests/errors/error_type.smelt:15:20]
+[error]: expected `Error`, found `Shape`; only an error enum becomes an `Error`: declare it `enum Shape: Error { ... }` at [tests/errors/error_type.smelt:15:20]
     15 |     let x: Error = s;                      // tagged
        |                    ^
-[error]: expected `Error`, found `NoZero`; only an enum with a variant equal to 0 (its success, like `None`) becomes an `Error` at [tests/errors/error_type.smelt:16:20]
+[error]: expected `Error`, found `NoZero`; only an error enum becomes an `Error`: declare it `enum NoZero: Error { ... }` at [tests/errors/error_type.smelt:16:20]
     16 |     let y: Error = n;                      // no variant equal to 0
        |                    ^
 [error]: `<` needs numbers, enums or pointers, found `Error`; an `Error` has no order: compare it with `==` or `!=` at [tests/errors/error_type.smelt:17:11]

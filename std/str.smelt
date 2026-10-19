@@ -197,8 +197,7 @@ pub fn format_int(n: i64, buffer: *[24]u8) -> string {
 }
 
 // Why a string isn't the value asked for; None when it is.
-pub enum ParseError {
-    None,
+pub enum ParseError: Error {
     Empty,
     Invalid,    // something that isn't part of one, like `x` in "12x"
     OutOfRange, // a number too big (or small) for the type

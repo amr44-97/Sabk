@@ -7,10 +7,10 @@
 [error]: `or_return` returns `Other` from `returns_other`, but `returns_other`'s last result is `Fail`; to pass failures of any type on, make its last result `Error` at [tests/errors/or_return_misuse.smelt:23:25]
     23 |     let x = get_other() or_return;        // Other isn't Fail
        |                         ^
-[error]: `or_return` needs the last value to say whether it failed: a `bool` (false: it failed) or an enum (anything but its 0: it failed); found `i64` at [tests/errors/or_return_misuse.smelt:24:21]
+[error]: `or_return` needs the last value to say whether it failed: a `bool` (false: it failed) or an error (anything but `.None`: it failed); found `i64` at [tests/errors/or_return_misuse.smelt:24:21]
     24 |     let y = count() or_return;            // i64 says nothing about failing
        |                     ^
-[error]: `or_return` treats `NoZero`'s 0 as success, but `NoZero` has no variant equal to 0; add one first, like `None` at [tests/errors/or_return_misuse.smelt:25:23]
+[error]: `or_return` needs a failure, and `NoZero` is a plain enum; to fail with it, make it an error enum: `enum NoZero: Error { ... }` at [tests/errors/or_return_misuse.smelt:25:23]
     25 |     let z = no_zero() or_return;          // NoZero has no 0
        |                       ^
 [error]: `or_else` needs an option (`?T`), a pointer, or a value and whether it's valid (two values, like `get_env("HOME") or_else "/"`); `three` gives 3 values at [tests/errors/or_return_misuse.smelt:30:21]
@@ -34,6 +34,6 @@
 [error]: `or_else` needs an option (`?T`), a pointer, or a value and whether it's valid (two values, like `get_env("HOME") or_else "/"`); `mine` gives one value, `Option(i64)` at [tests/errors/or_return_misuse.smelt:38:20]
     38 |     let g = mine() or_else 0;             // only the prelude's Option, ?T
        |                    ^
-[error]: `or_return` needs the last value to say whether it failed: a `bool` (false: it failed) or an enum (anything but its 0: it failed); found `?i64`; a missing value isn't a failure: give a fallback with `or_else`, or match it with `is .Some(x)` at [tests/errors/or_return_misuse.smelt:39:21]
+[error]: `or_return` needs the last value to say whether it failed: a `bool` (false: it failed) or an error (anything but `.None`: it failed); found `?i64`; a missing value isn't a failure: give a fallback with `or_else`, or match it with `is .Some(x)` at [tests/errors/or_return_misuse.smelt:39:21]
     39 |     let h = maybe() or_return;            // or_return takes failures only
        |                     ^

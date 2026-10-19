@@ -18,7 +18,7 @@ switch to them at the bootstrap.
 - [ ] **Metaprogramming, layer 3:** a build script that sees every declaration as it's checked (section 3)
 - [ ] **Types as values:** `#insert` in struct and enum bodies, value parameters on structs (section 3)
 - [x] **Tagged enums:** `!is`, checked variant access `x.Variant`, narrowing (section 4)
-- [ ] **Error enums:** `enum IoError: Error { ... }`; plain enums go back to being plain (section 5)
+- [x] **Error enums:** `enum IoError: Error { ... }`; plain enums go back to being plain (section 5)
 - [ ] **Results:** `E!T`, `E!void`, `!T` (inferred failure), wrapping, destructuring, `or_return .Replacement` (section 5)
 - [ ] **Dropped failures:** a warning that shows the handling; levels from flags and build options (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
