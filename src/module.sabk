@@ -44,6 +44,14 @@ pub struct Module {
     regions: Map(*Node, *Node);
     uses_pub: bool;
     first_pub: *Node;
+
+    // #load "x.sabk": the files that are part of this module (their
+    // declarations are in its root); for such a file, the module
+    files: [..]*Module;
+    loaded_into: *Module;
+    // for a file (a module's own, or one it loads): its `#scope_file`
+    // names, which only its own code sees
+    file_scope: Map(ScopeKey, *Node);
     first_region: *Node;
 }
 

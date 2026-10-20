@@ -1,0 +1,14 @@
+// one module, three files: this one and the two it loads
+#load "shapes/circle";
+#load "shapes/square.sabk";
+
+fn describe(s: Shape) -> string {
+    return switch (s) {
+    case .Circle{r}: tformat("a circle of area %{.2}", circle_area(r));
+    case .Square{side}: tformat("a square of area %", square_area(side));
+    };
+}
+
+#scope_module
+#import "std/fmt";
+enum Shape { Circle(r: f64), Square(side: f64) }

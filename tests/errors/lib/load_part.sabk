@@ -1,0 +1,3 @@
+#scope_file
+fn in_part() -> i64 { return 1; }
+const SHARED = 2;             // the module already has one

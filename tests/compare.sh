@@ -29,7 +29,9 @@ known=" tests/resolve/macro_labels.sabk
   tests/warnings/strict.sabk tests/run/hash_import.sabk
   tests/errors/lib/mixed.sabk tests/errors/lib/regions.sabk tests/run/lib/regions.sabk
   tests/errors/parse_scope_unknown.sabk tests/errors/scope_regions_misuse.sabk
-  tests/run/scope_regions.sabk
+  tests/run/scope_regions.sabk tests/errors/load_misuse.sabk tests/run/load_files.sabk
+  tests/errors/lib/load_part.sabk tests/errors/lib/load_parts.sabk tests/errors/lib/load_twice.sabk
+  tests/run/lib/shapes.sabk tests/run/lib/shapes/circle.sabk tests/run/lib/shapes/square.sabk
   tests/errors/format_check.sabk tests/errors/format_directives.sabk
   tests/errors/log_format.sabk tests/run/format_directives.sabk
   tests/run/is_not.sabk tests/errors/is_not_bindings.sabk

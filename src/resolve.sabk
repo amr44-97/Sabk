@@ -59,6 +59,7 @@ pub struct Resolver {
     modules: [..]*Module;        // load order; modules[0] is the root
     generated: [..]*Module;      // code made by #insert
     loaded: Map(string, *Module); // the file's own path -> its module
+    loaded_files: Map(string, *Module); // a #load-ed file's own path -> the module it's part of
     builtins: Map(string, *Node); // i32, u8, bool, ...
     error_count: isize;
 
@@ -267,9 +268,13 @@ pub fn ensure_resolved(r: *Resolver, d: *Node) -> bool {
 pub fn module_of(r: *Resolver, p: *u8) -> *Module {
     if (r.prelude != null && inside(r.prelude, p))
         return r.prelude;
-    for (m in r.modules)
+    for (m in r.modules) {
         if (inside(m, p))
             return m;
+        for (f in m.files) // the files it #loads: a location is in one of them
+            if (inside(f, p))
+                return f;
+    }
     for (m in r.generated)
         if (inside(m, p))
             return m;
@@ -348,8 +353,62 @@ fn load(r: *Resolver, path: string) -> *Module {
     // registered before its imports are loaded, so import cycles end
     map_put(&r.loaded, canonical, m);
     array_add(&r.modules, m);
+    load_files(r, m);
     collect_decls(r, m);
     return m;
+}
+
+// `#load "x.sabk";`: the file is part of this module, so its declarations
+// join the module's (in place of the #load), and so do the files it loads.
+// Its path is relative to the file the #load is in; a file is loaded once,
+// by one module, and can't be a module of its own too.
+fn load_files(r: *Resolver, m: *Module) {
+    let decls = root_decls(m);
+    let i: isize = 0;
+    while (i < decls.len) {
+        let d = decls.*[i];
+        if (d.kind.tag != .Load) {
+            i++;
+            continue;
+        }
+        let from = module_of(r, d.tok.text.ptr);
+        let spec = import_spec(d);
+        let name = if (ends_with(spec, ".sabk")) spec else tformat("%.sabk", spec);
+        let file = path_normalize(path_join(path_dir(from.path), name, context.temp_allocator));
+        splice(decls, i, .[]); // the #load goes, and what it loads takes its place
+        if (!file_exists(file) || is_dir(file)) {
+            error(r, d.tok, tformat("can't find `%` to load (looked for `%`)", spec, file));
+            continue;
+        }
+        let canonical = path_real(file) or_else file;
+        let as_module = map_get(&r.loaded, canonical) or_else null;
+        if (as_module != null) {
+            error(r, d.tok, tformat("`%` is a module of its own (imported, or the program's main file); a file is either imported or loaded, not both",
+                                    file));
+            continue;
+        }
+        let owner, seen = map_get(&r.loaded_files, canonical);
+        if (seen) {
+            if (owner != m)
+                error(r, d.tok, tformat("`%` is already part of module `%`: a file belongs to one module", file, owner.path));
+            continue; // loaded once
+        }
+        let src, err = load_source(file);
+        if (err != .None) {
+            error(r, d.tok, tformat("can't read `%`: %", file, system_error_text(err)));
+            continue;
+        }
+        let f = module_from(r, src);
+        f.loaded_into = m;
+        array_add(&m.files, f);
+        map_put(&r.loaded_files, canonical, m);
+        let made = root_decls(f).*;
+        let rest: [..]*Node;
+        array_append(&rest, decls.*[..i]);
+        array_append(&rest, made);
+        array_append(&rest, decls.*[i..]);
+        decls.* = rest; // and look at them: they may #load more
+    }
 }
 
 fn parse_module(r: *Resolver, path: string, text: string) -> *Module {
@@ -399,16 +458,29 @@ fn collect_decls(r: *Resolver, m: *Module) {
     for (n in root_decls(m).*) {
         switch (n.kind) {
         case .Import{module: &found}:
-            let file = import_path(r, m, import_spec(n));
-            if (file_exists(file) && !is_dir(file))
-                found.* = load(r, file);
+            // relative to the file it's written in (a #load-ed one too)
+            let file = import_path(r, module_of(r, n.tok.text.ptr), import_spec(n));
+            if (!file_exists(file) || is_dir(file))
+                continue;
+            let canonical = path_real(file) or_else file;
+            let part_of = map_get(&r.loaded_files, canonical) or_else null;
+            if (part_of != null) {
+                error(r, n.tok, tformat("`%` is part of module `%` (it #loads it); a file is either imported or loaded, not both",
+                                        file, part_of.path));
+                continue;
+            }
+            found.* = load(r, file);
         default:
         }
     }
 
     r.mod = m;
-    r.region = null; // a file starts exported
+    // each file of the module starts exported, and its own directives
+    // apply to its own declarations
+    let regions: Map(*Module, *Node);
     for (n in root_decls(m).*) {
+        let file = module_of(r, n.tok.text.ptr);
+        r.region = map_get(&regions, file) or_else null;
         switch (n.kind) {
         case .ScopeRegion{visibility}:
             if (m.first_region == null) {
@@ -416,7 +488,7 @@ fn collect_decls(r: *Resolver, m: *Module) {
                 if (m.uses_pub)
                     mixed_visibility(r, m, m.first_pub);
             }
-            r.region = if (visibility == .Export) null else n;
+            map_put(&regions, file, if (visibility == .Export) null else n);
         case .InsertString, .StaticIf:
             // run or decided once every module is loaded, under the region
             // they're written in
@@ -427,7 +499,10 @@ fn collect_decls(r: *Resolver, m: *Module) {
         case .Import{alias, module}:
             let spec = import_spec(n);
             if (module == null) {
-                error(r, n.tok, tformat("can't find module `%` (looked for `%`)", spec, import_path(r, m, spec)));
+                let file = import_path(r, module_of(r, n.tok.text.ptr), spec);
+                let canonical = path_real(file) or_else file;
+                if (!map_has(&r.loaded_files, canonical)) // that's reported already
+                    error(r, n.tok, tformat("can't find module `%` (looked for `%`)", spec, file));
                 continue;
             }
             // `import "x" as name;` only binds the name
@@ -451,15 +526,50 @@ fn collect_decls(r: *Resolver, m: *Module) {
 // a top-level declaration of `m`: its owner and its name in `m`'s scope
 fn collect_decl(r: *Resolver, m: *Module, n: *Node) {
     prepare_decl(r, m, n);
-    declare(r, &m.scope, n.tok.text, n, "this module");
     if (r.region != null)
         map_put(&m.regions, n, r.region);
+    // a `#scope_file` name is its file's: two files of a module can each
+    // have their own, but not one the whole module has
+    let file = file_of_region(r, r.region);
+    if (file != null) {
+        let clash = scope_get(&m.scope, n.tok.text, color_of(r, n));
+        if (clash != null) {
+            error(r, n.tok, tformat("`%` is already declared in this module", n.tok.text));
+            note(r, binding_token(clash), "the first declaration is here");
+        }
+        declare(r, &file.file_scope, n.tok.text, n, "this file");
+    } else {
+        for (f in files_of(m)) {
+            let clash = scope_get(&f.file_scope, n.tok.text, color_of(r, n));
+            if (clash != null) {
+                error(r, n.tok, tformat("`%` is already declared in this module, for one file (`#scope_file`)", n.tok.text));
+                note(r, clash.tok, "the first declaration is here");
+            }
+        }
+        declare(r, &m.scope, n.tok.text, n, "this module");
+    }
     if (is_pub(n) && !m.uses_pub) {
         m.uses_pub = true;
         m.first_pub = n;
         if (m.first_region != null)
             mixed_visibility(r, m, n);
     }
+}
+
+// the file a `#scope_file` belongs to; null for other regions
+fn file_of_region(r: *Resolver, region: *Node) -> *Module {
+    if (region == null || !(region.kind is .ScopeRegion{visibility: .File}))
+        return null;
+    return module_of(r, region.tok.text.ptr);
+}
+
+// a module's files: its own, and those it #loads
+fn files_of(m: *Module) -> [..]*Module {
+    let all: [..]*Module;
+    all.allocator = context.temp_allocator;
+    array_add(&all, m);
+    array_append(&all, m.files);
+    return all;
 }
 
 // `pub` (the rule from before) and `#scope_...` in one module
@@ -667,7 +777,7 @@ fn scope_get(scope: *Map(ScopeKey, *Node), name: string, color: i32) -> *Node {
 // of that module's plain imports, the prelude, and the builtins. A name two
 // imports both provide is ambiguous: lookup returns null and leaves the
 // candidates in `ambiguous` for report_ambiguous().
-fn lookup(r: *Resolver, name: string, color: i32) -> *Node {
+fn lookup(r: *Resolver, name: string, color: i32, from: *u8 = null) -> *Node {
     r.ambiguous.len = 0;
     let i = r.scopes.len;
     while (i > 0) {
@@ -677,6 +787,13 @@ fn lookup(r: *Resolver, name: string, color: i32) -> *Node {
             return found;
     }
     let m = if (color != 0) r.expansions[color].module else r.mod;
+    // the file's own `#scope_file` names, then the module's
+    if (from != null) {
+        let file = module_of(r, from);
+        let mine = if (file != null) scope_get(&file.file_scope, name, 0) else null;
+        if (mine != null)
+            return mine;
+    }
     let own = scope_get(&m.scope, name, 0);
     if (own != null)
         return own;
@@ -781,12 +898,22 @@ fn qualified_hint(r: *Resolver, name: string, color: i32) -> string {
                 return tformat("; did you mean `%.%`?", alias.tok.text, name);
         }
     }
+    // another file of this module has it under `#scope_file`
+    for (f in files_of(m)) {
+        let theirs = scope_get(&f.file_scope, name, 0);
+        let region = if (theirs != null) map_get(&m.regions, theirs) or_else null else null;
+        if (region != null)
+            return tformat("; `%` has one, but it's private to that file (`#scope_file` at line %)", f.path, region.tok.line);
+    }
     // a plain import has it, but keeps it to itself
     for (imp in m.flat_imports) {
         let other = imported_module(imp);
         if (other == null)
             continue;
         let found = scope_get(&other.scope, name, 0);
+        for (f in files_of(other)) // `#scope_file` names are their file's
+            if (found == null)
+                found = scope_get(&f.file_scope, name, 0);
         if (found == null || found.kind.tag == .Import || exported(found))
             continue;
         let region = map_get(&other.regions, found) or_else null;
@@ -799,6 +926,9 @@ fn qualified_hint(r: *Resolver, name: string, color: i32) -> string {
 fn module_member(r: *Resolver, m: *Module, name: Token) -> *Node {
     let s = name.text;
     let found = scope_get(&m.scope, s, 0);
+    for (f in files_of(m)) // `#scope_file`: private, found for the message
+        if (found == null)
+            found = scope_get(&f.file_scope, s, 0);
     if (found == null) { // set aside by a top-level #if (see lookup)
         let untaken = map_get(&m.untaken_scope, s) or_else null;
         if (untaken != null && exported(untaken))
@@ -1529,7 +1659,7 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
             return;
         let name = n.tok.text;
         let color = color_of(r, n);
-        n.decl = lookup(r, name, color);
+        n.decl = lookup(r, name, color, n.tok.text.ptr);
         if (n.decl == null) {
             if (report_ambiguous(r, n.tok))
                 return;
@@ -1908,7 +2038,7 @@ fn resolve_type(r: *Resolver, n: *Node) {
             resolve_type_args(r, n, n.decl);
             return;
         }
-        let d = lookup(r, n.tok.text, color_of(r, n));
+        let d = lookup(r, n.tok.text, color_of(r, n), n.tok.text.ptr);
         if (d == null && report_ambiguous(r, n.tok))
             return;
         if (d == null)
@@ -1929,7 +2059,7 @@ fn resolve_type(r: *Resolver, n: *Node) {
 
     case .TypeMember{module: module_name}:
         let name = module_name.tok;
-        let d = lookup(r, name.text, color_of(r, module_name));
+        let d = lookup(r, name.text, color_of(r, module_name), name.text.ptr);
         if (d == null && report_ambiguous(r, name))
             return;
         if (d == null) {
@@ -1981,12 +2111,12 @@ fn names_type(r: *Resolver, e: *Node) -> bool {
     case .TypeExpr:
         return true;
     case .Identifier:
-        let d = lookup(r, e.tok.text, color_of(r, e));
+        let d = lookup(r, e.tok.text, color_of(r, e), e.tok.text.ptr);
         return d != null && is_type_decl(d);
     case .Member{object}:
         if (object.kind.tag != .Identifier)
             return false;
-        let m = lookup(r, object.tok.text, color_of(r, object));
+        let m = lookup(r, object.tok.text, color_of(r, object), object.tok.text.ptr);
         if (m == null || m.kind.tag != .Import || imported_module(m) == null)
             return false;
         let found = scope_get(&imported_module(m).scope, e.tok.text, 0);

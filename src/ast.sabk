@@ -65,6 +65,7 @@ pub enum NodeKind {
     // #scope_export, #scope_module, #scope_file: who sees the declarations
     // after it, up to the next one; tok: the directive
     ScopeRegion(visibility: Visibility),
+    Load,                                    // #load "file"; tok: the path, a string token
     Fn(params: []*Node, result: *Node, body: *Node, is_pub: bool,
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
        nodiscard: bool, no_bounds_check: bool,
@@ -228,6 +229,7 @@ pub fn old_shape(n: *Node) -> OldShape {
     case .Root{decls}: s.tag = "ROOT"; s.list = decls;
     case .Import{alias}: s.tag = "IMPORT"; s.rhs = alias;
     case .ScopeRegion: s.tag = "SCOPE_REGION";
+    case .Load: s.tag = "LOAD";
     case .Fn(f):
         s.tag = if (f.is_macro) "MACRO_DECL" else "FUN_DECL";
         s.generic = f.type_params.len > 0 && n.generic == null;
@@ -453,10 +455,13 @@ fn print_ref(out: *[..]u8, d: *Node) {
     }
     print_to(out, " -> % `%` ", old_shape(d).tag, d.tok.text);
     if (d.owner != null) {
-        let text = d.owner.src.text;
-        let in_file = d.tok.text.ptr >= text.ptr && d.tok.text.ptr <= text.ptr + text.len;
-        append_string(out, d.owner.path);
-        append_string(out, if (in_file) ":" else " #insert:");
+        // the module's own file, a file it #loads, or code it #inserted
+        let file: *Module = if (holds(d.owner, d.tok)) d.owner else null;
+        for (f in d.owner.files)
+            if (holds(f, d.tok))
+                file = f;
+        append_string(out, if (file != null) file.path else d.owner.path);
+        append_string(out, if (file != null) ":" else " #insert:");
     }
     print_to(out, "%:%", d.tok.line, d.tok.column);
 }
@@ -474,6 +479,12 @@ fn parts(n: *Node) -> (*TypeInfo, *u8) {
         if (v.value == tag)
             return v.payload, (&n.kind as *u8) + info.fields[1].offset;
     return null, null;
+}
+
+// is `t` in `f`'s text?
+fn holds(f: *Module, t: Token) -> bool {
+    let text = f.src.text;
+    return t.text.ptr >= text.ptr && t.text.ptr <= text.ptr + text.len;
 }
 
 // a copy of `n` and everything under it, all given `color` (unless it's

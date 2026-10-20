@@ -12,7 +12,7 @@ switch to them at the bootstrap.
 ## Checklist
 
 - [x] **Formatting:** letter directives (`%s %q %w %x %X %b %o %e %f %c`), `%{}` before a letter, errors that teach (section 1)
-- [ ] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2)
+- [ ] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2): built Oct 20, 2026, alongside `import` and `pub`; moving std and the compiler over, then dropping `pub` and `import`, is left
 - [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3)
 - [ ] **Metaprogramming, layer 2:** `#code` values and syntax trees in std/compiler (section 3)
 - [ ] **Metaprogramming, layer 3:** a build script that sees every declaration as it's checked (section 3)
@@ -110,6 +110,35 @@ helpers after one `#scope_file`: std's 170 `pub`s become about one line
 per file. A declaration's visibility isn't written on it, so errors say
 where it comes from: "`is_space` is private to std/str.sabk
 (`#scope_file` at line 120)".
+
+### Edge cases met building them (built Oct 20, 2026; to review)
+
+1. **While code moves over, a file that writes `pub` keeps the rule from
+   before** (what isn't `pub` is private), and a file without `pub` gets
+   the new one (exported unless a directive says otherwise). A file
+   using both is an error, whichever comes first. Test files without
+   `pub` became all-exported; no test depended on the old privacy.
+2. **A `#load`-ed file is parsed as a file of its own** (for messages and
+   `#line`, which name it), and its declarations, imports and `#load`s
+   are spliced into the module's list in place of the `#load`, as
+   `#insert` does. Their owner is the module, so C names and `--types`
+   treat them as one module.
+3. **Each file starts exported**: the module's declarations are walked
+   in order, keeping a current region per file, so a `#scope_file`
+   before a `#load` doesn't cover the loaded file, and one at the end of
+   a loaded file doesn't leak back.
+4. **`#scope_file` names live in their file's own scope**, looked up
+   before the module's, so two files can each have their own `PI`; one
+   that clashes with a name the module has for all its files is an error.
+   A name a sibling file keeps to itself is "unknown", with a hint:
+   "`circle.sabk` has one, but it's private to that file".
+5. **Paths**: a `#load` and the imports in a loaded file are relative to
+   the file they're written in, not to the module's main file.
+6. **A file is either imported or loaded**, by one module, once; each
+   way round is an error (`#load` of an imported module, an import of a
+   loaded file), and the second report ("can't find module") is left out.
+7. **`--resolve` dumps** name the loaded file a declaration is in, not
+   the module's main file.
 
 ## 3. Metaprogramming
 

@@ -1,0 +1,7 @@
+// #load mistakes
+#import "lib/regions";
+#import "lib/load_parts";
+#import "lib/load_twice";
+#import "lib/load_part";      // part of lib/load_parts, so not a module
+
+fn main() {}

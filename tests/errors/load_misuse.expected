@@ -1,0 +1,21 @@
+[error]: can't find `load_missing` to load (looked for `tests/errors/lib/load_missing.sabk`) at [tests/errors/lib/load_parts.sabk:1:7]
+     1 | #load "load_missing";
+       |       ^
+[error]: `tests/errors/lib/regions.sabk` is a module of its own (imported, or the program's main file); a file is either imported or loaded, not both at [tests/errors/lib/load_parts.sabk:3:7]
+     3 | #load "regions";              // a module of its own (the test imports it first)
+       |       ^
+[error]: `SHARED` is already declared in this module, for one file (`#scope_file`) at [tests/errors/lib/load_parts.sabk:6:7]
+     6 | const SHARED = 1;
+       |       ^
+[note]: the first declaration is here at [tests/errors/lib/load_part.sabk:3:7]
+     3 | const SHARED = 2;             // the module already has one
+       |       ^
+[error]: `tests/errors/lib/load_part.sabk` is already part of module `tests/errors/lib/load_parts.sabk`: a file belongs to one module at [tests/errors/lib/load_twice.sabk:1:7]
+     1 | #load "load_part";            // already part of lib/load_parts
+       |       ^
+[error]: `tests/errors/lib/load_part.sabk` is part of module `tests/errors/lib/load_parts.sabk` (it #loads it); a file is either imported or loaded, not both at [tests/errors/load_misuse.sabk:5:9]
+     5 | #import "lib/load_part";      // part of lib/load_parts, so not a module
+       |         ^
+[error]: unknown name `in_part`; `tests/errors/lib/load_part.sabk` has one, but it's private to that file (`#scope_file` at line 1) at [tests/errors/lib/load_parts.sabk:5:31]
+     5 | fn part_one() -> i64 { return in_part(); }   // in_part is load_part's own
+       |                               ^

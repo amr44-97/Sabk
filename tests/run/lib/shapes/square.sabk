@@ -1,0 +1,11 @@
+#import "../helper" as helper; // relative to this file
+fn square(side: f64) -> Shape { return .Square(side); }
+
+#scope_module
+fn square_area(side: f64) -> f64 { return side * side; }
+
+#scope_file
+const PI = 3; // its own: the other file's PI is private to that file
+
+#scope_export
+fn square_note() -> string { return helper.greeting; }

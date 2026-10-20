@@ -1,0 +1,6 @@
+#load "load_missing";
+#load "load_part";
+#load "regions";              // a module of its own (the test imports it first)
+
+fn part_one() -> i64 { return in_part(); }   // in_part is load_part's own
+const SHARED = 1;

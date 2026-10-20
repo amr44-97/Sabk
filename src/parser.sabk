@@ -207,6 +207,13 @@ fn top_block(p: *Parser) -> *Node {
 fn top_decl(p: *Parser) -> *Node {
     if (at(p, .Import) || at_directive(p, "import"))
         return import_decl(p);
+    if (at_directive(p, "load")) {
+        // `#load "file.sabk";`: the file's declarations join this module
+        directive(p);
+        let path = expect(p, .String, "a file path after `#load`");
+        expect(p, .Semicolon, "`;` after `#load`");
+        return new_node(path, .Load);
+    }
     if (at_directive(p, "if"))
         return top_static_if(p);
     if (at_directive(p, "run")) {

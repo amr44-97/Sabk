@@ -1,0 +1,9 @@
+// #load: a module made of several files
+#import "std/io";
+#import "lib/shapes";
+
+fn main() {
+    println(describe(circle(1)));
+    println(describe(square(3)));
+    println(square_note());
+}

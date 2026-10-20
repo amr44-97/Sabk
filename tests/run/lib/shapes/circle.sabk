@@ -1,0 +1,8 @@
+// part of lib/shapes: its #scope_module names are this file's too
+fn circle(r: f64) -> Shape { return .Circle(r); }
+
+#scope_module
+fn circle_area(r: f64) -> f64 { return PI * r * r; }
+
+#scope_file
+const PI = 3.14159;

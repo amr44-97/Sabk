@@ -130,6 +130,7 @@ And what C leaves open, Sabk decides:
 ```
 file        = { top_decl } EOF ;
 top_decl    = import_decl
+            | "#load" STRING ";"          // this file's module takes in that file
             | scope_dir                   // who sees what follows
             | [ "pub" ] decl
             | "#insert" expr ";"          // declarations made by code
@@ -157,6 +158,29 @@ scope_dir   = "#scope_export" | "#scope_module" | "#scope_file" ;
     the qualified forms (`left.shared` or `right.shared`).
   - **Imports don't pass through:** importing `std/str` doesn't give you the
     names `str` itself imports.
+- **`#load "file.sabk";` makes one module of several files**, as in Jai.
+  The loaded file's declarations, imports and `#load`s join the module:
+  its files see each other's names, `#scope_module` ones included, and
+  importers see one module.
+
+  ```
+  // lib/shapes.sabk                    // lib/shapes/circle.sabk
+  #load "shapes/circle";                fn circle(r: f64) -> Shape { ... }
+  #load "shapes/square";                #scope_module
+                                        fn circle_area(r: f64) -> f64 { ... }
+  fn describe(s: Shape) -> string {     #scope_file
+      ... circle_area(r) ...            const PI = 3.14159;
+  }
+  #scope_module
+  enum Shape { ... }
+  ```
+
+  - The path is relative to the file the `#load` is in, and so are the
+    imports a loaded file writes.
+  - Each file starts exported; its own `#scope_` directives cover its own
+    declarations.
+  - A file is loaded once, by one module, and is either loaded or
+    imported, not both.
 - Source files end in `.sabk`, and the extension is optional in imports:
   `#import "util";` loads `util.sabk`.
 - `std/...` paths resolve to the standard library directory (`std` next to
@@ -185,8 +209,9 @@ scope_dir   = "#scope_export" | "#scope_module" | "#scope_file" ;
 
   - `#scope_export`: whoever imports the module (the default at the top).
   - `#scope_module`: the module's own files, not importers.
-  - `#scope_file`: this file only. Until a module can have several files,
-    it's the same as `#scope_module`.
+  - `#scope_file`: this file only. Two files of a module can each have
+    their own `#scope_file` name (`PI` in both), but not one the module
+    has for all its files.
   - Naming a private one says where it's made private: "`hidden` is
     private to file `lib/regions.sabk`", with a note at the `#scope_file`.
   - **While code moves over**, a file that writes `pub` keeps the rule
