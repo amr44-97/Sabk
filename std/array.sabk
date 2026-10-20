@@ -1,4 +1,4 @@
-// Functions for growable arrays. The type, [..]T, is the language's: it
+// Functions for dynamic arrays. The type, [..]T, is the language's: it
 // indexes, slices and loops like a slice, and goes wherever a []T is
 // expected as a view of its elements.
 //
@@ -30,7 +30,7 @@
 #import "std/os";
 #import "std/reflect";
 
-// a new growable array holding copies of `items`
+// a new dynamic array holding copies of `items`
 fn array_of(items: []$T, a: Allocator = context.allocator) -> [..]T {
     let xs: [..]T;
     xs.allocator = a;

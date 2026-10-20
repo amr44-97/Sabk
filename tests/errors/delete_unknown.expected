@@ -1,4 +1,4 @@
-std/mem.sabk:180:15: panic: delete can't free a `*i64`: it frees strings, slices, growable arrays, Maps and Builders; a pointer is freed with free(p)
+std/mem.sabk:180:15: panic: delete can't free a `*i64`: it frees strings, slices, dynamic arrays, Maps and Builders; a pointer is freed with free(p)
 [error]: `#run` failed: it called abort() (a panic?) at [std/mem.sabk:56:17]
     56 |         #insert #run delete_code(type_info(T));
        |                 ^

@@ -9,7 +9,7 @@ fn f() {
     let g = [2]u8.[x, y];               // an array of [2]u8
     let h = make_list([]u8);
     let i = make_list([4]u8);
-    let r = make_list([..]u8);          // a growable array type
+    let r = make_list([..]u8);          // a dynamic array type
     let j = .[x, y][0];
     let k = .[x][0];
     let l = .[.[1, 2], .[3, 4]];

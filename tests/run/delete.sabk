@@ -1,4 +1,4 @@
-// delete(x) frees what a string, slice, growable array, Map or Builder
+// delete(x) frees what a string, slice, dynamic array, Map or Builder
 // holds; #if (T == Map) asks whether T is any Map
 #import "std/io";
 #import "std/mem";

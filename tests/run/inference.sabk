@@ -20,7 +20,7 @@ struct Box($T) { value: T; }
 struct Pair($A, $B) { first: A; second: B; }
 struct Bag($T) { items: []T; count: i32; }
 
-// a growable array with room for `capacity`; T comes from where it's used
+// a dynamic array with room for `capacity`; T comes from where it's used
 fn make_array($T: type, capacity: isize = 0) -> [..]T {
     let xs: [..]T;
     array_reserve(&xs, capacity);

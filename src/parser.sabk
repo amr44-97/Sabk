@@ -1808,7 +1808,7 @@ fn element_of(t: *Node) -> *Node {
     switch (t.kind) {
     case .TypeArray{elem}: return elem;
     case .TypeSlice{elem}: return elem;
-    case .TypeGrowable{elem}: return elem;
+    case .TypeDynArray{elem}: return elem;
     default: return t;
     }
 }
@@ -2004,7 +2004,7 @@ fn bracket(p: *Parser) -> *Node {
     } else if (at(p, .Ellipsis2) && at(p, .RBracket, 1)) { // [..]T
         next(p);
         next(p);
-        declared = new_node(open, .TypeGrowable(type_(p)));
+        declared = new_node(open, .TypeDynArray(type_(p)));
     } else {
         let first = expr(p);
         if (at(p, .Comma) || (at(p, .RBracket) && !can_start_type(peek(p, 1).kind)) ||
@@ -2065,7 +2065,7 @@ fn type_(p: *Parser) -> *Node {
         if (at(p, .Ellipsis2) && at(p, .RBracket, 1)) { // [..]T
             next(p);
             next(p);
-            return new_node(t, .TypeGrowable(type_(p)));
+            return new_node(t, .TypeDynArray(type_(p)));
         }
         let len = expr(p);
         expect(p, .RBracket, "`]` after the array length");

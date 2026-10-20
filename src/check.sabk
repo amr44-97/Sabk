@@ -675,8 +675,8 @@ fn variant_value(c: *Checker, n: *Node, t: *Type, name: string, call: *Node) -> 
     return t;
 }
 
-fn growable_constant(c: *Checker, d: *Node) {
-    error(c, d.tok, tformat("a constant can't be a growable array: its elements are allocated; make it a variable, or a constant array (`const % = .[...];`)",
+fn dyn_array_constant(c: *Checker, d: *Node) {
+    error(c, d.tok, tformat("a constant can't be a dynamic array: its elements are allocated; make it a variable, or a constant array (`const % = .[...];`)",
                             d.tok.text));
 }
 
@@ -696,8 +696,8 @@ fn check_var(c: *Checker, d: *Node) {
         error(c, declared.tok, "a constant can't have type `void`: its one value is `.{}`, so there's nothing to name");
         t = c.types.error;
     }
-    if (is_const && t != null && t.kind == .Growable) {
-        growable_constant(c, d);
+    if (is_const && t != null && t.kind == .DynArray) {
+        dyn_array_constant(c, d);
         t = c.types.error;
     }
     if (uninit && d.owner != null)
@@ -726,8 +726,8 @@ fn check_var(c: *Checker, d: *Node) {
         if (is_const)
             d.cval = value.cval;
     }
-    if (is_const && t != null && t.kind == .Growable) {
-        growable_constant(c, d);
+    if (is_const && t != null && t.kind == .DynArray) {
+        dyn_array_constant(c, d);
         t = c.types.error;
     }
 
@@ -940,12 +940,12 @@ fn type_from_node(c: *Checker, n: *Node) -> *Type {
         else if (elem.kind != .Error)
             t = slice_of(&c.types, elem);
 
-    case .TypeGrowable{elem: e}:
+    case .TypeDynArray{elem: e}:
         let elem = type_from_node(c, e);
         if (elem.kind == .Void)
-            error(c, e.tok, "a growable array can't hold `void`");
+            error(c, e.tok, "a dynamic array can't hold `void`");
         else if (elem.kind != .Error)
-            t = growable_of(&c.types, elem);
+            t = dyn_array_of(&c.types, elem);
 
     case .TypeArray{elem: e, len}:
         let elem = type_from_node(c, e);
@@ -1013,7 +1013,7 @@ fn layout(c: *Checker, t: *Type) {
         t.size, t.align = 8, 8;
     case .Slice: // pointer + length
         t.size, t.align = 16, 8;
-    case .Growable: // pointer, length, capacity, allocator
+    case .DynArray: // pointer, length, capacity, allocator
         layout(c, c.allocator_type);
         t.size = 24 + c.allocator_type.size;
         t.align = 8;

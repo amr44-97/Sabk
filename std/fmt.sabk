@@ -343,8 +343,8 @@ fn put(b: *Builder, p: *void, t: *TypeInfo, nested: bool, spec: *FormatSpec) {
         put_address(b, (p as *usize).*);
     case .Array:
         put_items(b, bytes, t.count, t.elem, spec);
-    case .Slice, .Growable: // []u8 too: bytes print as numbers, text is a
-        // string; a growable array starts with a slice's two fields
+    case .Slice, .DynArray: // []u8 too: bytes print as numbers, text is a
+        // string; a dynamic array starts with a slice's two fields
         let s = (p as *RawSlice).*;
         put_items(b, s.ptr, s.len, t.elem, spec);
     case .String:
@@ -402,7 +402,7 @@ fn as_text(p: *void, t: *TypeInfo) -> (string, bool) {
     switch (t.kind) {
     case .String:
         return (p as *string).*, true;
-    case .Slice, .Growable:
+    case .Slice, .DynArray:
         if (t.elem != byte)
             return "", false;
         let s = (p as *RawSlice).*;

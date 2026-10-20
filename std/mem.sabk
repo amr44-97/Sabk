@@ -5,7 +5,7 @@
 //
 //   alloc(size)                    zeroed memory, or null
 //   free(p)                        gives it back
-//   delete(x)                      frees what a string, slice, growable
+//   delete(x)                      frees what a string, slice, dynamic
 //                                  array, Map or Builder holds
 //   resize(p, old_size, size)      grows or shrinks it, keeping the bytes
 //   free_all(a)                    frees everything `a` handed out, for
@@ -42,7 +42,7 @@ fn free(memory: *void, a: Allocator = context.allocator) {
 }
 
 // Frees what `x` holds: a string's or slice's elements (from `a`: they
-// don't say which allocator they came from), a growable array's elements,
+// don't say which allocator they came from), a dynamic array's elements,
 // or a Map's or Builder's memory (each from its own allocator). `x` is a
 // copy, so the variable it came from still points at the freed memory.
 // Anything else is a compile error; a pointer from alloc or new is freed
@@ -175,10 +175,10 @@ fn sabk_unpoison(memory: *void, size: isize) #foreign;
 fn delete_code(t: *TypeInfo) -> string {
     switch (t.kind) {
     case .String, .Slice: return "free(x.ptr, a);";
-    case .Growable: return "free(x.ptr, x.allocator);";
+    case .DynArray: return "free(x.ptr, x.allocator);";
     default:
         panic(str.join(.["delete can't free a `", t.name, "`: it frees strings, slices, ",
-                         "growable arrays, Maps and Builders; a pointer is freed with free(p)"], ""));
+                         "dynamic arrays, Maps and Builders; a pointer is freed with free(p)"], ""));
     }
     return "";
 }

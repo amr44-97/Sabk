@@ -21,7 +21,7 @@ fn pipe(fds: *[2]int) -> int #foreign libc;
 fn write(fd: int, data: *void, size: size_t) -> ssize_t #foreign libc;
 
 // an #align(64) struct is 64-aligned wherever it lives: a local, a global,
-// the heap and a growable array (posix_memalign past 16), here and in #run
+// the heap and a dynamic array (posix_memalign past 16), here and in #run
 struct Line #align(64) { first: u8; }
 let GLOBAL_LINE: Line;
 

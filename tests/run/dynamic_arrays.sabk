@@ -12,7 +12,7 @@ fn sum(xs: []i64) -> i64 {
     return total;
 }
 
-// [..]$T and []$T both find T in a growable array
+// [..]$T and []$T both find T in a dynamic array
 fn last(xs: [..]$T) -> T { return xs[xs.len - 1]; }
 fn first(xs: []$T) -> T { return xs[0]; }
 

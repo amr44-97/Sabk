@@ -60,7 +60,7 @@ fn anys() {
     for (i in 0..3) print_to(&buf, "% ", i);          // a ..Any isn't kept
 }
 
-// 8: copying a growable array
+// 8: copying a dynamic array
 fn copies() {
     let xs: [..]i64;
     array_add(&xs, 1);
@@ -95,7 +95,7 @@ fn grow_while_looping(shelf: *Shelf) {
     for (x in xs) array_add(&ys, x);                  // another array
 }
 
-// 13: growing a by-value copy of a growable array
+// 13: growing a by-value copy of a dynamic array
 fn add_one(xs: [..]i64) { array_add(&xs, 99); }       // warns
 fn add_one_ptr(xs: *[..]i64) { array_add(xs, 99); }
 fn first(xs: [..]i64) -> i64 { return xs[0]; }

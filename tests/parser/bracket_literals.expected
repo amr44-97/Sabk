@@ -45,7 +45,7 @@ ROOT
         lhs: CALL `(`
           lhs: IDENTIFIER `make_list`
           TYPE_EXPR `[`
-            lhs: TYPE_GROWABLE `[`
+            lhs: TYPE_DYN_ARRAY `[`
               lhs: TYPE_NAME `u8`
       VAR_DECL `j`
         lhs: INDEX `[`

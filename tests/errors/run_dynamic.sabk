@@ -1,4 +1,4 @@
-// what #run makes is carried into the program; a growable array's
+// what #run makes is carried into the program; a dynamic array's
 // elements were allocated while compiling, so it can't be
 #import "std/array";
 

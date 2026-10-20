@@ -1,4 +1,4 @@
-// delete frees strings, slices, growable arrays, Maps and Builders; a
+// delete frees strings, slices, dynamic arrays, Maps and Builders; a
 // pointer is freed with free(p)
 #import "std/mem";
 

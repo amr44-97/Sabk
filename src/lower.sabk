@@ -881,7 +881,7 @@ fn for_in(l: *Lower, n: *Node) {
     let more = alloc_slot(l, 1, 1);
     cmp(l, .U64, .Lt, more, i, len);
     let exit = jump(l, .Jz, more);
-    if (t.kind == .Slice || t.kind == .Growable) {
+    if (t.kind == .Slice || t.kind == .DynArray) {
         let p = alloc_slot(l, 8, 8);
         move(l, p, base, 8);
         base = p;
@@ -1241,7 +1241,7 @@ fn convert(l: *Lower, value: u32, from: *Type, to: *Type) -> u32 {
         emit(l, .{ .op = .Addr, .a = any + field(to, "info").offset as u32, .imm = info as usize });
         return any;
     }
-    if (from.kind == .Growable) { // [..]T -> []T: its first two fields
+    if (from.kind == .DynArray) { // [..]T -> []T: its first two fields
         let s = alloc(l, to);
         move(l, s, value, 16);
         return s;
@@ -1503,7 +1503,7 @@ fn inner(l: *Lower, n: *Node) -> u32 {
     case .Cast{value: e}:
         let from = type_of(l, e);
         let value = expr(l, e);
-        if (from.kind == .Growable && t.kind == .Slice)
+        if (from.kind == .DynArray && t.kind == .Slice)
             return convert(l, value, from, t);
         if (from.kind == .Slice || from == t)
             return value;
@@ -1687,7 +1687,7 @@ fn member_offset(l: *Lower, t: *Type, n: *Node) -> u64 {
     let field_name = n.tok.text;
     if (t.kind == .Slice)
         return if (field_name == "len") 8 else 0;
-    if (t.kind == .Growable)
+    if (t.kind == .DynArray)
         return if (field_name == "ptr") 0 else if (field_name == "len") 8 else if (field_name == "cap") 16 else 24;
     layout(l.c, t);
     let fl = field(t, field_name);
@@ -1777,9 +1777,9 @@ fn element(l: *Lower, n: *Node) -> u32 {
     let t = concrete(l.vm, object.ty);
     let elem_size = vm_size_of(l.vm, n.ty) as u64;
     let known = index.cval.kind == .Int;
-    // what's indexed first, then the index; a growable array starts with a
+    // what's indexed first, then the index; a dynamic array starts with a
     // slice's two fields
-    if (t.kind == .Slice || t.kind == .Growable) {
+    if (t.kind == .Slice || t.kind == .DynArray) {
         let s = expr(l, object);
         let i = to_u64(l, expr(l, index), type_of(l, index));
         at(l, n.tok); // an error points at the indexing, as in the program
@@ -1810,7 +1810,7 @@ fn slice(l: *Lower, n: *Node) -> u32 {
     let lo = if (lo_node != null) to_u64(l, expr(l, lo_node), type_of(l, lo_node)) else u64_slot(l, 0);
     let base: u32 = 0;
     let len: u32 = 0;
-    if (t.kind == .Slice || t.kind == .Growable) {
+    if (t.kind == .Slice || t.kind == .DynArray) {
         let s = expr(l, object);
         base = s;
         len = s + 8;

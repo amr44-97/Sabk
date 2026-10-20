@@ -555,7 +555,7 @@ fn shape_fits(c: *Checker, pattern: *Node, arg: *Node) -> bool {
         return false; // `.{...}` and `.Red` need a type to start from
     if (is_open_literal(arg)) {
         let k = pattern.kind.tag;
-        return k == .TypeSlice || k == .TypeArray || k == .TypeGrowable;
+        return k == .TypeSlice || k == .TypeArray || k == .TypeDynArray;
     }
     if (arg.ty == null || arg.ty.kind == .Error)
         return false;
@@ -574,12 +574,12 @@ fn type_fits(c: *Checker, pattern: *Node, t: *Type) -> bool {
     case .TypePointer{to}:
         return t.kind == .Ptr && type_fits(c, to, t.elem);
     case .TypeSlice{elem}:
-        return (t.kind == .Slice || t.kind == .Array || t.kind == .Growable) && t.elem != null &&
+        return (t.kind == .Slice || t.kind == .Array || t.kind == .DynArray) && t.elem != null &&
                type_fits(c, elem, t.elem);
     case .TypeArray{elem}:
         return t.kind == .Array && type_fits(c, elem, t.elem);
-    case .TypeGrowable{elem}:
-        return t.kind == .Growable && type_fits(c, elem, t.elem);
+    case .TypeDynArray{elem}:
+        return t.kind == .DynArray && type_fits(c, elem, t.elem);
     case .TypeFn{params, c_call}:
         return t.kind == .Fn && t.params.len == params.len && t.is_c_call == c_call;
     case .TypeName, .TypeMember: // List($T): an instance of List
@@ -619,7 +619,7 @@ fn type_text(n: *Node) -> string {
     case .TypeParam: return tformat("$%", n.tok.text);
     case .TypePointer{to}: return tformat("*%", type_text(to));
     case .TypeSlice{elem}: return tformat("[]%", type_text(elem));
-    case .TypeGrowable{elem}: return tformat("[..]%", type_text(elem));
+    case .TypeDynArray{elem}: return tformat("[..]%", type_text(elem));
     case .TypeArray{elem, len}: return tformat("[%]%", if (len != null) len.tok.text else "", type_text(elem));
     case .TypeName{args}: return with_args(n.tok.text, args);
     case .TypeMember{args}: return with_args(n.tok.text, args);
@@ -786,7 +786,7 @@ fn literal_fits(c: *Checker, arg: *Node, pt: *Type) -> bool {
             return pt.is_tagged;
         return (pt.kind == .Struct && !pt.is_tuple) || pt.kind == .Union;
     case .ArrayLiteral:
-        return pt.kind == .Array || pt.kind == .Slice || pt.kind == .Growable;
+        return pt.kind == .Array || pt.kind == .Slice || pt.kind == .DynArray;
     default:
         return false;
     }

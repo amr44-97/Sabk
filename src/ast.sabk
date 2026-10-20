@@ -183,7 +183,7 @@ enum NodeKind {
     TypePointer(to: *Node),
     TypeArray(elem: *Node, len: *Node),
     TypeSlice(elem: *Node),
-    TypeGrowable(elem: *Node),
+    TypeDynArray(elem: *Node),
     TypeFn(params: []*Node, result: *Node,
            c_call: bool = false,           // fn(...) #c_call: a C function pointer
            variadic: bool = false),        // fn(*char, ...) -> int #c_call
@@ -410,7 +410,7 @@ fn old_shape(n: *Node) -> OldShape {
     case .TypePointer{to}: s.tag = "TYPE_PTR"; s.lhs = to;
     case .TypeArray{elem, len}: s.tag = "TYPE_ARRAY"; s.lhs = elem; s.rhs = len;
     case .TypeSlice{elem}: s.tag = "TYPE_SLICE"; s.lhs = elem;
-    case .TypeGrowable{elem}: s.tag = "TYPE_GROWABLE"; s.lhs = elem;
+    case .TypeDynArray{elem}: s.tag = "TYPE_DYN_ARRAY"; s.lhs = elem;
     case .TypeFn(f):
         s.tag = "TYPE_FN"; s.declared = f.result; s.list = f.params;
         s.variadic = f.variadic;

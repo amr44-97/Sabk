@@ -11,7 +11,7 @@
     11 |     let same = b == "abc";
        |                ^
 [error]: expected `string`, found `[..]u8`; the same memory converts with `grown as string` at [tests/errors/bytes_text_cast.sabk:13:11]
-    13 |     takes(grown);                           // a growable one: `grown as string`
+    13 |     takes(grown);                           // a dynamic one: `grown as string`
        |           ^
 [error]: can't cast `[..]i32` to `string` at [tests/errors/bytes_text_cast.sabk:15:18]
     15 |     let t = wide as string;                 // only a [..]u8 is text

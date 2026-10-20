@@ -22,7 +22,7 @@
 //                            `"12x" isn't an integer`; for a fallback on
 //                            purpose, set context.log_level = .Error
 //
-//   let b = make_builder();        text built on a growable [..]u8
+//   let b = make_builder();        text built on a dynamic [..]u8
 //   defer builder_free(&b);
 //   builder_append(&b, "x = ");
 //   builder_print(&b, "% items", 42);   any values, formatted (std/fmt)
@@ -259,7 +259,7 @@ fn parse_bool(s: string) -> (bool, ParseError = .None) {
 
 // ---- building strings
 
-// Text built a piece at a time. Its bytes are a growable array, so a zero
+// Text built a piece at a time. Its bytes are a dynamic array, so a zero
 // Builder is ready to use (it grows with context.allocator), and copying
 // one shares the bytes, as copying a [..]u8 does.
 struct Builder {

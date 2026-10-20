@@ -51,7 +51,7 @@ struct PanicHandler {
 // to Any implicitly: a pointer to (a copy of) it and its type.
 
 enum TypeKind {
-    Void, Bool, Int, Float, Rawptr, Pointer, Array, Slice, Growable, String,
+    Void, Bool, Int, Float, Rawptr, Pointer, Array, Slice, DynArray, String,
     Function, Struct, Union, Enum, TaggedEnum,
 }
 
@@ -61,7 +61,7 @@ struct TypeInfo {
     size: isize;
     align: isize;
     is_signed: bool;          // Int
-    elem: *TypeInfo;          // Pointer, Array, Slice, Growable, String:
+    elem: *TypeInfo;          // Pointer, Array, Slice, DynArray, String:
                               // what it holds; Enum, TaggedEnum: the tag's
                               // integer type
     count: isize;             // Array: its length

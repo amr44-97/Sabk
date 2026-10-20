@@ -184,8 +184,8 @@ fn shape_of(c: *Checker, t: *Type) -> TypeShape {
     case .Slice:
         s.kind = if (t.is_string) "String" else "Slice";
         s.elem = t.elem;
-    case .Growable:
-        s.kind = "Growable";
+    case .DynArray:
+        s.kind = "DynArray";
         s.elem = t.elem;
     case .Enum:
         s.kind = "Enum";

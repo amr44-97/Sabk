@@ -119,7 +119,7 @@ $ ./sabk --run example.sabk
   allocators, and `tformat` makes throwaway text in the temp allocator.
 - **Literals typed by their context:** `let p: Point = .{ .x = 1 };`,
   `draw(.Red)`, `case .Spades:`.
-- **Growable arrays built in**, as in Jai: `[..]T` indexes, slices and
+- **Dynamic arrays built in**, as in Jai: `[..]T` indexes, slices and
   loops like a slice and passes as one; std/array grows it
   (`array_add(&xs, x)`), and nothing allocates without a call.
 - **`defer`**, slicing (`s[a..b]`), array and slice literals (`.[1, 2]`), untyped

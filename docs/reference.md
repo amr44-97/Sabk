@@ -377,7 +377,7 @@ values      = expr { "," expr } ;
     `&(&p).b` is the same error: the field is still in it.
   - **Everywhere a value lives is aligned as its type asks**: locals,
     globals, `new` (the heap gives memory aligned past 16 bytes through
-    `posix_memalign`), growable arrays, the arenas, and `#run` code's
+    `posix_memalign`), dynamic arrays, the arenas, and `#run` code's
     memory, so `#run` hands C the same layout the program does.
   - In C they're `__attribute__((packed))` and `__attribute__((aligned(n)))`,
     with a `_Static_assert` that the C compiler lays the struct out as
@@ -424,7 +424,7 @@ values      = expr { "," expr } ;
 type        = "*" type                                  // pointer
             | "[" expr "]" type                         // array of N
             | "[" "]" type                              // slice (pointer + length)
-            | "[" ".." "]" type                         // growable array
+            | "[" ".." "]" type                         // dynamic array
             | "fn" "(" [ type { "," type } ] ")" [ "->" results ]
             | "fn" "(" [ type { "," type } [ "," "..." ] ] ")" [ "->" results ] "#c_call"
                                                         // a C function pointer
@@ -459,14 +459,14 @@ rows.*[1] = 2;                                  // element 1 of the first
 
 This way `p[i]` means the same for every `T` in generic code: std/array's
 `xs.ptr[xs.len]` is the next element even when the elements are arrays.
-The one exception is a pointer to a growable array: where `*[..]T` is
+The one exception is a pointer to a dynamic array: where `*[..]T` is
 written out, `p[i]` and `p[lo..hi]` are errors that suggest `p.*[i]`,
-since stepping over whole growable arrays is never what's meant there (see
+since stepping over whole dynamic arrays is never what's meant there (see
 below).
 C's `*p` isn't a dereference; a `*` before an expression only spells a
 pointer type, where a type argument goes (`make(*Node)`).
 
-**Growable arrays.** `[..]T` is an array that grows. Its elements are
+**Dynamic arrays.** `[..]T` is an array that grows. Its elements are
 allocated, and it's laid out as `{ptr, len, cap, allocator}`, four fields
 that can all be read and set. It indexes, slices and loops like a slice
 (`xs[i]` is bounds-checked against `xs.len`), and goes wherever a `[]T` is
@@ -483,7 +483,7 @@ xs.len = 0;                      // empty, keeping the memory
 array_free(&xs);
 ```
 
-Nothing allocates without a call: a literal can't be a growable array
+Nothing allocates without a call: a literal can't be a dynamic array
 (`let xs: [..]i64 = .[1, 2];` is an error, and `array_of` copies one), and
 neither can a constant. Copying one copies its four fields, so both copies
 share the elements. A function that adds to one takes `*[..]T`, and reaches
@@ -526,7 +526,7 @@ fn finish() { return flush(); }     // returned where void is returned
 - Through a `*void`, `p.*` is a void: it reads nothing, which is what
   `*T` with `T = void` needs in generic code.
 - A constant can't be `void` (there's nothing to name), and neither can a C
-  function's parameter, since C has none. Arrays, slices and growable
+  function's parameter, since C has none. Arrays, slices and dynamic
   arrays of `void` are errors: there's nothing for them to hold.
 - Printing a call that returns void is an error, since it's almost always
   a mistake; a `void` value printed (in generic code, say) shows `void`.
@@ -627,7 +627,7 @@ item        = [ "&" ] IDENT                          // a name for it (`_`: none
   already the default, which covers C's top-level `static`.
 - `for` has two forms. `for (i in a..b)` counts from `a` up to but not
   including `b`. `for (x in xs)` iterates over the elements of an array,
-  slice, growable array or string (its bytes, as `u8`s), and `for (x, i
+  slice, dynamic array or string (its bytes, as `u8`s), and `for (x, i
   in xs)` gives each one's index too, an `isize`. The C three-clause form
   also works. The parser tells them apart by looking for `IDENT "in"` (or
   `IDENT "," IDENT "in"`) right after `(`.
@@ -644,7 +644,7 @@ item        = [ "&" ] IDENT                          // a name for it (`_`: none
     or have its address taken; nor can the index. To change the elements,
     use the index: `for (x, i in xs) xs[i] = x * 2;`. A range takes one
     name: `for (i in a..b)` already counts.
-  - `xs` is read once, before the first pass. Adding to a growable array
+  - `xs` is read once, before the first pass. Adding to a dynamic array
     while looping over it is a [trap](#memory-traps) (12).
 - **`switch` has no implicit fallthrough.** A case runs until the next `case`
   or `default`. One case can match several values: `case 1, 2, 3:`. `break`
@@ -969,7 +969,7 @@ with_temp_allocator() { let s = format("%", x); }  // ... with the temp allocato
   pointer, `free(s.ptr)` or `delete(s)` for a slice or string. These take
   the allocator last, defaulting to `context.allocator`, so memory from
   another one is freed with it: `free(p, arena_allocator(&arena))`. A
-  growable array, `Map` or `Builder` records its allocator, and
+  dynamic array, `Map` or `Builder` records its allocator, and
   `array_free(&xs)`, `map_free(&m)`, `builder_free(&b)` and `delete(x)`
   free with that one. See [Memory and ownership](#memory-and-ownership).
 - Most of the standard library's allocating functions take the allocator
@@ -1241,7 +1241,7 @@ so a length passed to C takes a cast, `memcpy(dst, src, s.len as usize)`.
 
 **Assignment.** You can assign to variables, parameters, fields, indexed
 elements and `p.*`. You can't assign to constants, `for (x in ...)` loop
-variables, `.len` or `.ptr` of an array or slice (a growable array's can
+variables, `.len` or `.ptr` of an array or slice (a dynamic array's can
 be set), or temporaries. `&x` needs something assignable.
 
 **Functions:**
@@ -1412,7 +1412,7 @@ let built = raw as string;           // a [..]u8: a view of its elements
 ```
 
 - An array of bytes reads as text through a slice: `buf[..n] as string`.
-  A growable one converts directly, `raw as string`, a view of its
+  A dynamic one converts directly, `raw as string`, a view of its
   elements like the `[]u8` it passes as.
 - A `string` prints as text and a `[]u8` as numbers.
 - `==` compares strings by content; two `[]u8` have no `==`, and bytes
@@ -1434,7 +1434,7 @@ let o = text < "b";    // error: `<` needs numbers, enums or pointers, found `st
 ### `Builder`
 
 A `Builder` (std/str) is text built a piece at a time. Its bytes are a
-growable `[..]u8`, so it owns them, and a zero one is ready to use: it
+dynamic `[..]u8`, so it owns them, and a zero one is ready to use: it
 grows with `context.allocator`, or with the allocator `make_builder(a)`
 was given.
 
@@ -2476,7 +2476,7 @@ let b: Builder;               defer builder_free(&b);
 let a = arena_init();         defer arena_destroy(&a); // everything from it at once
 ```
 
-`delete(x)` (std/mem) frees what any string, slice, growable array, `Map`
+`delete(x)` (std/mem) frees what any string, slice, dynamic array, `Map`
 or `Builder` holds. A function that returns allocated memory says so in
 its comment, and its caller frees it: `read_file`'s text, `format`'s
 string, `split`'s slice (not the parts, which are views of the input).
@@ -2556,8 +2556,8 @@ memory they take back is poisoned until they hand it out again.
 | 9 | Writing to a string literal | warning | write to a copy |
 | 10 | Writing through a view changes text others hold | by design | write to a copy |
 | 11 | An array passed as a slice is shared, not copied | by design | copy it first |
-| 12 | Growing a growable array while looping over it | warning, `--sanitize` | add after the loop |
-| 13 | Growing a by-value copy of a growable array | warning, `--sanitize` | pass `*[..]T` |
+| 12 | Growing a dynamic array while looping over it | warning, `--sanitize` | add after the loop |
+| 13 | Growing a by-value copy of a dynamic array | warning, `--sanitize` | pass `*[..]T` |
 | 14 | Indexing past a pointer to one value | `--sanitize` | `p.*`, not `p[1]` |
 
 What the warnings look at, so you know what they miss:
@@ -2789,7 +2789,7 @@ println("% %", a, b);
 This is intended, but nothing at the call shows it. It's also what makes
 trap 3 easy to write.
 
-**12. Growing a growable array while looping over it.** A `for` loop
+**12. Growing a dynamic array while looping over it.** A `for` loop
 reads its sequence once. If the body grows the array, the elements move
 and the loop keeps reading the old, freed block:
 
@@ -2812,7 +2812,7 @@ for (x in xs) {
 Avoid it: collect what to add in a second array, and append after the
 loop.
 
-**13. Growing a by-value copy of a growable array.** A `[..]T` passed by
+**13. Growing a by-value copy of a dynamic array.** A `[..]T` passed by
 value is a copy of its fields (trap 8). Adding to the copy can move the
 elements and free the block the caller's array still points at:
 
@@ -3001,7 +3001,7 @@ carries. There's one per type, so two can be compared with `==`
 
 ```
 enum TypeKind { Void, Bool, Int, Float, Rawptr, Pointer, Array, Slice,
-                    String, Function, Struct, Union, Enum, TaggedEnum }
+                    DynArray, String, Function, Struct, Union, Enum, TaggedEnum }
 
 struct TypeInfo {
     kind: TypeKind;
@@ -3009,7 +3009,7 @@ struct TypeInfo {
     size: isize;
     align: isize;
     is_signed: bool;          // Int
-    elem: *TypeInfo;          // Pointer, Array, Slice, String: what it
+    elem: *TypeInfo;          // Pointer, Array, Slice, DynArray, String: what it
                               // holds; Enum, TaggedEnum: the tag's integer
     count: isize;             // Array: its length
     fields: []TypeField;      // Struct, Union; TaggedEnum: tag and payload
@@ -3686,7 +3686,7 @@ struct layout give the same results at compile time as at run time.
 - pointers, `*void`, functions and unions can't come out: an address means
   nothing once the program runs. This is checked before anything runs, and
   applies to fields and elements too.
-- a growable array can't come out either, since the program couldn't grow
+- a dynamic array can't come out either, since the program couldn't grow
   memory the compiler allocated; return a slice of it. So a `Map` can't,
   and std/map's `static_map` makes one that can:
 
@@ -4009,16 +4009,16 @@ it offers.
 |-----------|-------------|
 | `std/io`  | `print`, `println`, `eprint`, `eprintln`, formatted (`print("x = %", x)`, `print("%{.2}", f)`); C's `printf`; `read_file`, `write_file`, `append_file`, `delete_file`, `file_exists`, which fail with an `IoError`, and `io_error_message`; `last_io_error()`, what errno says after a C call fails |
 | `std/fmt` | `format(fmt, ..args)` (a new string), `tformat` (in the temp allocator), `builder_print(&b, fmt, ..args)`, `print_to(&buf, fmt, ..args)` (onto a `[..]u8`), `format_into(&b, fmt, args)`, `append_value(&b, value)`: any value as text; `%{...}` options, and `FormatSpec`, `parse_format_spec`, `append_formatted` |
-| `std/mem` | `alloc`, `free`, `resize`, `free_all` on any allocator; `delete(x)`, which frees what a string, slice, growable array, `Map` or `Builder` holds; `with_allocator(a) { }`, `with_temp_allocator() { }`; `copy_bytes`, `copy_slice`, `clone_slice`, `set_bytes`, `copy_memory`, `zero_memory`; `Arena` with `arena_init`, `arena_allocator`, `arena_alloc`, `arena_reset`, `arena_destroy` |
-| `std/str` | `equal`, `compare_strings`, `string_less`, `starts_with`, `ends_with`, `index_of`, `index_of_char`, `contains`, `trim`, `split`, `join`, `cut`, `copy_string`; `to_cstring`, `from_cstring`; `format_int`, `format_uint`; `parse_int`, `parse_uint`, `parse_float`, `parse_bool`, which fail with a `ParseError`; `Builder`, text on a growable `[..]u8` (a zero one is ready to use), with `make_builder`, `builder_append`, `builder_append_char` (formatted values go in with std/fmt's `builder_print`), `builder_string`, `builder_clear`, `builder_free`; `append_string(&buf, s)`, text onto a `[..]u8` |
+| `std/mem` | `alloc`, `free`, `resize`, `free_all` on any allocator; `delete(x)`, which frees what a string, slice, dynamic array, `Map` or `Builder` holds; `with_allocator(a) { }`, `with_temp_allocator() { }`; `copy_bytes`, `copy_slice`, `clone_slice`, `set_bytes`, `copy_memory`, `zero_memory`; `Arena` with `arena_init`, `arena_allocator`, `arena_alloc`, `arena_reset`, `arena_destroy` |
+| `std/str` | `equal`, `compare_strings`, `string_less`, `starts_with`, `ends_with`, `index_of`, `index_of_char`, `contains`, `trim`, `split`, `join`, `cut`, `copy_string`; `to_cstring`, `from_cstring`; `format_int`, `format_uint`; `parse_int`, `parse_uint`, `parse_float`, `parse_bool`, which fail with a `ParseError`; `Builder`, text on a dynamic `[..]u8` (a zero one is ready to use), with `make_builder`, `builder_append`, `builder_append_char` (formatted values go in with std/fmt's `builder_print`), `builder_string`, `builder_clear`, `builder_free`; `append_string(&buf, s)`, text onto a `[..]u8` |
 | `std/os`  | `args`, `exit`, `abort`, `get_env` (and whether it's set); the `panic` and `assert` macros, which report the source location through `context.panic_handler` |
 | `std/path` | paths taken apart as views, `path_dir`, `path_base`, `path_stem`, `path_ext`, `path_is_absolute`; and made, allocated: `path_join`, `path_normalize` (on the text alone), `path_absolute` and `path_real` (links followed; the file has to exist), which fail with an `IoError`. POSIX paths |
 | `std/fs` | directories: `is_dir`, `make_dir`, `remove_dir`, `make_temp_dir(prefix)` (in `$TMPDIR` or `/tmp`), `current_dir`, failing with an `IoError` (files are std/io's). POSIX |
 | `std/process` | `run_command(args)` (no shell; the program is looked up in `$PATH`) and `run_shell(command)` (`/bin/sh -c`), which wait for it and give an `Exit` (`code`, and `signal` when one ended it) and a `ProcessError` (`NotFound`, `CantStart`); `shell_quote`. POSIX |
 | `std/time` | `now_ns()` (a monotonic clock, for measuring), `unix_time_ns()` (the wall clock), `sleep_ms(ms)`. POSIX |
 | `std/logging` | `log(level, fmt, args)` through `context.logger`, skipping levels below `context.log_level`; `capture_logger(&lines)`, `silent_logger()` |
-| `std/array` | for growable arrays, `[..]T`: `array_of(items)` (an allocated copy), `array_add`, `array_add_new` (a pointer to a new last element, to fill in place), `array_append`, `array_pop`, `array_insert`, `array_remove`, `array_remove_unordered`, `array_find(xs, item)` (its index or -1, on any `[]T`) and `array_remove_value` (the first equal one), comparing as std/reflect's `values_equal`, `array_reserve`, `array_clear`, `array_free` |
-| `std/map` | `Map($K, $V)`, a hash map whose `entries`, a growable array, holds its entries in insertion order, for keys of any type; a zero one is ready to use; `make_map` (to pick the allocator or the hashing), `map_put`, `map_find` (a pointer, or null), `map_get` (a copy, and whether it's there), `map_has`, `map_remove`, `map_clear`, `map_free`; `StaticMap($K, $V)`, a read-only map that `#run` can bake into the program, made by `static_map(pairs)` from `Pair`s and read with `static_map_get` and `static_map_has`; `hash_bytes`, `hash_string`, `hash_key`, `keys_equal` |
+| `std/array` | for dynamic arrays, `[..]T`: `array_of(items)` (an allocated copy), `array_add`, `array_add_new` (a pointer to a new last element, to fill in place), `array_append`, `array_pop`, `array_insert`, `array_remove`, `array_remove_unordered`, `array_find(xs, item)` (its index or -1, on any `[]T`) and `array_remove_value` (the first equal one), comparing as std/reflect's `values_equal`, `array_reserve`, `array_clear`, `array_free` |
+| `std/map` | `Map($K, $V)`, a hash map whose `entries`, a dynamic array, holds its entries in insertion order, for keys of any type; a zero one is ready to use; `make_map` (to pick the allocator or the hashing), `map_put`, `map_find` (a pointer, or null), `map_get` (a copy, and whether it's there), `map_has`, `map_remove`, `map_clear`, `map_free`; `StaticMap($K, $V)`, a read-only map that `#run` can bake into the program, made by `static_map(pairs)` from `Pair`s and read with `static_map_get` and `static_map_has`; `hash_bytes`, `hash_string`, `hash_key`, `keys_equal` |
 | `std/build` | for build scripts (top-level `#run`): `set_output`, `set_release`, `is_release`, `set_bounds_checks`, `add_c_flags`, `link_library`, `add_c_file`, `add_library_dir` |
 | `std/c` | C's standard library for `#foreign`: `libc` and `libm` (see [C interop](#c-interop-libraries-and-foreign)) |
 | `std/checked` | 64-bit arithmetic that reports overflow instead of wrapping: `add_i64`, `sub_i64`, `mul_i64`, `div_i64`, `rem_i64`, `neg_i64`, `shl_i64` and their `u64` versions, each giving the result and whether it fits; `fits_signed(v, bits)`, `fits_unsigned(v, bits)`; `I64_MIN`, `I64_MAX`, `U64_MAX` |
@@ -4042,12 +4042,12 @@ A few things to know:
   later value wins.
 - **`delete(x)` frees what a value holds**, whatever it is: a string's or
   slice's elements (from `context.allocator`, or the allocator given), a
-  growable array's elements, a `Map`'s or `Builder`'s memory. It takes a
+  dynamic array's elements, a `Map`'s or `Builder`'s memory. It takes a
   copy, so the variable still points at the freed memory; `array_free`,
   `map_free` and `builder_free` take a pointer and also empty it. Anything
   else is a compile error: a pointer from `alloc` or `new` is freed with
   `free(p)`.
-- **A zero growable array is ready to use.** `let xs: [..]i32;` grows with
+- **A zero dynamic array is ready to use.** `let xs: [..]i32;` grows with
   `context.allocator`, or with the allocator its `allocator` field was
   given, from its first add. Growing can move the elements, so pointers and
   slices into them are only valid until it next grows.

@@ -10,7 +10,7 @@ fn main() {
     bytes("abc");                           // a literal's bytes too
     let same = b == "abc";
     let grown: [..]u8;
-    takes(grown);                           // a growable one: `grown as string`
+    takes(grown);                           // a dynamic one: `grown as string`
     let wide: [..]i32;
     let t = wide as string;                 // only a [..]u8 is text
 }

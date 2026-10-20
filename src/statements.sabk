@@ -856,9 +856,9 @@ fn check_for_in(c: *Checker, n: *Node) {
         let t = check_expr(c, iterable, null);
         if (t.kind == .UntypedString) // for (c in "abc"): a string's bytes
             t = default_type(c, iterable);
-        if (t.kind == .Array || t.kind == .Slice || t.kind == .Growable)
+        if (t.kind == .Array || t.kind == .Slice || t.kind == .DynArray)
             var = t.elem;
-        else if (t.kind == .Ptr && (t.elem.kind == .Array || t.elem.kind == .Growable))
+        else if (t.kind == .Ptr && (t.elem.kind == .Array || t.elem.kind == .DynArray))
             error(c, iterable.tok, tformat("can't iterate over a pointer; to iterate over the array it points at, write `%.*`",
                                            text_of(iterable)));
         else if (t.kind != .Error)

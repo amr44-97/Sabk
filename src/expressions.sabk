@@ -69,7 +69,7 @@ fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
     case .Array:
         // [N]T -> []T: a view of the array (of a copy, for a temporary)
         return to.kind == .Slice && !to.is_string && from.elem == to.elem;
-    case .Growable:
+    case .DynArray:
         // [..]T -> []T: a view of its elements, wherever they are
         return to.kind == .Slice && !to.is_string && from.elem == to.elem;
     case .Enum:
@@ -189,7 +189,7 @@ fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
         let hint = "";
         if ((from.is_string || from.kind == .UntypedString) && to == bytes) {
             hint = tformat("; the same memory converts with `% as []u8`", text_of(e));
-        } else if (to.is_string && (from == bytes || from == growable_of(&c.types, c.types.u8))) {
+        } else if (to.is_string && (from == bytes || from == dyn_array_of(&c.types, c.types.u8))) {
             hint = tformat("; the same memory converts with `% as string`", text_of(e));
         } else if (to.is_string && from.kind == .Array && from.elem == c.types.u8) {
             hint = tformat("; view it as text with `%[..] as string`", text_of(e));
@@ -283,7 +283,7 @@ fn explain_pointer_index(c: *Checker, e: *Node) {
     default: return;
     }
     if (object.ty == null || object.ty.kind != .Ptr ||
-        (object.ty.elem.kind != .Array && object.ty.elem.kind != .Growable))
+        (object.ty.elem.kind != .Array && object.ty.elem.kind != .DynArray))
         return;
     let written = "p[i]";
     let meant = "p.*[i]";
@@ -354,7 +354,7 @@ fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
             // An array's and a slice's fields (`.len`, `.ptr`) and a tagged
             // enum's `.tag` are read-only, through a pointer too: `p.len`
             // with `p: *[4]i32` or `*[]i32` is as read-only as `s.len`.
-            // Only a growable array's fields can be set. (A design choice
+            // Only a dynamic array's fields can be set. (A design choice
             // that may change: making a slice's fields writable would be
             // decided here.)
             let base = object.ty;
@@ -1525,7 +1525,7 @@ fn check_member(c: *Checker, n: *Node) -> *Type {
             return c.types.isize;
         if (name == "ptr")
             return ptr_to(&c.types, t.elem);
-    case .Growable: // all four can be assigned
+    case .DynArray: // all four can be assigned
         if (name == "len" || name == "cap")
             return c.types.isize;
         if (name == "ptr")

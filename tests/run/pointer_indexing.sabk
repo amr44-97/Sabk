@@ -33,7 +33,7 @@ fn compute() -> i64 {
 const COMPUTED = #run compute();
 
 fn main() {
-    // a growable array of arrays: array_add writes xs.ptr[xs.len], a *[2]i64
+    // a dynamic array of arrays: array_add writes xs.ptr[xs.len], a *[2]i64
     let pairs: [..][2]i64;
     for (i in 0..3) array_add(&pairs, .[i, i * 10]);
     println("%", pairs);

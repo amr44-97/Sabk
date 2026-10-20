@@ -116,7 +116,7 @@ fn param_target(n: *Node) -> *Node {
             return pointer_param(object);
         return param_target(object);
     case .Index{object}:
-        if (object.ty != null && (object.ty.kind == .Slice || object.ty.kind == .Growable || object.ty.kind == .Ptr))
+        if (object.ty != null && (object.ty.kind == .Slice || object.ty.kind == .DynArray || object.ty.kind == .Ptr))
             return pointer_param(object);
         return param_target(object);
     case .VariantAccess{object}:
@@ -550,7 +550,7 @@ fn keeps(t: *Type, v: *Type, seen: *Map(*Type, bool)) -> bool {
         return false;
     map_put(seen, t, true);
     switch (t.kind) {
-    case .Array, .Slice, .Growable:
+    case .Array, .Slice, .DynArray:
         return !t.is_string && keeps(t.elem, v, seen);
     case .Struct, .Union:
         for (f in t.fields)
@@ -713,7 +713,7 @@ fn pointee_key(p: *Node) -> string {
 
 // memory of its own, by value
 fn owns(t: *Type) -> bool {
-    if (t.kind == .Growable)
+    if (t.kind == .DynArray)
         return true;
     if (t.kind == .Array)
         return owns(t.elem);
@@ -729,11 +729,11 @@ fn grows(t: *Traps, call: *Node) {
         if (is_pack(t, a) || a.ty == null || type_of(a).kind != .Ptr)
             continue;
         let target = type_of(a).elem;
-        if (target.kind != .Growable && !owns(target))
+        if (target.kind != .DynArray && !owns(target))
             continue;
         let arg = bare(a);
         // trap 12: the array a loop around here reads
-        if (target.kind == .Growable) {
+        if (target.kind == .DynArray) {
             let key = pointee_key(arg);
             for (l in t.looping) {
                 if (key.len > 0 && l.key == key) {
@@ -751,7 +751,7 @@ fn grows(t: *Traps, call: *Node) {
             continue;
         let r = root(operand);
         // trap 13: a by-value parameter's copy of the caller's array
-        if (r != null && r.kind.tag == .Param && target.kind == .Growable)
+        if (r != null && r.kind.tag == .Param && target.kind == .DynArray)
             warning(t.c, a.tok, tformat("`%` is a copy of the caller's %, sharing its elements: if % grows or frees it, the caller's points at freed memory; to change the caller's, take `%`",
                                         r.tok.text, if (r.ty == target) qt(target) else "value",
                                         traps_callee_name(call), type_name(ptr_to(&t.c.types, r.ty))));
@@ -827,7 +827,7 @@ fn visit(t: *Traps, n: *Node) {
         let subject = bare(iterable);
         if (subject != null && subject.kind is .Slice{object})
             subject = bare(object);
-        let reads = subject != null && subject.ty != null && subject.ty.kind == .Growable &&
+        let reads = subject != null && subject.ty != null && subject.ty.kind == .DynArray &&
                     place_key(subject).len > 0;
         if (reads)
             array_add(&t.looping, Loop.{ .key = place_key(subject), .loop = n });

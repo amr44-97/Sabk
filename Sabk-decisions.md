@@ -12,14 +12,14 @@ deliberately left for later. Newest at the bottom of each list.
 - **Dereference is postfix `.*`**, as in Jai and Zig: `p.*`, `p.*[i]`.
 - **`.ptr` on fixed arrays.** `a.ptr` is `&a[0]`; needs a place (not a
   temporary, not a constant); the escape check treats it as `&a`.
-- **Writable fields on growable arrays only.** `[..]T`'s `.ptr`, `.len`,
+- **Writable fields on dynamic arrays only.** `[..]T`'s `.ptr`, `.len`,
   `.cap` and `.allocator` can be assigned; slice and string fields stay
   read-only (slicing does that job, with a bounds check).
 - **Turning bounds checks off.** A function directive
   (`#no_bounds_check`, like Jai's `#no_abc`) and a build option with
   Off / On / Always. Covers index and slice checks only, not division by
   zero. `#run` code in the VM keeps its checks.
-- **Built-in growable arrays `[..]T`** replace `List(T)`: `{ptr, len, cap,
+- **Built-in dynamic arrays `[..]T`** replace `List(T)`: `{ptr, len, cap,
   allocator}`, functions in std, converts to `[]T` (a view of the heap, not
   of the frame). Initial values come from `array_of(.[1, 2, 3])` (or
   `array_of(items, allocator)`), a call that visibly allocates; a literal
@@ -42,7 +42,7 @@ deliberately left for later. Newest at the bottom of each list.
   - `Point{ ... }` becomes `Point.{ ... }`; field names keep the dot:
     `.{ .x = 1 }`.
 - **Strings stay Jai's writable view (section 6).** No read-only `string`,
-  and no owned or growable string type: an owned `string` would need
+  and no owned or dynamic string type: an owned `string` would need
   ownership machinery (Rust's moves and destructors, or Swift's reference
   counting) to stop two copies owning one buffer, and Jai and Odin both
   do without one. Text is built in a `Builder`, now a `[..]u8` inside.
@@ -75,7 +75,7 @@ deliberately left for later. Newest at the bottom of each list.
   b and c pass by reference behind your back, which aliases (Zig issue
   #5973) and, for c, makes assignability depend on a generic `T`'s size.
   Recommended: d, which also catches pushing onto a by-value copy of a
-  growable array; needs `let x = x;` shadowing of a parameter, which Sabk
+  dynamic array; needs `let x = x;` shadowing of a parameter, which Sabk
   refuses today.
 - **`null`, `?T` and `or_else` (raised Oct 20, 2026, for a deep
   discussion).** The user's habit from Zig, where optionals are nullable,

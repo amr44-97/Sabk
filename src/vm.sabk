@@ -687,8 +687,8 @@ fn vm_bakeable(vm: *Vm, of_type: *Type) -> (bool, string) {
         return false, "a pointer's address means nothing once the program runs";
     case .Fn:
         return false, "a function can't be carried over yet";
-    case .Growable:
-        return false, "a growable array's elements were allocated while compiling; return a slice or an array instead";
+    case .DynArray:
+        return false, "a dynamic array's elements were allocated while compiling; return a slice or an array instead";
     case .Union:
         return false, "a union doesn't say which of its fields holds the value";
     default:

@@ -326,11 +326,11 @@ fn is_text_type(c: *Checker, t: *Type) -> bool {
     if (t.is_string || t.kind == .UntypedString)
         return true;
     let byte = c.types.u8;
-    return (t.kind == .Slice || t.kind == .Array || t.kind == .Growable || t.kind == .Ptr) && t.elem == byte;
+    return (t.kind == .Slice || t.kind == .Array || t.kind == .DynArray || t.kind == .Ptr) && t.elem == byte;
 }
 
 fn is_aggregate(t: *Type) -> bool {
-    return (t.kind == .Struct && !t.is_tagged) || t.kind == .Union || t.kind == .Array || t.kind == .Growable ||
+    return (t.kind == .Struct && !t.is_tagged) || t.kind == .Union || t.kind == .Array || t.kind == .DynArray ||
            (t.kind == .Slice && !t.is_string);
 }
 

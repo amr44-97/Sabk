@@ -561,8 +561,8 @@ fn c_type(g: *CodeGen, t: *Type) -> string {
         name = format("slice__%", type_ident(g, t.elem));
         print_to(&g.fwd, "typedef struct % %;\n", name, name);
         array_add(&g.to_define, t);
-    case .Growable:
-        name = format("grow__%", type_ident(g, t.elem));
+    case .DynArray:
+        name = format("dyn_array__%", type_ident(g, t.elem));
         print_to(&g.fwd, "typedef struct % %;\n", name, name);
         array_add(&g.to_define, t);
     case .Enum:
@@ -590,7 +590,7 @@ fn c_type(g: *CodeGen, t: *Type) -> string {
 
 fn by_value(g: *CodeGen, member: *Type) {
     switch (member.kind) {
-    case .Struct, .Union, .Array, .Slice, .Growable: define_type(g, member);
+    case .Struct, .Union, .Array, .Slice, .DynArray: define_type(g, member);
     default:
     }
 }
@@ -657,7 +657,7 @@ fn define_type(g: *CodeGen, of_type: *Type) {
                       "n, const char *where) {\n  if (n == 0)\n    return (", name,
                       "){0};\n  return (", name, "){(", elem, " *)rt_new(ctx, ",
                       "a, sizeof(", elem, ") * n, _Alignof(", elem, "), where), n};\n}\n"));
-    case .Growable:
+    case .DynArray:
         // a []T's two fields first, so a view of the elements is those two
         by_value(g, g.c.allocator_type);
         let s = c_type(g, slice_of(ts(g), t.elem));
@@ -1066,7 +1066,7 @@ fn simple_stmt(g: *CodeGen, n: *Node) -> string {
 
 fn zero_value(t: *Type) -> string {
     switch (t.kind) {
-    case .Struct, .Union, .Array, .Slice, .Growable: return "{0}";
+    case .Struct, .Union, .Array, .Slice, .DynArray: return "{0}";
     case .Void: return "{}"; // an empty struct: no element to set
     default: return "0";
     }
@@ -1502,7 +1502,7 @@ fn convert(g: *CodeGen, value: string, from: *Type, to: *Type) -> string {
         print_to(&g.fn_storage, "  % %;\n", c_type(g, from), name);
         return compound(g, to, cat(".value = (", name, " = ", value, ", &", name, "), .info = ", info));
     }
-    if (from.kind == .Growable) // [..]T -> []T, and [..]u8 -> string
+    if (from.kind == .DynArray) // [..]T -> []T, and [..]u8 -> string
         return cat(c_type(g, from), "__view(", value, ")");
     if (to.is_string) // []u8 as text: the same C struct
         return value;
@@ -1747,7 +1747,7 @@ fn expr_inner(g: *CodeGen, n: *Node) -> string {
         return variant_access(g, n, object, checked);
 
     case .Cast{value}:
-        if (value.ty.kind == .Growable && n.ty.kind == .Slice)
+        if (value.ty.kind == .DynArray && n.ty.kind == .Slice)
             return convert(g, expr(g, value), value.ty, n.ty);
         if (value.ty.kind == .Slice || value.ty == n.ty)
             return expr(g, value); // a string literal or a no-op
@@ -1953,9 +1953,9 @@ fn array_literal(g: *CodeGen, n: *Node) -> string {
     return compound(g, n.ty, cat("{", if (items.len == 0) "0" else items, "}"));
 }
 
-// `n`, a slice or growable array, as a slice
+// `n`, a slice or dynamic array, as a slice
 fn sequence(g: *CodeGen, n: *Node) -> string {
-    if (n.ty.kind == .Growable)
+    if (n.ty.kind == .DynArray)
         return convert(g, expr(g, n), n.ty, slice_of(ts(g), n.ty.elem));
     return expr(g, n);
 }
@@ -1983,7 +1983,7 @@ fn index(g: *CodeGen, n: *Node) -> string {
     if (n.kind is .Index{object: o, index: i})
         object, index_node = o, i;
     let t = object.ty;
-    if (t.kind == .Growable) // a view of its elements
+    if (t.kind == .DynArray) // a view of its elements
         t = slice_of(ts(g), t.elem);
     let checked = checks_bounds(g);
     if (!g.static_init && has_call(object) && has_call(index_node) && t.kind != .Array) {
@@ -2029,14 +2029,14 @@ fn slice(g: *CodeGen, n: *Node) -> string {
     let lo = if (lo_node != null) expr(g, lo_node) else "0";
     let where = location(g, n.tok);
     let checked = checks_bounds(g);
-    if ((t.kind == .Slice || t.kind == .Growable) && !checked) {
+    if ((t.kind == .Slice || t.kind == .DynArray) && !checked) {
         // the slice once, for its pointer and maybe its length
         let s = tmp(g, "seq");
         let hi = if (hi_node != null) expr(g, hi_node) else cat(s, ".len");
         return cat("({ ", c_type(g, slice_of(ts(g), n.ty.elem)), " ", s, " = ", sequence(g, object), "; ", name,
                    "__part(", s, ".ptr, ", lo, ", ", hi, "); })");
     }
-    if (t.kind == .Slice || t.kind == .Growable) {
+    if (t.kind == .Slice || t.kind == .DynArray) {
         if (hi_node == null)
             return cat(name, "__from(", sequence(g, object), ", ", lo, ", ", where, ")");
         return cat(name, "__slice(", sequence(g, object), ", ", lo, ", ", expr(g, hi_node), ", ", where, ")");

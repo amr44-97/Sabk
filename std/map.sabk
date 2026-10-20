@@ -24,7 +24,7 @@
 // its first key goes in.
 //
 // Removing a key moves the last entry into its place, so that one entry
-// changes position. As with a growable array, adding can move the entries,
+// changes position. As with a dynamic array, adding can move the entries,
 // so a pointer from map_find is only valid until the next map_put.
 
 #import "std/array";

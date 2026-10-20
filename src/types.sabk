@@ -18,7 +18,7 @@ enum TypeKind {
     Ptr,
     Array,
     Slice,
-    Growable,       // [..]T: {ptr, len, cap, allocator}; its first two fields are a []T
+    DynArray,       // [..]T: {ptr, len, cap, allocator}; its first two fields are a []T
     Fn,
     Struct,
     Union,
@@ -45,7 +45,7 @@ struct Type {
     name: string;           // builtins, structs, unions and enums
     bits: i32;              // Int, Float
     is_signed: bool;        // Int
-    elem: *Type;            // Ptr, Array, Slice, Growable; Enum: its backing integer
+    elem: *Type;            // Ptr, Array, Slice, DynArray; Enum: its backing integer
     len: u64;               // Array
     params: []*Type;        // Fn
     ret: *Type;             // Fn
@@ -97,7 +97,7 @@ struct Types {
 
     ptrs: Map(*Type, *Type);
     slices: Map(*Type, *Type);
-    growables: Map(*Type, *Type);
+    dynamic_arrays: Map(*Type, *Type);
     arrays: Map(ArrayKey, *Type);
     fns: [..]*Type;
     tuples: Map([]*Type, *Type);
@@ -156,13 +156,13 @@ fn slice_of(ts: *Types, elem: *Type) -> *Type {
     return t;
 }
 
-fn growable_of(ts: *Types, elem: *Type) -> *Type {
-    let found = map_get(&ts.growables, elem) or_else null;
+fn dyn_array_of(ts: *Types, elem: *Type) -> *Type {
+    let found = map_get(&ts.dynamic_arrays, elem) or_else null;
     if (found != null)
         return found;
-    let t = make(.Growable);
+    let t = make(.DynArray);
     t.elem = elem;
-    map_put(&ts.growables, elem, t);
+    map_put(&ts.dynamic_arrays, elem, t);
     return t;
 }
 
@@ -216,7 +216,7 @@ fn type_name(t: *Type) -> string {
     switch (t.kind) {
     case .Ptr: return tformat("*%", type_name(t.elem));
     case .Slice: return if (t.is_string) "string" else tformat("[]%", type_name(t.elem));
-    case .Growable: return tformat("[..]%", type_name(t.elem));
+    case .DynArray: return tformat("[..]%", type_name(t.elem));
     case .Array: return tformat("[%]%", t.len, type_name(t.elem));
     case .Fn:
         let s: [..]u8;

@@ -79,7 +79,7 @@ fn equal_code(t: *TypeInfo) -> string {
                 builder_print(&b, " && values_equal(a.%, b.%)", f.name, f.name);
         }
         builder_append(&b, ";");
-    case .Array, .Slice, .Growable:
+    case .Array, .Slice, .DynArray:
         if (t.kind == .Slice && t.elem == type_info(u8)) {
             builder_append(&b, "return (a as string) == (b as string);");
             return builder_string(&b);
@@ -125,7 +125,7 @@ fn hash_code(t: *TypeInfo) -> string {
             builder_print(&b, "h = combine_hashes(h, hash_value(v.%));\n", f.name);
         }
         builder_append(&b, "return h;");
-    case .Array, .Slice, .Growable:
+    case .Array, .Slice, .DynArray:
         if (t.kind == .Slice && t.elem == type_info(u8)) {
             builder_append(&b, "return hash_memory(v.ptr, v.len);");
             return builder_string(&b);

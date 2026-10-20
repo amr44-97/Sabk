@@ -27,7 +27,7 @@ the types.
 | 10 | Writing through a view changes text others hold | compiles | error (section 6) |
 | 11 | An array passed as a slice is shared, not copied | compiles (section 11) | by design |
 | 12 | Growing a sequence while looping over it | warning, `--sanitize` | maybe a check (see Sabk-decisions.md) |
-| 13 | Growing a by-value copy of a growable array | warning, `--sanitize` | error, if parameters become immutable (deferred) |
+| 13 | Growing a by-value copy of a dynamic array | warning, `--sanitize` | error, if parameters become immutable (deferred) |
 | 14 | Indexing past a pointer to one value | `--sanitize` | not planned (Jai and C allow it) |
 
 Since 2026-10-19 the compiler warns about the traps a function's own code
@@ -310,7 +310,7 @@ A loop by pointer (`for (&e in xs)`, deferred) would make this worse:
 writes through `e` would land in the freed block. Avoid it: collect what
 to add in a second array and append after the loop.
 
-### 13. Growing a by-value copy of a growable array
+### 13. Growing a by-value copy of a dynamic array
 
 A `[..]T` passed by value is a copy of its fields. Adding to the copy can
 move the elements and free the block the caller's array still points at.

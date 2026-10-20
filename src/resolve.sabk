@@ -2387,7 +2387,7 @@ fn resolve_type(r: *Resolver, n: *Node) {
 
     case .TypePointer{to}: resolve_type(r, to);
     case .TypeSlice{elem}: resolve_type(r, elem);
-    case .TypeGrowable{elem}: resolve_type(r, elem);
+    case .TypeDynArray{elem}: resolve_type(r, elem);
 
     case .TypeArray{elem, len}:
         resolve_type(r, elem);
