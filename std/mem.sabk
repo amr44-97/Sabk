@@ -48,7 +48,7 @@ fn free(memory: *void, a: Allocator = context.allocator) {
 // Anything else is a compile error; a pointer from alloc or new is freed
 // with free(p).
 fn delete(x: $T, a: Allocator = context.allocator) {
-    #if (T == map.Map)
+    #if (T is map.Map)
         map.map_free(&x);
     else #if (T == str.Builder)
         str.builder_free(&x);

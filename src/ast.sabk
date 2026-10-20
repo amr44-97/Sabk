@@ -163,6 +163,10 @@ enum NodeKind {
     // body, `expansion` the copy's color; tok: the callee's
     MacroExpansion(callee: *Node, stmts: []*Node, result: *Node, expansion: i32),
     TypeCompare(lhs: *Node, rhs: *Node),     // T == U in an #if condition
+    // made by the resolver: `T is []$E`, a type matched against a type
+    // pattern, whose `$` names are bound where it's true
+    TypeIs(subject: *Node, pattern: *Node),
+    KindPattern,                             // `T is enum`: tok is struct, enum, union or fn
     // made by the checker: a tagged enum's value, `Expr.Number(1)`; decl:
     // the variant, payload: its value, or null
     VariantValue(payload: *Node),
@@ -395,6 +399,8 @@ fn old_shape(n: *Node) -> OldShape {
     case .MacroExpansion{callee, stmts, result}:
         s.tag = "MACRO_EXPANSION"; s.declared = result; s.lhs = callee; s.list = stmts;
     case .TypeCompare{lhs, rhs}: s.tag = "TYPE_COMPARE"; s.lhs = lhs; s.rhs = rhs;
+    case .TypeIs{subject, pattern}: s.tag = "TYPE_IS"; s.lhs = subject; s.rhs = pattern;
+    case .KindPattern: s.tag = "KIND_PATTERN";
     case .VariantValue{payload}: s.tag = "VARIANT_VALUE"; s.lhs = payload;
     case .VariantAccess{object}: s.tag = "VARIANT_ACCESS"; s.lhs = object;
 

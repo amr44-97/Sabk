@@ -610,20 +610,30 @@ fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
 
     case .TypeCompare{lhs, rhs}:
         // T == []u8: types are interned, so the same type is the same
-        // pointer. A generic struct without its types matches any of its
-        // instances: `T == Map` is true for every Map(K, V).
-        let ta = any_instance(lhs);
-        let tb = any_instance(rhs);
-        let a: *Type = if (ta != null) null else type_from_node(c, lhs);
-        let b: *Type = if (tb != null) null else type_from_node(c, rhs);
-        if ((a != null && a.kind == .Error) || (b != null && b.kind == .Error))
+        // pointer (any instance of a generic struct is `T is Map`)
+        let a, b = type_from_node(c, lhs), type_from_node(c, rhs);
+        if (a.kind == .Error || b.kind == .Error)
             break;
-        let same = if (ta != null && tb != null) ta == tb
-                   else if (ta != null) of_template(b, ta)
-                   else if (tb != null) of_template(a, tb)
-                   else a == b;
         t = c.types.bool_;
-        n.cval = bool_const(same == (n.tok.kind == .EqualEq));
+        n.cval = bool_const((a == b) == (n.tok.kind == .EqualEq));
+
+    case .TypeIs{subject, pattern}:
+        // T is []$E: decided here, per instance in generic code, which is
+        // when its `$` names get their types (or none, where it's false)
+        let of = type_from_node(c, subject);
+        if (of.kind == .Error)
+            break;
+        let bound: [..]*Node;
+        let matched = matches_type(c, pattern, of, &bound);
+        for (b in bound) {
+            if (!matched) { // a match that failed halfway binds nothing
+                b.ty = null;
+                b.check_state = 0;
+            }
+        }
+        collect_bindings(pattern, n, &c.pattern_bindings); // for a use where it's false
+        t = c.types.bool_;
+        n.cval = bool_const(matched);
 
     case .SizeOf{of, is_type}:
         let size_of: *Type = null;
@@ -931,22 +941,111 @@ fn context_type(c: *Checker, n: *Node, expected: *Type) -> *Type {
 
 /* ------------------------------------------------------------ expressions */
 
-// a side of `T == Map`: a generic struct named without its types, which
-// matches any of its instances
-fn any_instance(side: *Node) -> *Node {
-    let args: []*Node;
-    switch (side.kind) {
-    case .TypeName{args: a}: args = a;
-    case .TypeMember{args: a}: args = a;
-    default: return null;
+// Does type `t` have the shape `p` says? `$E` in it takes the part it
+// meets (added to `bound`); a generic struct without its types is any of
+// its instances; `struct`, `enum`, `union` and `fn` are kinds of type.
+fn matches_type(c: *Checker, p: *Node, t: *Type, bound: *[..]*Node) -> bool {
+    switch (p.kind) {
+    case .KindPattern:
+        return switch (p.tok.text) {
+        case "struct": t.kind == .Struct && !t.is_tagged && !t.is_tuple;
+        case "union": t.kind == .Union;
+        case "enum": t.kind == .Enum || t.is_tagged; // tagged ones too
+        default: t.kind == .Fn;                      // fn: Sabk's or C's
+        };
+    case .TypeParam:
+        let first = if (p.decl != null && p.decl != p) p.decl else p;
+        for (b in bound.*)
+            if (b == first) // `Map($K, $K)`: the same type again
+                return first.ty == t;
+        first.ty = t;
+        first.check_state = 2;
+        array_add(bound, first);
+        return true;
+    case .TypePointer{to}:
+        return t.kind == .Ptr && matches_type(c, to, t.elem, bound);
+    case .TypeSlice{elem}:
+        return t.kind == .Slice && !t.is_string && matches_type(c, elem, t.elem, bound);
+    case .TypeDynArray{elem}:
+        return t.kind == .DynArray && matches_type(c, elem, t.elem, bound);
+    case .TypeArray{elem, len}:
+        let lt = check_expr(c, len, null);
+        if (lt.kind == .Error || len.cval.kind != .Int)
+            return false;
+        return t.kind == .Array && t.len == len.cval.i.lo && matches_type(c, elem, t.elem, bound);
+    case .TypeFn{params, result, c_call, variadic}:
+        if (t.kind != .Fn || t.params.len != params.len || t.is_c_call != c_call || t.is_variadic != variadic)
+            return false;
+        for (i in 0..params.len)
+            if (!matches_type(c, params[i], t.params[i], bound))
+                return false;
+        return if (result == null) t.ret.kind == .Void else matches_type(c, result, t.ret, bound);
+    case .TypeName, .TypeMember:
+        let args = if (p.kind is .TypeName{args: a}) a else if (p.kind is .TypeMember{args: a}) a else .[];
+        if (p.decl != null && is_template(p.decl)) {
+            // Map, Map($K, $V): an instance of it, and its types
+            if (!of_template(t, p.decl))
+                return false;
+            if (args.len == 0)
+                return true;
+            let given = t.decl.instance_args;
+            if (given.len != args.len)
+                return false;
+            for (i in 0..args.len)
+                if (!matches_type(c, args[i], given[i], bound))
+                    return false;
+            return true;
+        }
+    default:
     }
-    if (args.len == 0 && side.decl != null && is_template(side.decl))
-        return side.decl;
-    return null;
+    // no `$` in it: the same type
+    let want = type_from_node(c, p);
+    return want.kind != .Error && want == t;
+}
+
+// does this condition bind type names: a `T is []$E` in it, along `&&`s
+fn binds_types(n: *Node) -> bool {
+    switch (n.kind) {
+    case .TypeIs{pattern}: return has_type_param(pattern);
+    case .Binary{op: .And, lhs, rhs}: return binds_types(lhs) || binds_types(rhs);
+    case .Grouped{inner}: return binds_types(inner);
+    default: return false;
+    }
+}
+
+fn has_type_param(p: *Node) -> bool {
+    if (p == null)
+        return false;
+    if (p.kind.tag == .TypeParam)
+        return true;
+    let s = old_shape(p);
+    for (part in .[s.declared, s.lhs, s.rhs, s.extra])
+        if (has_type_param(part))
+            return true;
+    for (item in s.list)
+        if (has_type_param(item))
+            return true;
+    return false;
+}
+
+// every `$E` in pattern `p`, mapped to its `is`, for the message about a
+// use where the match is false
+fn collect_bindings(p: *Node, test: *Node, out: *Map(*Node, *Node)) {
+    if (p == null)
+        return;
+    if (p.kind.tag == .TypeParam) {
+        map_put(out, if (p.decl != null && p.decl != p) p.decl else p, test);
+        return;
+    }
+    let s = old_shape(p);
+    for (part in .[s.declared, s.lhs, s.rhs, s.extra])
+        collect_bindings(part, test, out);
+    for (item in s.list)
+        collect_bindings(item, test, out);
 }
 
 fn of_template(t: *Type, templ: *Node) -> bool {
-    return (t.kind == .Struct || t.kind == .Union) && t.decl != null && t.decl.generic == templ;
+    return (t.kind == .Struct || t.kind == .Union || t.kind == .Enum) && t.decl != null && t.decl.generic == templ;
 }
 
 // new(T [, allocator]), new([]T, n [, allocator]), new(value [, allocator])
@@ -1155,6 +1254,12 @@ fn check_binary(c: *Checker, n: *Node) -> *Type {
 
     if (op == .And || op == .Or) {
         let l = check_expr(c, lhs, null);
+        // `T is []$E && E is struct`: where the match is false, E has no
+        // type, so the right side (all about E) isn't checked; it's false
+        if (op == .And && lhs.cval.kind == .Bool && lhs.cval.i.lo == 0 && binds_types(lhs)) {
+            n.cval = bool_const(false);
+            return c.types.bool_;
+        }
         // the right side runs only when the left is true (`&&`) or false
         // (`||`): what that says holds there
         let known = c.facts.len;

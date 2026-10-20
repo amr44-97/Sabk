@@ -403,6 +403,12 @@ values      = expr { "," expr } ;
   conditions. The comparison is decided while compiling, so a plain `if`
   on it costs nothing, but both its branches must still compile for the
   types in hand; `#if` is the one that checks only the branch taken.
+  `==` always means the same type: `T == Map` (a generic struct without
+  its types) is an error that suggests `T is Map`.
+- **`is` matches a type's shape**, as it matches a value against a
+  pattern: `T is []$E`, `T is Map($K, $V)`, `T is Map`, `T is enum`. The
+  `$` names are types in the branch where it's true. See
+  [Compile-time `#if`](#compile-time-if).
 - **Functions are values.** A function's name is a value of its function
   type, which can be stored, passed and called; `null` is no function.
   There are no closures: a function sees its parameters and globals, so
@@ -3600,12 +3606,51 @@ fn hash_key(key: $T) -> u64 {
 ```
 
 **The condition** must be a `bool` known at compile time:
-- type comparisons: `T == string`, `T != *u8`, `T == List(i32)`; a
-  generic struct without its types matches any instance: `T == Map` is
-  true for every `Map(K, V)`. They work outside `#if` too (see
-  [Declarations](#declarations))
+- type comparisons: `T == string`, `T != *u8`, `T == List(i32)`: the same
+  type (they work outside `#if` too, see [Declarations](#declarations))
+- a type's shape, `T is ...` (below)
 - constants and `sizeof`: `sizeof(T) == 8`, `DEBUG`
 - any of these combined with `&&`, `||` and `!`
+
+**`is` on types** asks what shape a type has, and names its parts:
+
+```
+fn describe($T: type) -> string {
+    #if (T is []$E)          return tformat("a slice of %", type_info(E).name);
+    else #if (T is *$P)      return tformat("a pointer to %", type_info(P).name);
+    else #if (T is Map($K, $V)) return "a Map";        // any Map, and K and V are its types
+    else #if (T is enum)     return "an enum";
+    else                     return "something else";
+}
+```
+
+- **The patterns** are types with `$` names in them: `[]$E`, `*$P`,
+  `[..]$E`, `[4]$E`, `?$O`, `fn($A) -> $R`, `fn($A) -> $R #c_call`,
+  `Map($K, $V)`, `lib.List($T)`, and parts written out, `Map(string,
+  $V)`. A generic struct without its types is any of its instances,
+  `T is Map`, also inside a pattern (`T is []Map`). `struct`, `enum`,
+  `union` and `fn` are kinds: `enum` is true for tagged enums too, and
+  `fn` for Sabk's and C's function types. A pattern with nothing to bind
+  is the same type, as `==` is (`T is []u8`).
+- **`$E` names the part it meets**, a type in the branch where the match
+  is true: `let first: E;`, `sizeof(E)`, `recursive(P)`. The same name
+  twice must be the same type: `T is Map($K, $K)` is true for a
+  `Map(i64, i64)` only.
+- **Names are for the branch**, and for the rest of an `&&` chain:
+  `#if (T is []$E && E is struct)`. When the left side of `&&` is false
+  there, `E` has no type, so the right side isn't checked: it's false.
+  Elsewhere (after the `if`, in `else`) the name is unknown.
+- **Only a condition binds names**, of an `#if` or a plain `if`: in a
+  constant (`const B = T is []$E;`), after `!is`, or as a value, a `$`
+  name is an error. Without names, `is` goes anywhere a constant `bool`
+  does: `const E = Color is enum;`, `T !is struct`.
+- **A plain `if` checks both branches**, as for `==`, so a name it binds
+  only has a type where the match is true: for a `T` that doesn't match,
+  using it is an error ("`E` comes from `$E` in an `is` that's false
+  here ... `#if` skips the one not taken"). Bindings are for `#if`.
+- **In generic code** the match is decided per instance, as `==` is, and
+  its names are bound per instance. At the top level, `#if` takes `is`
+  without names (`#if (Shape is enum)`).
 
 A condition that's only known at run time is an error: use a plain `if`.
 

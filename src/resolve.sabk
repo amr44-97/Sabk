@@ -65,9 +65,12 @@ struct Resolver {
     value_owner: *Node;          // the labeled block or switch giving a value
     context_ok: bool;
     declaring_type_params: bool; // resolving a function's parameter types
-    // a side of an #if type comparison, which can name a generic struct
-    // without its types: `T == Map` (any Map)
+    // a side of a type comparison: a generic struct without its types
+    // there is `T is Map`'s job, which the error says
     any_instance_ok: *Node;
+    // resolving a type pattern, after `is`: `$E` binds a name there, and a
+    // generic struct without its types is any of its instances
+    in_type_pattern: bool;
     in_template: bool;           // resolving a generic fn or struct
     labeled: [..]*Node;          // the labeled loops and switches around
 
@@ -1488,11 +1491,83 @@ fn resolve_test(r: *Resolver, n: *Node) {
         resolve_test(r, rhs);
     case .Grouped{inner}:
         resolve_test(r, inner);
+    case .Is{value, pattern} if (names_type(r, value)):
+        resolve_type_is(r, n, value, pattern, r.scopes.len - 1);
     case .Is{value, pattern}:
         resolve_expr(r, value);
         resolve_pattern(r, pattern, r.scopes.len - 1);
     default:
         resolve_expr(r, n);
+    }
+}
+
+// `T is []$E`, `T is Map`, `T is enum`: a type matched against a type
+// pattern, a constant `bool`. Its `$` names go in the scope `bindings`, for
+// the branch it guards (-1 where there's none: an `!is`, a value)
+fn resolve_type_is(r: *Resolver, n: *Node, value: *Node, pattern: *Node, bindings: isize) {
+    let subject = expr_to_type(value);
+    let shape = if (pattern.kind.tag == .KindPattern) pattern else pattern_to_type(pattern);
+    if (subject == null || shape == null) {
+        error(r, pattern.tok, tformat("a type is matched against a type pattern, like `% is []$E`, `% is Map` or `% is enum`",
+                                      text_of(value), text_of(value), text_of(value)));
+        return;
+    }
+    n.kind = .TypeIs(subject, shape);
+    resolve_type(r, subject);
+    if (shape.kind.tag == .KindPattern)
+        return;
+    // its names: the first `$K` declares K, and a second `$K` must match
+    // the same type (`Map($K, $K)`)
+    let params: [..]*Node;
+    collect_type_params(shape, &params);
+    let first: Map(string, *Node);
+    for (param in params) {
+        let seen = map_get(&first, param.tok.text) or_else null;
+        if (seen != null) {
+            param.decl = seen;
+            continue;
+        }
+        map_put(&first, param.tok.text, param);
+        if (bindings < 0) {
+            error(r, param.tok, tformat("`$%` binds a name, which only the condition of an `if` or `#if` can do (not an `!is`): it's for the branch where the match is true",
+                                        param.tok.text));
+            continue;
+        }
+        declare(r, &r.scopes[bindings], param.tok.text, param);
+    }
+    r.in_type_pattern = true;
+    resolve_type(r, shape);
+    r.in_type_pattern = false;
+}
+
+// a pattern after `is` read as a type: `Map`, `lib.List`, `Map(i32, i64)`
+// (which parses like a variant's pattern), or one written as a type
+fn pattern_to_type(p: *Node) -> *Node {
+    switch (p.kind) {
+    case .VariantPattern{variant, bindings}:
+        let t = expr_to_type(variant);
+        if (t == null)
+            return null;
+        let args: [..]*Node;
+        for (b in bindings) {
+            let a: *Node = null;
+            switch (b.kind) {
+            case .Binding: a = new_node(b.tok, .TypeName(.[])); // a name: `i32`
+            case .FieldPattern{pattern: inner}: a = pattern_to_type(inner);
+            default: a = pattern_to_type(b);
+            }
+            if (a == null)
+                return null;
+            array_add(&args, a);
+        }
+        switch (t.kind) {
+        case .TypeName{args: &a}: a.* = args;
+        case .TypeMember{args: &a}: a.* = args;
+        default:
+        }
+        return t;
+    default:
+        return expr_to_type(p);
     }
 }
 
@@ -1757,18 +1832,23 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
         // names are resolved in both branches, and the type checker picks
         // one; but a branch that inserts code made by `#run` would run it,
         // so then the condition is decided now (in an instance, its types
-        // are known) and only the branch taken is resolved
-        resolve_expr(r, cond);
+        // are known) and only the branch taken is resolved. Names `is`
+        // binds (`#if (T is []$E)`) are for the first branch.
+        push_scope(r);
+        resolve_test(r, cond);
         if (has_string_insert(then) || has_string_insert(else_)) {
             let value, known = decide_condition(r, cond, false);
             if (known) {
-                let taken = if (!value) else_ else then;
-                if (taken != null)
-                    resolve_body(r, taken);
+                if (value)
+                    resolve_body(r, then);
+                pop_scope(r);
+                if (!value && else_ != null)
+                    resolve_body(r, else_);
                 return;
             }
         }
         resolve_body(r, then);
+        pop_scope(r);
         if (else_ != null)
             resolve_body(r, else_);
 
@@ -2178,12 +2258,17 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
 
     case .EnumShorthand: // .Red: the type checker finds its enum
 
+    case .Is{value, pattern} if (names_type(r, value)): // a constant: `const E = T is enum;`
+        resolve_type_is(r, n, value, pattern, -1);
+
     case .Is{value, pattern}: // only an if's or while's condition can bind names
         resolve_expr(r, value);
         resolve_pattern(r, pattern, -1);
 
     case .Unary{op: .Not, operand} if (is_negated_is(n, operand)):
-        if (operand.kind is .Is{value, pattern}) {
+        if (operand.kind is .Is{value, pattern} && names_type(r, value)) {
+            resolve_type_is(r, operand, value, pattern, -1);
+        } else if (operand.kind is .Is{value, pattern}) {
             resolve_expr(r, value);
             resolve_pattern(r, pattern, NEGATED);
         }
@@ -2356,7 +2441,7 @@ fn resolve_type(r: *Resolver, n: *Node) {
         }
 
     case .TypeParam:
-        if (!r.declaring_type_params)
+        if (!r.declaring_type_params && !r.in_type_pattern)
             error(r, n.tok, tformat("`$%` declares a type parameter, which only a function parameter's type can do; write `%` to use one",
                                     n.tok.text, n.tok.text));
 
@@ -2481,7 +2566,7 @@ fn expr_to_type(e: *Node) -> *Node {
 }
 
 // `T == []u8`, `word != i64`: two types compared, a constant `bool`. A
-// generic struct without its types is any of its instances (`T == Map`).
+// generic struct without its types is an error that suggests `T is Map`.
 fn resolve_type_compare(r: *Resolver, n: *Node, lhs: *Node, rhs: *Node) {
     n.decl = null; // no operator function compares types
     let left, right = expr_to_type(lhs), expr_to_type(rhs);
@@ -2516,8 +2601,13 @@ fn resolve_type_args(r: *Resolver, n: *Node, d: *Node) {
     let name = d.tok.text;
     let generic = is_template(d);
     let expected = type_params_of(d).len;
-    if (generic && args.len == 0 && n == r.any_instance_ok)
-        return; // `T == Map`: is T any Map
+    if (generic && args.len == 0 && r.in_type_pattern)
+        return; // `T is Map`: any Map
+    if (generic && args.len == 0 && n == r.any_instance_ok) {
+        // `==` always means the same type
+        error(r, n.tok, tformat("`%` without its types is any `%`, and `==` means the same type: write `T is %`", name, name, name));
+        return;
+    }
     if (generic && args.len == 0)
         error(r, n.tok, tformat("`%` is generic: give its types, `%(T)`", name, name));
     else if (!generic && args.len > 0)

@@ -1,5 +1,5 @@
 // delete(x) frees what a string, slice, dynamic array, Map or Builder
-// holds; #if (T == Map) asks whether T is any Map
+// holds; #if (T is Map) asks whether T is any Map
 #import "std/io";
 #import "std/mem";
 #import "std/array";
@@ -7,8 +7,8 @@
 #import "std/str";
 
 fn kind($T: type) -> string {
-    #if (T == Map) return "a Map";
-    else #if (T == map.Map) return "never: the same test";
+    #if (T is Map) return "a Map";
+    else #if (T is map.Map) return "never: the same test";
     else #if (T == [..]i64) return "a [..]i64";
     else return "something else";
 }

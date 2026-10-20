@@ -1,0 +1,16 @@
+// `is` on types: what it needs, and where its names live
+#import "std/map";
+
+const ANY_MAP = Map(i32, i32) == Map;         // `==` is the same type: `is` is any Map
+const BOUND = i32 is []$E;                     // names are for a branch
+const NEGATED = i32 !is *$P;
+
+fn f($T: type) {
+    #if (T is []$E) {
+        let inside: E;                          // fine: the branch's
+    }
+    let outside: E;                             // not here
+    #if (T is 4) {}                             // a type against a value
+}
+
+fn main() {}

@@ -1,0 +1,15 @@
+[error]: `Map` without its types is any `Map`, and `==` means the same type: write `T is Map` at [tests/errors/type_is.sabk:4:34]
+     4 | const ANY_MAP = Map(i32, i32) == Map;         // `==` is the same type: `is` is any Map
+       |                                  ^
+[error]: `$E` binds a name, which only the condition of an `if` or `#if` can do (not an `!is`): it's for the branch where the match is true at [tests/errors/type_is.sabk:5:25]
+     5 | const BOUND = i32 is []$E;                     // names are for a branch
+       |                         ^
+[error]: `$P` binds a name, which only the condition of an `if` or `#if` can do (not an `!is`): it's for the branch where the match is true at [tests/errors/type_is.sabk:6:27]
+     6 | const NEGATED = i32 !is *$P;
+       |                           ^
+[error]: unknown type `E` at [tests/errors/type_is.sabk:12:18]
+    12 |     let outside: E;                             // not here
+       |                  ^
+[error]: a type is matched against a type pattern, like `T is []$E`, `T is Map` or `T is enum` at [tests/errors/type_is.sabk:13:15]
+    13 |     #if (T is 4) {}                             // a type against a value
+       |               ^

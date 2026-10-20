@@ -1326,6 +1326,58 @@ fn case_stmts(p: *Parser) -> [..]*Node {
 // A pattern, in a case or after `is`: a value; a range, a..b or a..=b; or
 // a variant, with what it holds: .V, .V(x), .V(&x), .V{a, &b, field: c}
 // (also written Type.V). Its value takes operators of `min_prec` and up.
+// after `is`: a value's pattern (`.Number(n)`, `IoError(e)`) or a type's
+// (`[]$E`, `*$P`, `Map($K, $V)`, `enum`), told apart by how it starts; a
+// name alone (`T is Map`) is either, and the resolver decides
+fn is_pattern(p: *Parser) -> *Node {
+    let t = peek(p);
+    switch (t.kind) {
+    case .Struct, .Enum, .Union:
+        next(p);
+        return new_node(t, .KindPattern);
+    case .Fn:
+        if (!at(p, .LParen, 1)) { // `T is fn`: any function type
+            next(p);
+            return new_node(t, .KindPattern);
+        }
+        return new_node(t, .TypeExpr(type_(p)));
+    case .LBracket, .Dollar, .Question, .Star:
+        return new_node(t, .TypeExpr(type_(p)));
+    case .Identifier:
+        if (type_param_ahead(p))
+            return new_node(t, .TypeExpr(type_(p)));
+    default:
+    }
+    return pattern(p, CMP_PREC + 1);
+}
+
+// `Map($K, $V)`, `lib.List($T)`: a name, then parentheses holding a `$`
+fn type_param_ahead(p: *Parser) -> bool {
+    let k: isize = 1;
+    while (at(p, .Period, k) && at(p, .Identifier, k + 1))
+        k += 2;
+    if (!at(p, .LParen, k))
+        return false;
+    let depth = 0;
+    let i = k;
+    while (true) {
+        let kind = peek(p, i).kind;
+        if (kind == .Eof)
+            return false;
+        if (kind == .Dollar)
+            return true;
+        if (kind == .LParen)
+            depth++;
+        if (kind == .RParen) {
+            depth--;
+            if (depth == 0)
+                return false;
+        }
+        i++;
+    }
+    return false;
+}
+
 fn pattern(p: *Parser, min_prec: isize) -> *Node {
     let saved = p.in_pattern;
     p.in_pattern = true;
@@ -1493,7 +1545,7 @@ fn binary(p: *Parser, min_prec: isize) -> *Node {
         let op = next(p);
         let n: *Node;
         if (negated) {
-            let test = new_node(op, .Is(lhs, pattern(p, CMP_PREC + 1)));
+            let test = new_node(op, .Is(lhs, is_pattern(p)));
             end_here(p, test, begin);
             n = new_node(bang, .Unary(.Not, test));
         } else if (op.kind == .OrElse) {
@@ -1503,7 +1555,7 @@ fn binary(p: *Parser, min_prec: isize) -> *Node {
             // e is .Number(n): the right side is a pattern, which binds
             // tighter than comparisons, so `e is .V(x) && x > 0` ends it
             // before the `&&`
-            n = new_node(op, .Is(lhs, pattern(p, CMP_PREC + 1)));
+            n = new_node(op, .Is(lhs, is_pattern(p)));
         } else {
             // +1 makes operators left-associative
             n = new_node(op, .Binary(binary_op(op.kind), lhs, binary(p, prec + 1)));

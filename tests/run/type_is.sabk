@@ -1,0 +1,79 @@
+// `is` on types: a type's shape, with `$` names bound in the branch where
+// it matches
+#import "std/io";
+#import "std/fmt";
+#import "std/map";
+
+struct Point { x: i32; y: i32; }
+union Bits { f: f32; u: u32; }
+enum Color { Red, Green }
+enum Shape { Dot, Circle(f64) }
+const Compare = fn(*void, *void) -> int #c_call;
+
+fn describe($T: type) -> string {
+    #if (T is []$E && E is struct) {
+        let first: E;                                    // E is a type here
+        return tformat("a slice of structs, %, % bytes each", type_info(E).name, sizeof(E));
+    } else #if (T is []$E) {
+        return tformat("a slice of %", type_info(E).name);
+    } else #if (T is *[]$E) {
+        return tformat("a pointer to a slice of %", type_info(E).name);
+    } else #if (T is *$P) {
+        return tformat("a pointer to %", type_info(P).name);
+    } else #if (T is Map($K, $K)) {
+        return tformat("a Map from % to itself", type_info(K).name);
+    } else #if (T is Map($K, $V)) {
+        return tformat("a Map from % to %", type_info(K).name, type_info(V).name);
+    } else #if (T is [..]$E) {
+        return tformat("a dynamic array of %", type_info(E).name);
+    } else #if (T is [4]$E) {
+        return tformat("four %", type_info(E).name);
+    } else #if (T is fn($A) -> $R) {
+        return tformat("a Sabk function from % to %", type_info(A).name, type_info(R).name);
+    } else #if (T is fn($A, $B) -> $R #c_call) {
+        return tformat("a C function of % and %", type_info(A).name, type_info(B).name);
+    } else #if (T is ?$O) {
+        return tformat("an option of %", type_info(O).name);
+    } else #if (T is enum) {
+        return "an enum";
+    } else #if (T is struct) {
+        return "a struct";
+    } else #if (T is union) {
+        return "a union";
+    } else #if (T is fn) {
+        return "some other function";
+    } else {
+        return "something else";
+    }
+}
+
+// in a plain `if` too: a constant condition (both branches are checked,
+// so a binding is for `#if`)
+fn kind_of($T: type) -> string {
+    if T is enum then return "enum";
+    if T !is struct then return "not a struct";
+    return "struct";
+}
+
+// at the top level, without bindings
+#if (Shape is enum) { const SHAPE_KIND = "Shape is an enum"; } else { const SHAPE_KIND = "?"; }
+const IS_MAP = Map(string, i64) is Map;
+const SLICE_OF_MAPS = []Map(i64, i64) is []Map;   // any instance, inside a pattern
+
+fn main() {
+    println("%", describe([]Point));
+    println("%", describe([]u8));
+    println("%", describe(*[]f64));
+    println("%", describe(*Point));
+    println("%", describe(Map(i64, i64)));
+    println("%", describe(Map(string, bool)));
+    println("%", describe([..]f64));
+    println("%", describe([4]bool));
+    println("%", describe(fn(i32) -> string));
+    println("%", describe(Compare));
+    println("%", describe(?i64));
+    println("% / % / % / %", describe(Color), describe(Shape), describe(Point), describe(Bits));
+    println("% / %", describe(fn()), describe(i64));
+    println("% % %", kind_of(Color), kind_of(i64), kind_of(Point));
+    println("% % %", SHAPE_KIND, IS_MAP, SLICE_OF_MAPS);
+}

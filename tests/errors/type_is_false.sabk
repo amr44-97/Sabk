@@ -1,0 +1,13 @@
+// A plain `if` checks both branches, so a name `is` binds has no type where
+// the match is false; `#if` skips the branch
+fn first_size($T: type) -> isize {
+    if (T is []$E) {
+        return sizeof(E);
+    }
+    return 0;
+}
+
+fn main() {
+    let a = first_size([]u8);       // fine: it matches
+    let b = first_size(i64);        // E has no type here
+}

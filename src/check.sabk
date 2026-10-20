@@ -81,6 +81,9 @@ struct Checker {
     error_ids: Map(*Type, u32);
     type_infos: [..]*Type;      // the types type_info(T) or Any needs
     expanding: [..]*Node;       // macro expansions being checked
+    // each `$E` of a `T is []$E`, to its `is`: a use where it's false
+    // (unbound) says so
+    pattern_bindings: Map(*Node, *Node);
 
     // generics: one instance per (template, types)
     instances_by_key: Map(InstanceKey, *Node);
@@ -905,6 +908,17 @@ fn type_from_node(c: *Checker, n: *Node) -> *Type {
         let args = if (n.kind is .TypeName{args: a}) a else if (n.kind is .TypeMember{args: a}) a else .[];
         if (n.decl == null || untaken(c, n, n.decl)) // the resolver reported a missing one
             break;
+        // `E` from `T is []$E`, used where that's false (a plain `if`
+        // checks both branches)
+        let test = map_get(&c.pattern_bindings, n.decl) or_else null;
+        if (test != null && n.decl.check_state != 2) {
+            let subject: *Node = null;
+            if (test.kind is .TypeIs{subject: s})
+                subject = s;
+            error(c, n.tok, tformat("`%` comes from `$%` in an `is` that's false here, for % = %: a plain `if` checks both branches; `#if` skips the one not taken",
+                                    n.tok.text, n.tok.text, text_of(subject), type_name(type_from_node(c, subject))));
+            break;
+        }
         if (args.len == 0) {
             t = decl_type(c, n.decl);
             break;

@@ -30,7 +30,7 @@ switch to them at the bootstrap.
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 - [x] **C interop:** `#library`, `#system_library`, `#foreign`, `#c_call` and C function types; `extern` goes (section 8); `std/c` exports libc and libm
 - [x] **C types** in the prelude: `int`, `long`, `char`, `size_t`, ... (section 8)
-- [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8). Built: everything but `is` and `#distinct`
+- [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8). Built: everything but `#distinct`
 - [x] **Layout:** `#packed` and `#align(n)` on structs (section 8)
 
 ## 1. Formatting
@@ -1295,6 +1295,22 @@ Decided with the user: `#align` acts on the whole struct only (documented so), a
 6. **GCC prints a note** when a struct aligned to 64 is passed by value ("the ABI ... has changed in GCC 4.6"), which `-w` doesn't silence; `-Wno-psabi` does, for GCC and clang.
 7. **The C has a `_Static_assert`** of each such struct's size and alignment, as the C types got in step 2, so a C compiler that lays it out differently stops the build.
 8. **Linux's epoll** checks the layout against a real ABI: the kernel hands back the `u64` in a packed `EpollEvent` intact (on x86-64, where glibc packs it).
+
+### Built, step 6 (Oct 21, 2026): `is` on types
+
+Decided with the user before building: `T == Map` (any instance) is an error that suggests `T is Map`; `is` on types works in a plain `if` as in `#if`.
+
+#### Edge cases met building it (to review)
+
+1. **Telling a type pattern from a value's:** after `is`, a pattern that starts with `[`, `*`, `$`, `?`, `fn`, `struct`, `enum` or `union`, or a name with parentheses holding a `$` (`Map($K, $V)`), is read as a type. `T is Map` and `T is Map(i32, i64)` parse like a value's patterns (`IoError(e)`), and the resolver reads them as types when the left side names a type.
+2. **Kinds:** `enum` is true for tagged enums too (Sabk's enums hold values), `struct` isn't (a tagged enum is a struct inside the compiler), and `fn` is any function type, Sabk's or C's. A pattern with no `$` is the same type, as `==` is.
+3. **A repeated name must match the same type:** `Map($K, $K)`. A match that fails halfway (`K` bound, then `V` not) binds nothing.
+4. **Names are for the branch and the rest of an `&&` chain;** when the left of `&&` is a false match that binds names, the right side isn't checked (its names have no type) and is false. This is the one place a constant `false` skips checking.
+5. **Only a condition binds names**: a constant, an `!is` or a value with a `$` name is an error that says so. At the top level, `#if` takes `is` without names; with them, it's that same error, since top-level declarations can't depend on per-instance names.
+6. **A plain `if` checks both branches** (step 1's rule), so a name it binds is unbound where the match is false, and using it says why and points to `#if`. Bindings are really for `#if`; the plain `if` takes `is` for constants and kinds.
+7. **Bindings are per instance** the way `$T` is: each generic instance's copy of the pattern holds its own types, so `recursive(P)` works through any depth of pointers, and in `#run`.
+8. **`T == Map` moved in two rounds**, since std/mem used it (`#if (T == map.Map)` in `delete`): round 1 added `is` with `==` still matching any instance, and the seed learned `is`; round 2 moved std and the test to `is` and made `==` the error.
+9. **An unknown binding outside its branch** is "unknown type `E`", without saying it's a branch's name; a hint could come later if it bites.
 
 ## 9. How it lands
 

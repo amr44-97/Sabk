@@ -1,0 +1,6 @@
+[error]: `E` comes from `$E` in an `is` that's false here, for T = i64: a plain `if` checks both branches; `#if` skips the one not taken at [tests/errors/type_is_false.sabk:5:23]
+     5 |         return sizeof(E);
+       |                       ^
+[note]: in `first_size` with T = i64, used here at [tests/errors/type_is_false.sabk:12:13]
+    12 |     let b = first_size(i64);        // E has no type here
+       |             ^

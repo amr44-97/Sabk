@@ -1,0 +1,16 @@
+a slice of structs, Point, 8 bytes each
+a slice of u8
+a pointer to a slice of f64
+a pointer to Point
+a Map from i64 to itself
+a Map from string to bool
+a dynamic array of f64
+four bool
+a Sabk function from i32 to string
+a C function of *void and *void
+an option of i64
+an enum / an enum / a struct / a union
+some other function / something else
+enum not a struct struct
+Shape is an enum true true
+[exit 0]
