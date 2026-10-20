@@ -133,15 +133,18 @@ top_decl    = import_decl
             | [ "pub" ] decl
             | "#insert" expr ";"          // declarations made by code
             | "#run" expr ";" ;           // a build step
-import_decl = "import" STRING [ "as" IDENT ] ";" ;
+import_decl = "#import" STRING [ "as" IDENT ] ";" ;
 ```
 
 - Each file is a module. Imports work like Jai's:
 
   | Import | What you get |
   |---|---|
-  | `import "std/io";` | the module's `pub` names directly, `println("hi")`, and also the qualified form, `io.println("hi")` |
-  | `import "std/io" as out;` | only the qualified form, `out.println("hi")` |
+  | `#import "std/io";` | the module's `pub` names directly, `println("hi")`, and also the qualified form, `io.println("hi")` |
+  | `#import "std/io" as out;` | only the qualified form, `out.println("hi")` |
+
+  `import "std/io";`, without the `#`, is the spelling from before, still
+  accepted while code moves over.
 
   - The qualified name is the last path segment. If that isn't a valid
     identifier (`my-lib`), a plain import gives only the bare names.
@@ -153,7 +156,7 @@ import_decl = "import" STRING [ "as" IDENT ] ";" ;
   - **Imports don't pass through:** importing `std/str` doesn't give you the
     names `str` itself imports.
 - Source files end in `.sabk`, and the extension is optional in imports:
-  `import "util";` loads `util.sabk`.
+  `#import "util";` loads `util.sabk`.
 - `std/...` paths resolve to the standard library directory (`std` next to
   the compiler, or `--std <dir>`). Every other path is relative to the
   importing file.

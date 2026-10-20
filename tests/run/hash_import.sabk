@@ -1,0 +1,6 @@
+// #import, with and without `as`
+#import "std/io";
+#import "std/str" as text;
+fn main() {
+    println("% %", text.trim("  hi  "), text.starts_with("abc", "ab"));
+}

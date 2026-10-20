@@ -189,7 +189,7 @@ fn top_block(p: *Parser) -> *Node {
 }
 
 fn top_decl(p: *Parser) -> *Node {
-    if (at(p, .Import))
+    if (at(p, .Import) || at_directive(p, "import"))
         return import_decl(p);
     if (at_directive(p, "if"))
         return top_static_if(p);
@@ -258,9 +258,14 @@ fn top_decl(p: *Parser) -> *Node {
     return decl;
 }
 
+// `#import "std/io";`, `#import "std/io" as io;` (and `import`, the
+// spelling from before, while code moves over)
 fn import_decl(p: *Parser) -> *Node {
+    let what = if (at(p, .Hash)) "#import" else "import";
+    if (at(p, .Hash))
+        next(p); // #
     next(p); // import
-    let path = expect(p, .String, "a module path after `import`");
+    let path = expect(p, .String, tformat("a module path after `%`", what));
     let alias: *Node = null;
     if (eat(p, .As))
         alias = new_node(expect(p, .Identifier, "a module name after `as`"), .Identifier);
