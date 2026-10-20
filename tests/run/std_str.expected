@@ -25,7 +25,7 @@ uint "18446744073709551616": 0 OutOfRange
 warning: "-1" isn't an unsigned integer
 uint "-1": 0 Invalid
 float "1.5": 1.5 None
-float "-2e3": -2e+03 None
+float "-2e3": -2000 None
 float "inf": inf None
 warning: "1e999" is out of range for a number
 float "1e999": 0 OutOfRange

@@ -534,6 +534,12 @@ fn put_float(b: *Builder, f: f64, single: bool, spec: *FormatSpec) {
         let same = back == f;
         if (single)
             same = back as f32 == f as f32;
+        // 20 reads back from "2e+01", but a number of an ordinary size is
+        // written out: more digits until there's no exponent (it still
+        // reads back)
+        let ordinary = (f >= 1 && f < 1e16) || (f <= -1 && f > -1e16);
+        if (same && ordinary && index_of_char(text[..len] as string, 'e') >= 0 && precision < 17)
+            continue;
         if (same || precision == 17) {
             builder_append(b, text[..len] as string);
             return;
