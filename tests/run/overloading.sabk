@@ -1,0 +1,51 @@
+// several functions of one name: a call picks the one its arguments fit
+#import "std/io";
+#import "std/fmt";
+
+struct Circle { r: f64; }
+struct Rect { w: f64; h: f64; }
+enum Color { Red, Green }
+
+fn area(c: Circle) -> f64 { return 3.0 * c.r * c.r; }
+fn area(r: Rect) -> f64 { return r.w * r.h; }
+fn area(shapes: []Circle) -> f64 {
+    let total = 0.0;
+    for (s in shapes) total += area(s);
+    return total;
+}
+
+fn show(x: i64) -> string { return "i64"; }
+fn show(x: f64) -> string { return "f64"; }
+fn show(s: string) -> string { return "string"; }
+fn show(c: Color) -> string { return "Color"; }
+fn show(x: i32) -> string { return "i32"; }
+
+fn size(x: isize) -> string { return "isize"; }
+fn size(x: i64) -> string { return "i64"; }
+
+fn wide(x: i32) -> string { return "i32"; }
+fn wide(x: i64) -> string { return "i64"; }
+fn wide(x: f64) -> string { return "f64"; }
+
+fn total(xs: ..i64) -> i64 {
+    let t: i64 = 0;
+    for (x in xs) t += x;
+    return t;
+}
+fn total(label: string, xs: ..i64) -> string { return tformat("% %", label, total(..xs)); }
+
+const AT_COMPILE_TIME = #run show("x");   // #run picks the same way
+
+fn main() {
+    println("% %", area(Circle.{ .r = 1 }), area(Rect.{ .w = 2, .h = 3 }));
+    let cs = Circle.[.{ .r = 1 }, .{ .r = 2 }];
+    println("%", area(cs[..]));
+    let small: i32 = 3;
+    println("% % % % % %", show(5 as i64), show(1.5), show("hi"), show(.Red), show(small), show(small as i64));
+    println("% %", size(5), size(5 as i64));
+    println("% %", wide(5), wide(2.5));          // a constant: isize, then i64
+    println("% %", total(1, 2, 3), total("sum:", 4, 5));
+    let f: fn(Rect) -> f64 = area;           // a function value: its type picks
+    println("%", f(Rect.{ .w = 4, .h = 5 }));
+    println("%", AT_COMPILE_TIME);
+}

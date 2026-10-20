@@ -1,0 +1,3 @@
+[error]: `puts` is an `extern` function, and C has one function per name: it can't share its name at [tests/errors/overload_extern.sabk:2:11]
+     2 | extern fn puts(s: *u8) -> i32;
+       |           ^

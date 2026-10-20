@@ -1,0 +1,5 @@
+// C has one function per name
+extern fn puts(s: *u8) -> i32;
+fn puts(s: string) -> i32 { return 0; }
+
+fn main() {}

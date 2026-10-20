@@ -36,6 +36,7 @@
 #import "patterns";
 #import "expressions";
 #import "generics";
+#import "overloads";
 #import "comptime";
 #import "formats";
 #import "memory";
@@ -417,6 +418,7 @@ fn prepare(c: *Checker) {
 // false if any errors were reported
 fn check_program(c: *Checker) -> bool {
     prepare(c);
+    check_overload_sets(c); // before any call picks among them
     for (d in root_list(c.res.prelude))
         check_top(c, d);
     for (m in c.res.modules) {

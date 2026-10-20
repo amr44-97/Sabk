@@ -66,6 +66,9 @@ enum NodeKind {
     // after it, up to the next one; tok: the directive
     ScopeRegion(visibility: Visibility),
     Load,                                    // #load "file"; tok: the path, a string token
+    // several functions of one name, in a scope (never in a tree): a call
+    // picks one by its arguments; tok: the first's name
+    Overloads(fns: []*Node),
     Fn(params: []*Node, result: *Node, body: *Node,
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
        nodiscard: bool, no_bounds_check: bool,
@@ -207,6 +210,7 @@ fn old_shape(n: *Node) -> OldShape {
     case .Import{alias}: s.tag = "IMPORT"; s.rhs = alias;
     case .ScopeRegion: s.tag = "SCOPE_REGION";
     case .Load: s.tag = "LOAD";
+    case .Overloads{fns}: s.tag = "OVERLOADS"; s.list = fns;
     case .Fn(f):
         s.tag = if (f.is_macro) "MACRO_DECL" else "FUN_DECL";
         s.generic = f.type_params.len > 0 && n.generic == null;

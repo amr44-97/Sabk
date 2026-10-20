@@ -19,6 +19,7 @@
 #import "comptime";
 #import "formats";
 #import "narrowing";
+#import "overloads";
 
 /* ------------------------------------------------------------ conversions */
 
@@ -464,7 +465,7 @@ fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
 
     case .Identifier:
         if (n.decl != null)
-            t = value_of_decl(c, n, n.decl);
+            t = value_of_decl(c, n, n.decl, expected);
 
     case .Grouped{inner}:
         t = check_expr(c, inner, expected);
@@ -584,10 +585,16 @@ fn is_option(c: *Checker, t: *Type) -> bool {
 // what a ?T holds when it's Some: T
 fn option_value(t: *Type) -> *Type { return t.decl.instance_args[0]; }
 
-fn value_of_decl(c: *Checker, n: *Node, d: *Node) -> *Type {
+fn value_of_decl(c: *Checker, n: *Node, d: *Node, expected: *Type = null) -> *Type {
     if (untaken(c, n, d))
         return c.types.error;
     switch (d.kind) {
+    case .Overloads{fns}: // a function value: the expected type picks one
+        let f = overload_value(c, n, fns, expected);
+        if (f == null)
+            return c.types.error;
+        n.decl = f;
+        return value_of_decl(c, n, f, expected);
     case .Fn{is_extern, is_macro}:
         if (is_macro)
             return c.types.error;
@@ -1348,6 +1355,17 @@ fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
         return variant_value(c, n, expected, if (starts_with(name, ".")) name[1..] else name, n);
     }
 
+    // several functions of this name: the arguments pick one, already
+    // checked for it
+    let picked = false;
+    if (callee.decl != null && callee.decl.kind is .Overloads{fns}) {
+        let chosen = pick_overload(c, n, callee, fns);
+        if (chosen == null)
+            return c.types.error;
+        callee.decl = chosen;
+        picked = true;
+    }
+
     // a declared function, whose defaults (and type parameters) are known
     let fun: *Node = if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl else null;
     if (fun != null)
@@ -1392,7 +1410,8 @@ fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
             let want = c.types.error;
             if (t.kind == .Fn)
                 want = if (i < t.params.len) t.params[i] else null;
-            check_expr(c, args[i], want);
+            if (!picked || args[i].ty == null) // checked to pick the function
+                check_expr(c, args[i], want);
         }
         if (t.kind == .Error)
             return t;

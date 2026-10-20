@@ -816,6 +816,43 @@ Decided, as in Jai:
   imports' (above).
 - **A concrete candidate beats a generic one** silently, by rank 4.
 
+### Built, step 1 (Oct 20, 2026): within a module
+
+Overloads in one module (and the files it `#load`s); across plain imports,
+generic candidates and operators come next.
+
+#### Edge cases met building it (to review)
+
+1. **A set lives in a scope, never in a tree**: the resolver keeps
+   functions of one name in an `Overloads` node, and the checker puts the
+   one a call picks on the callee, so everything after (codegen, the VM)
+   sees an ordinary function.
+2. **The arguments are checked once, to rank the candidates**, and not
+   again when the call is checked; `.{...}`, `.Red` and `.[...]` wait,
+   and fit by shape: `.{...}` any struct or union, `.Red` a type with
+   that variant, `.[...]` an array, slice or `[..]T`.
+3. **An integer constant prefers `isize`, then `i64`**, then the other
+   types it fits (ranks 2, 3, 4), so `f(5)` with `f(i32)`, `f(i64)` and
+   `f(f64)` picks the `i64` one rather than being ambiguous.
+4. **Visibility is by the call's own place**: its file's module sees its
+   own candidates and others' exported ones (a generic instance's or a
+   `#load`-ed file's code included).
+5. **`..xs` only goes whole to a `..T` parameter, the last**; other extra
+   arguments each go as a `T`.
+6. **Two candidates with the same parameters are an error at the
+   second**, checked before any call picks; one that differs only in its
+   result says so.
+7. **`extern` functions can't share a name** (C has one per name), and an
+   `#expand` function can't either.
+8. **A memory trap the compiler didn't catch**: the first version built
+   the set as `.Overloads(.[prev, n])`, keeping a slice of a temporary
+   array literal in a heap node; the names went missing and the compiler
+   crashed. The escape check doesn't follow a value through a variant
+   constructor into `new_node`. Worth a look for the trap warnings.
+9. **Found on the way**: `println("%", 20.0)` printed `2e+01` (the
+   shortest form that reads back); numbers of an ordinary size are now
+   written out (fixed separately, 3fa281a).
+
 ### Operators
 
 ```

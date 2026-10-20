@@ -23,7 +23,7 @@ its own, and all name resolution happens after parsing.
   [traps](#memory-traps) the compiler doesn't catch
 - [Printing and type information](#printing-and-type-information)
 - [Compiling and running](#compiling-and-running)
-- [Generics](#generics), [Compile-time `#if`](#compile-time-if),
+- [Overloading](#overloading), [Generics](#generics), [Compile-time `#if`](#compile-time-if),
   [Compile-time execution](#compile-time-execution),
   [Compile-time reflection](#compile-time-reflection), [Macros](#macros)
 - [Standard library](#standard-library), [Lexical notes](#lexical-notes)
@@ -3038,6 +3038,56 @@ first parameter. `extern` functions use the plain C calling convention:
 **C interop details:**
 - Struct layout matches C, so structs can be passed to C as they are.
 - `f32` arguments to C variadic functions are passed as `f64`, as C requires.
+
+## Overloading
+
+Several functions can share a name when their parameters differ, as in
+Jai. A call picks the one its arguments fit best:
+
+```
+fn area(c: Circle) -> f64 { ... }
+fn area(r: Rect) -> f64 { ... }
+fn area(shapes: []Circle) -> f64 { ... }
+
+area(c);                          // the Circle one
+area(Rect.{ .w = 2, .h = 3 });    // the Rect one
+area(.{ .r = 1 });                // error: `.{ ... }` fits both Circle and Rect
+let f: fn(Rect) -> f64 = area;    // a function value: its type picks
+```
+
+**How a call picks.** Each argument is ranked against each candidate's
+parameter, best first:
+
+1. the same type;
+2. a constant or literal at its default type: `5` for an `isize`, `1.5`
+   for an `f64`, `"x"` for a `string`, `.Red`, `.{...}` or `.[...]` for a
+   type that has that shape;
+3. an integer constant for an `i64`;
+4. a constant for another type it fits (`5` for an `i32` or an `f64`);
+5. an implicit conversion (`i32` to `i64`, `[N]T` to `[]T`, a value to
+   `?T`, to `Any`).
+
+The pick is better or equal on every argument than each other candidate,
+and better on at least one. So `f(5)` picks `f(x: isize)`, then
+`f(x: i64)`, over `f(x: i32)` and `f(x: f64)`. When none fits, the error
+says why each doesn't; when several fit equally, it lists them:
+
+```
+pick(a, b);   // a, b: i32, with pick(i32, i64) and pick(i64, i32)
+[error]: `pick` is ambiguous here: 2 of them fit these arguments, (i32, i32), equally well; convert an argument with `as` to pick one
+```
+
+- **Not by the result type.** Two functions that differ only in what
+  they return are an error at the second, and so are two with the same
+  parameters.
+- **A function value** needs a type to pick one: `let f = area;` is an
+  error that lists them.
+- **Not for `extern` functions**, since C has one function per name, and
+  not for `#expand` functions.
+- A variadic candidate (`..T`) takes each extra argument as a `T`, or a
+  `..xs` slice whole.
+- In C, each one's name gets its parameters' types: `area__Circle`,
+  `area__Rect`.
 
 ## Generics
 

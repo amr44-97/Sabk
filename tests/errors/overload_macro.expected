@@ -1,0 +1,6 @@
+[error]: `log_it` is already declared in this module: an `#expand` function can't share its name (functions can, with different parameters) at [tests/errors/overload_macro.sabk:3:4]
+     3 | fn log_it(x: string) #expand {}
+       |    ^
+[note]: the first declaration is here at [tests/errors/overload_macro.sabk:2:4]
+     2 | fn log_it(x: i64) {}
+       |    ^

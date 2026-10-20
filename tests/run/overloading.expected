@@ -1,0 +1,9 @@
+3 6
+15
+i64 f64 string Color i32 i64
+isize i64
+i64 f64
+6 sum: 9
+20
+string
+[exit 0]

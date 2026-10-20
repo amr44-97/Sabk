@@ -1,0 +1,370 @@
+// Function overloading, Jai's way: several functions can share a name when
+// their parameters differ, and a call picks the one its arguments fit best.
+//
+//   fn area(c: Circle) -> f64 { ... }
+//   fn area(r: Rect) -> f64 { ... }
+//   area(c);                       the Circle one
+//
+// Each argument is ranked against its parameter:
+//   1  the same type
+//   2  a constant or literal that takes the parameter's type, at its
+//      default type (`5` for an isize, `1.5` for an f64, "x" for a string,
+//      `.Red` for an enum that has it)
+//   3  an integer constant for an i64
+//   4  a constant for another type it fits (`5` for an i32 or an f64)
+//   5  a conversion (`i32` to `i64`, `[N]T` to `[]T`, to `?T`, to `Any`)
+// The pick is better or equal on every argument and better on one. None
+// fitting, or several fitting equally, is an error listing them.
+//
+// The resolver keeps the functions of one name in an `Overloads` node; the
+// call's callee gets the one picked. A function used as a value picks the
+// one whose type is expected: `let f: fn(Circle) -> f64 = area;`.
+
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/str";
+#import "ast";
+#import "module";
+#import "resolve";
+#import "token";
+#import "types";
+#import "check";
+#import "expressions";
+#import "generics";
+
+// the function of `fns` a call to them picks, or null (reported)
+fn pick_overload(c: *Checker, n: *Node, callee: *Node, fns: []*Node) -> *Node {
+    let args = call_args_of(n);
+    // the arguments' own types, which rank the candidates; `.{...}`, `.Red`
+    // and `.[...]` wait for the parameter's type
+    let broken = false;
+    for (a in args) {
+        if (is_contextual(a) || is_open_literal(a))
+            continue;
+        let e = if (a.kind is .Spread{value}) value else a; // ..xs: the slice
+        if (check_expr(c, e, null).kind == .Error)
+            broken = true;
+    }
+    if (broken)
+        return null; // reported: ranking would only add noise
+
+    let candidates = visible_candidates(c, n.tok, fns);
+    let fitting: [..]*Node;
+    let ranks: [..][]i32;
+    for (f in candidates) {
+        let r, fits = rank_call(c, f, args);
+        if (fits) {
+            array_add(&fitting, f);
+            array_add(&ranks, r);
+        }
+    }
+    let name = callee.tok.text;
+    if (fitting.len == 0) {
+        error(c, callee.tok, tformat("no `%` takes these arguments: (%)", name, arg_types(c, args)));
+        for (f in candidates)
+            note(c, f.tok, tformat("`%`: %", describe_fn(c, f), why_not(c, f, args)));
+        return null;
+    }
+    // the one better or equal on every argument than each other one, and
+    // better on at least one
+    for (i in 0..fitting.len) {
+        let best = true;
+        for (j in 0..fitting.len)
+            if (j != i && !better(ranks[i], ranks[j]))
+                best = false;
+        if (best)
+            return fitting[i];
+    }
+    error(c, callee.tok, tformat("`%` is ambiguous here: % of them fit these arguments, (%), equally well%",
+                                 name, fitting.len, arg_types(c, args), ambiguity_hint(args)));
+    for (f in fitting)
+        note(c, f.tok, tformat("`%` fits", describe_fn(c, f)));
+    return null;
+}
+
+// a function value of one of `fns`: the one whose type is expected
+fn overload_value(c: *Checker, n: *Node, fns: []*Node, expected: *Type) -> *Node {
+    let candidates = visible_candidates(c, n.tok, fns);
+    if (expected != null && expected.kind == .Fn) {
+        for (f in candidates)
+            if (decl_type(c, f) == expected)
+                return f;
+        error(c, n.tok, tformat("no `%` has the type %", n.tok.text, qt(expected)));
+    } else {
+        error(c, n.tok, tformat("there are % functions named `%`: a function value needs a type to pick one, like `let f: fn(...) -> ... = %;`",
+                                candidates.len, n.tok.text, n.tok.text));
+    }
+    for (f in candidates)
+        note(c, f.tok, tformat("`%` is one", describe_fn(c, f)));
+    return null;
+}
+
+// two functions of one name with the same parameters (the result type
+// doesn't tell calls apart): an error at the second
+fn check_overload_sets(c: *Checker) {
+    for (set in c.res.overload_sets) {
+        let fns: []*Node;
+        if (set.kind is .Overloads{fns: list})
+            fns = list;
+        for (i in 1..fns.len) {
+            let a = decl_type(c, fns[i]);
+            if (a.kind != .Fn)
+                continue;
+            for (j in 0..i) {
+                let b = decl_type(c, fns[j]);
+                if (b.kind != .Fn || !same_params(a, b))
+                    continue;
+                let what = if (a.ret == b.ret) "the same parameters" else "the same parameters (a result type doesn't tell calls apart)";
+                error(c, fns[i].tok, tformat("`%` is declared twice with %: %", fns[i].tok.text, what,
+                                             describe_fn(c, fns[i])));
+                note(c, fns[j].tok, tformat("the first is here: %", describe_fn(c, fns[j])));
+                break;
+            }
+        }
+    }
+}
+
+// `area(r: Rect) -> f64`
+fn describe_fn(c: *Checker, f: *Node) -> string {
+    let t = decl_type(c, f);
+    let out: [..]u8;
+    out.allocator = context.temp_allocator;
+    print_to(&out, "%(", f.tok.text);
+    let params = fn_params(f);
+    let k = 0;
+    for (i in 0..params.len) {
+        if (i > 0)
+            append_string(&out, ", ");
+        let pt = if (t.kind == .Fn && i < t.params.len) type_name(t.params[i]) else "?";
+        print_to(&out, "%: %{}%", params[i].tok.text, if (is_variadic_param(params[i])) ".." else "", pt);
+        k++;
+    }
+    append_string(&out, ")");
+    if (t.kind == .Fn && t.ret.kind != .Void)
+        print_to(&out, " -> %", type_name(t.ret));
+    return out as string;
+}
+
+#scope_file
+
+fn call_args_of(n: *Node) -> []*Node {
+    if (n.kind is .Call{args})
+        return args;
+    return .[];
+}
+
+// the candidates the code at `at` can see: its own module's, and the
+// others' exported ones
+fn visible_candidates(c: *Checker, at: Token, fns: []*Node) -> [..]*Node {
+    let caller = module_of(c.res, at.text.ptr);
+    if (caller != null && caller.loaded_into != null)
+        caller = caller.loaded_into;
+    let out: [..]*Node;
+    out.allocator = context.temp_allocator;
+    for (f in fns)
+        if (caller == null || caller.inserted_by != null || f.owner == caller || exported(f))
+            array_add(&out, f);
+    return out;
+}
+
+// each argument's rank against `f`'s parameters, and whether they all fit
+fn rank_call(c: *Checker, f: *Node, args: []*Node) -> ([]i32, bool) {
+    let t = decl_type(c, f);
+    let ranks = new([]i32, args.len, context.temp_allocator);
+    if (t.kind != .Fn || !count_fits(f, t, args.len))
+        return ranks, false;
+    for (i in 0..args.len) {
+        let r = rank_at(c, f, t, args, i);
+        if (r == 0)
+            return ranks, false;
+        ranks[i] = r;
+    }
+    return ranks, true;
+}
+
+// the i-th argument's rank; `..xs` only goes to a `..T` parameter, whole
+fn rank_at(c: *Checker, f: *Node, t: *Type, args: []*Node, i: isize) -> i32 {
+    if (args[i].kind is .Spread{value}) {
+        let params = fn_params(f);
+        let last = params.len - 1;
+        if (last < 0 || !is_variadic_param(params[last]) || i != last || i != args.len - 1)
+            return 0;
+        return rank_arg(c, value, t.params[last]);
+    }
+    return rank_arg(c, args[i], param_type(f, t, i));
+}
+
+// enough arguments for the parameters without defaults, and not too many
+fn count_fits(f: *Node, t: *Type, given: isize) -> bool {
+    let params = fn_params(f);
+    let variadic = params.len > 0 && is_variadic_param(params[params.len - 1]);
+    let fixed = if (variadic) params.len - 1 else params.len;
+    let needed: isize = 0;
+    for (i in 0..fixed)
+        if (value_of(params[i]) == null)
+            needed = i + 1;
+    return given >= needed && (variadic || given <= params.len);
+}
+
+// the type the i-th argument goes to: a `..T` parameter takes each extra
+// argument as a T
+fn param_type(f: *Node, t: *Type, i: isize) -> *Type {
+    let params = fn_params(f);
+    let last = params.len - 1;
+    if (last >= 0 && is_variadic_param(params[last]) && i >= last)
+        return t.params[last].elem;
+    return t.params[i];
+}
+
+// 0: doesn't fit; 1 to 5: see the top of the file
+fn rank_arg(c: *Checker, arg: *Node, pt: *Type) -> i32 {
+    if (pt.kind == .Error)
+        return 5; // reported: don't make it worse
+    if (is_contextual(arg) || is_open_literal(arg))
+        return if (literal_fits(c, arg, pt)) 2 else 0;
+    let at = arg.ty;
+    if (at == null)
+        return 0;
+    if (at == pt)
+        return 1;
+    if (!can_coerce(c, arg, at, pt))
+        return 0;
+    switch (at.kind) {
+    case .UntypedInt:
+        return if (pt == c.types.isize) 2 else if (pt == c.types.i64) 3 else 4;
+    case .UntypedFloat:
+        return if (pt == c.types.f64) 2 else 4;
+    case .UntypedString:
+        return if (pt == c.types.string_) 2 else 4;
+    case .Null:
+        return 4;
+    default:
+        return 5;
+    }
+}
+
+// can `.Red`, `.Some(1)`, `.{...}` or `.[...]` be a `pt`?
+fn literal_fits(c: *Checker, arg: *Node, pt: *Type) -> bool {
+    let e = ungroup(arg);
+    switch (e.kind) {
+    case .EnumShorthand:
+        return has_variant(pt, e.tok.text[1..]);
+    case .Call{callee}: // .Some(1)
+        return pt.is_tagged && has_variant(pt, callee.tok.text[1..]);
+    case .StructInit{variant}:
+        if (variant) // .Let{...}
+            return pt.is_tagged;
+        return (pt.kind == .Struct && !pt.is_tuple) || pt.kind == .Union;
+    case .ArrayLiteral:
+        return pt.kind == .Array || pt.kind == .Slice || pt.kind == .Growable;
+    default:
+        return false;
+    }
+}
+
+fn has_variant(t: *Type, name: string) -> bool {
+    if (t.kind != .Enum && !t.is_tagged)
+        return false;
+    if (t.decl == null)
+        return false;
+    for (v in enum_variants(t.decl))
+        if (v.tok.text == name)
+            return true;
+    return false;
+}
+
+// does `a` rank better or equal on every argument, and better on one?
+fn better(a: []i32, b: []i32) -> bool {
+    let strictly = false;
+    for (i in 0..a.len) {
+        if (a[i] > b[i])
+            return false;
+        if (a[i] < b[i])
+            strictly = true;
+    }
+    return strictly;
+}
+
+fn same_params(a: *Type, b: *Type) -> bool {
+    if (a.params.len != b.params.len || a.is_variadic != b.is_variadic)
+        return false;
+    for (i in 0..a.params.len)
+        if (a.params[i] != b.params[i])
+            return false;
+    return true;
+}
+
+// "Rect, i64": the arguments' types, as far as they're known
+fn arg_types(c: *Checker, args: []*Node) -> string {
+    let out: [..]u8;
+    out.allocator = context.temp_allocator;
+    for (i in 0..args.len) {
+        if (i > 0)
+            append_string(&out, ", ");
+        let a = args[i];
+        if (a.kind is .Spread{value})
+            print_to(&out, "..%", if (value.ty != null) type_name(value.ty) else "?");
+        else if (is_contextual(a) || is_open_literal(a))
+            append_string(&out, source_of(a));
+        else if (a.ty != null)
+            append_string(&out, kind_of_value(a.ty));
+        else
+            append_string(&out, "?");
+    }
+    return out as string;
+}
+
+// what a call quotes of an argument: its text
+fn source_of(a: *Node) -> string { return if (a.span.len > 0) a.span else ungroup(a).tok.text; }
+
+// a type, or what a constant is: "an integer constant" reads better than
+// "untyped int"
+fn kind_of_value(t: *Type) -> string {
+    return switch (t.kind) {
+    case .UntypedInt: "an integer constant";
+    case .UntypedFloat: "a float constant";
+    case .UntypedString: "a string literal";
+    case .Null: "null";
+    default: type_name(t);
+    };
+}
+
+// why `f` doesn't take `args`
+fn why_not(c: *Checker, f: *Node, args: []*Node) -> string {
+    let t = decl_type(c, f);
+    if (t.kind != .Fn)
+        return "its type is broken";
+    if (!count_fits(f, t, args.len)) {
+        let params = fn_params(f);
+        return tformat("it takes % argument%{}, given %", params.len, if (params.len == 1) "" else "s", args.len);
+    }
+    for (i in 0..args.len) {
+        if (rank_at(c, f, t, args, i) != 0)
+            continue;
+        let a = args[i];
+        if (a.kind is .Spread{value})
+            return tformat("`..%` passes a slice to a `..T` parameter, the last", value.tok.text);
+        let given = if (is_contextual(a) || is_open_literal(a)) tformat("`%`", source_of(a))
+                    else if (a.ty != null && is_untyped(a.ty)) kind_of_value(a.ty)
+                    else if (a.ty != null) tformat("a %", qt(a.ty)) else "this";
+        return tformat("the % argument is %, not a %", ordinal(i), given, qt(param_type(f, t, i)));
+    }
+    return "it doesn't fit";
+}
+
+fn ambiguity_hint(args: []*Node) -> string {
+    for (a in args)
+        if (is_contextual(a) || is_open_literal(a))
+            return "; give a literal its type to pick one (`Circle.{ ... }`, `Color.Red`)";
+    return "; convert an argument with `as` to pick one";
+}
+
+fn ordinal(i: isize) -> string {
+    return switch (i) {
+    case 0: "1st";
+    case 1: "2nd";
+    case 2: "3rd";
+    default: tformat("%{}th", i + 1);
+    };
+}

@@ -42,6 +42,10 @@ struct Resolver {
     generated: [..]*Module;      // code made by #insert
     loaded: Map(string, *Module); // the file's own path -> its module
     loaded_files: Map(string, *Module); // a #load-ed file's own path -> the module it's part of
+    // the functions that share their name with another: their C names
+    // get their parameters' types
+    overloaded: Map(*Node, bool);
+    overload_sets: [..]*Node;
     builtins: Map(string, *Node); // i32, u8, bool, ...
     error_count: isize;
 
@@ -279,6 +283,22 @@ fn module_decl(m: *Module, name: string) -> *Node {
         if (found == null)
             found = scope_get(&f.file_scope, name, 0);
     return found;
+}
+
+// can the modules that import `d`'s module name it? Yes, unless a
+// `#scope_module` or `#scope_file` covers it
+fn exported(d: *Node) -> bool {
+    switch (d.kind) {
+    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
+    case .Overloads{fns}: // when one of them is
+        for (f in fns)
+            if (exported(f))
+                return true;
+        return false;
+    default: return false; // import bindings are never exported
+    }
+    let m = d.owner;
+    return m == null || !map_has(&m.regions, d);
 }
 
 #scope_file
@@ -605,7 +625,7 @@ fn collect_decl(r: *Resolver, m: *Module, n: *Node) {
             error(r, n.tok, tformat("`%` is already declared in this module", n.tok.text));
             note(r, binding_token(clash), "the first declaration is here");
         }
-        declare(r, &file.file_scope, n.tok.text, n, "this file");
+        declare_or_overload(r, m, &file.file_scope, n, "this file");
     } else {
         for (f in files_of(m)) {
             let clash = scope_get(&f.file_scope, n.tok.text, color_of(r, n));
@@ -614,9 +634,57 @@ fn collect_decl(r: *Resolver, m: *Module, n: *Node) {
                 note(r, clash.tok, "the first declaration is here");
             }
         }
-        declare(r, &m.scope, n.tok.text, n, "this module");
+        declare_or_overload(r, m, &m.scope, n, "this module");
     }
 }
+
+// a function whose name the scope has for another function joins it in an
+// overload set; anything else is declared once
+fn declare_or_overload(r: *Resolver, m: *Module, scope: *Map(ScopeKey, *Node), n: *Node, where: string) {
+    let key = ScopeKey.{ .name = n.tok.text, .color = color_of(r, n) };
+    let prev = map_get(scope, key) or_else null;
+    if (prev == null || !overloadable(n) || !(overloadable(prev) || prev.kind.tag == .Overloads)) {
+        if (prev != null && (is_macro(n) || is_macro(prev)) && n.kind.tag == .Fn && prev.kind.tag == .Fn) {
+            error(r, n.tok, tformat("`%` is already declared in %: an `#expand` function can't share its name (functions can, with different parameters)",
+                                    n.tok.text, where));
+            note(r, prev.tok, "the first declaration is here");
+            return;
+        }
+        declare(r, scope, n.tok.text, n, where);
+        return;
+    }
+    for (f in .[n, if (prev.kind.tag == .Fn) prev else null]) {
+        if (f != null && is_extern_fn(f)) {
+            error(r, f.tok, tformat("`%` is an `extern` function, and C has one function per name: it can't share its name", f.tok.text));
+            return;
+        }
+    }
+    map_put(&r.overloaded, n, true);
+    if (prev.kind is .Overloads{fns: &list}) {
+        let more: [..]*Node;
+        array_append(&more, list.*);
+        array_add(&more, n);
+        list.* = more;
+        return;
+    }
+    map_put(&r.overloaded, prev, true);
+    let both = new([]*Node, 2); // the set outlives this call: not a literal's slice
+    both[0] = prev;
+    both[1] = n;
+    let set = new_node(prev.tok, .Overloads(both));
+    set.owner = m;
+    array_add(&r.overload_sets, set);
+    map_put(scope, key, set);
+}
+
+// a function that can share its name: not a macro, not generic (yet)
+fn overloadable(d: *Node) -> bool {
+    if (d.kind is .Fn{is_macro: false, type_params})
+        return type_params.len == 0;
+    return false;
+}
+
+fn is_extern_fn(d: *Node) -> bool { return d.kind is .Fn{is_extern: true}; }
 
 // the file a `#scope_file` belongs to; null for other regions
 fn file_of_region(r: *Resolver, region: *Node) -> *Module {
@@ -632,17 +700,6 @@ fn files_of(m: *Module) -> [..]*Module {
     array_add(&all, m);
     array_append(&all, m.files);
     return all;
-}
-
-// can the modules that import `d`'s module name it? Yes, unless a
-// `#scope_module` or `#scope_file` covers it
-fn exported(d: *Node) -> bool {
-    switch (d.kind.tag) {
-    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
-    default: return false; // import bindings are never exported
-    }
-    let m = d.owner;
-    return m == null || !map_has(&m.regions, d);
 }
 
 // every `$T` inside a type, in source order: a function type's parameters

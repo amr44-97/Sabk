@@ -1,0 +1,24 @@
+// mistakes with functions that share a name
+struct Circle { r: f64; }
+struct Rect { w: f64; h: f64; }
+
+fn area(c: Circle) -> f64 { return c.r; }
+fn area(r: Rect) -> f64 { return r.w; }
+
+fn pick(x: i32, y: i64) -> i64 { return 1; }
+fn pick(x: i64, y: i32) -> i64 { return 2; }
+
+fn twice(x: i64) -> i64 { return x; }
+fn twice(x: i64) -> i64 { return x; }        // the same parameters
+fn half(x: i64) -> i64 { return x; }
+fn half(x: i64) -> f64 { return 1.0; }       // only the result differs
+
+fn main() {
+    area(5);                                  // none fits
+    area(.{ .r = 1 });                        // fits both structs
+    let a: i32 = 1;
+    let b: i32 = 2;
+    pick(a, b);                               // each fits one argument better
+    let f = area;                             // which one?
+    let g: fn(i64) -> f64 = area;             // no such area
+}

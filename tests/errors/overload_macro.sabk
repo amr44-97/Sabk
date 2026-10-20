@@ -1,0 +1,5 @@
+// an #expand function can't share its name
+fn log_it(x: i64) {}
+fn log_it(x: string) #expand {}
+
+fn main() {}

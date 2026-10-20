@@ -388,6 +388,13 @@ fn global_name(g: *CodeGen, decl: *Node) -> string {
     // a generic instance is named after its types: max__i32, List__u8
     for (arg in decl.instance_args)
         name = cat(name, "__", type_ident(g, arg));
+    // a function sharing its name, after its parameters: area__Circle
+    if (map_has(&g.res.overloaded, decl) && decl.ty != null && decl.ty.kind == .Fn) {
+        if (decl.ty.params.len == 0)
+            name = cat(name, "__void");
+        for (p in decl.ty.params)
+            name = cat(name, "__", type_ident(g, p));
+    }
     return name;
 }
 

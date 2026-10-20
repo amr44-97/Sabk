@@ -1,0 +1,57 @@
+[error]: `twice` is declared twice with the same parameters: twice(x: i64) -> i64 at [tests/errors/overload_misuse.sabk:12:4]
+    12 | fn twice(x: i64) -> i64 { return x; }        // the same parameters
+       |    ^
+[note]: the first is here: twice(x: i64) -> i64 at [tests/errors/overload_misuse.sabk:11:4]
+    11 | fn twice(x: i64) -> i64 { return x; }
+       |    ^
+[error]: `half` is declared twice with the same parameters (a result type doesn't tell calls apart): half(x: i64) -> f64 at [tests/errors/overload_misuse.sabk:14:4]
+    14 | fn half(x: i64) -> f64 { return 1.0; }       // only the result differs
+       |    ^
+[note]: the first is here: half(x: i64) -> i64 at [tests/errors/overload_misuse.sabk:13:4]
+    13 | fn half(x: i64) -> i64 { return x; }
+       |    ^
+[error]: no `area` takes these arguments: (an integer constant) at [tests/errors/overload_misuse.sabk:17:5]
+    17 |     area(5);                                  // none fits
+       |     ^
+[note]: `area(c: Circle) -> f64`: the 1st argument is an integer constant, not a `Circle` at [tests/errors/overload_misuse.sabk:5:4]
+     5 | fn area(c: Circle) -> f64 { return c.r; }
+       |    ^
+[note]: `area(r: Rect) -> f64`: the 1st argument is an integer constant, not a `Rect` at [tests/errors/overload_misuse.sabk:6:4]
+     6 | fn area(r: Rect) -> f64 { return r.w; }
+       |    ^
+[error]: `area` is ambiguous here: 2 of them fit these arguments, (.{ .r = 1 }), equally well; give a literal its type to pick one (`Circle.{ ... }`, `Color.Red`) at [tests/errors/overload_misuse.sabk:18:5]
+    18 |     area(.{ .r = 1 });                        // fits both structs
+       |     ^
+[note]: `area(c: Circle) -> f64` fits at [tests/errors/overload_misuse.sabk:5:4]
+     5 | fn area(c: Circle) -> f64 { return c.r; }
+       |    ^
+[note]: `area(r: Rect) -> f64` fits at [tests/errors/overload_misuse.sabk:6:4]
+     6 | fn area(r: Rect) -> f64 { return r.w; }
+       |    ^
+[error]: `pick` is ambiguous here: 2 of them fit these arguments, (i32, i32), equally well; convert an argument with `as` to pick one at [tests/errors/overload_misuse.sabk:21:5]
+    21 |     pick(a, b);                               // each fits one argument better
+       |     ^
+[note]: `pick(x: i32, y: i64) -> i64` fits at [tests/errors/overload_misuse.sabk:8:4]
+     8 | fn pick(x: i32, y: i64) -> i64 { return 1; }
+       |    ^
+[note]: `pick(x: i64, y: i32) -> i64` fits at [tests/errors/overload_misuse.sabk:9:4]
+     9 | fn pick(x: i64, y: i32) -> i64 { return 2; }
+       |    ^
+[error]: there are 2 functions named `area`: a function value needs a type to pick one, like `let f: fn(...) -> ... = area;` at [tests/errors/overload_misuse.sabk:22:13]
+    22 |     let f = area;                             // which one?
+       |             ^
+[note]: `area(c: Circle) -> f64` is one at [tests/errors/overload_misuse.sabk:5:4]
+     5 | fn area(c: Circle) -> f64 { return c.r; }
+       |    ^
+[note]: `area(r: Rect) -> f64` is one at [tests/errors/overload_misuse.sabk:6:4]
+     6 | fn area(r: Rect) -> f64 { return r.w; }
+       |    ^
+[error]: no `area` has the type `fn(i64) -> f64` at [tests/errors/overload_misuse.sabk:23:29]
+    23 |     let g: fn(i64) -> f64 = area;             // no such area
+       |                             ^
+[note]: `area(c: Circle) -> f64` is one at [tests/errors/overload_misuse.sabk:5:4]
+     5 | fn area(c: Circle) -> f64 { return c.r; }
+       |    ^
+[note]: `area(r: Rect) -> f64` is one at [tests/errors/overload_misuse.sabk:6:4]
+     6 | fn area(r: Rect) -> f64 { return r.w; }
+       |    ^
