@@ -228,7 +228,21 @@ declarations": a library is a constant, `#foreign lib ["c_name"]` after
 a signature or a top-level `let`, linking follows use, and `#run` opens
 the library.
 
-**Open points to ask about first** (recommendations in brackets):
+**Decided Oct 20, 2026** (these replace the open points below where they
+differ): Jai's spelling, `#library "vendor/libraylib"` and
+`#system_library "libm"` (the file's name with its prefix, no
+extension); `,link_always` now (`#system_library,link_always "libGL"`:
+linked even if nothing uses it); `#foreign` with no library for the
+program's own C; and no rule for one C name declared twice: every foreign
+declaration gets its own C name, bound to the symbol with a GNU asm label
+(`__asm__("strlen")`, `"_strlen"` on macOS). A shared library gets no
+rpath (as in Jai); `sabk --run` sets `LD_LIBRARY_PATH` for it; and std/build
+gets `add_library_dir(dir)`: `-L<dir>` when linking, and `LD_LIBRARY_PATH`
+for `--run` (build steps run after checking, so compile-time `#run` code
+doesn't search it). Done before step 3: the built-in types and C's names
+are reserved (`reserved_type` in resolve.sabk).
+
+**Open points as first asked** (recommendations in brackets):
 
 1. Finding a library: `#library "vendor/raylib"` looks for
    `vendor/libraylib.a`, then `vendor/libraylib.so` (`.dylib` on macOS),

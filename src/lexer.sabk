@@ -284,11 +284,11 @@ fn number(l: *Lexer) -> (TokenKind, bool) {
     }
     while (is_digit(peek(l)))
         l.pos++;
-    let float = false;
+    let is_float = false;
     // a fraction only with a digit after the `.`: `1..5` stays a range and
     // `1.foo` a member
     if (peek(l) == '.' && is_digit(peek(l, 1))) {
-        float = true;
+        is_float = true;
         l.pos++;
         while (is_digit(peek(l)))
             l.pos++;
@@ -297,13 +297,13 @@ fn number(l: *Lexer) -> (TokenKind, bool) {
     if (peek(l) == 'e' || peek(l) == 'E') {
         let sign: isize = if (peek(l, 1) == '+' || peek(l, 1) == '-') 1 else 0;
         if (is_digit(peek(l, 1 + sign))) {
-            float = true;
+            is_float = true;
             l.pos += 1 + sign;
             while (is_digit(peek(l)))
                 l.pos++;
         }
     }
-    return add(l, if (float) .Float else .Number, l.line, l.line_start), true;
+    return add(l, if (is_float) .Float else .Number, l.line, l.line_start), true;
 }
 
 fn char_literal(l: *Lexer) -> (TokenKind, bool) {

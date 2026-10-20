@@ -1,7 +1,7 @@
 // #run happens while compiling, before any local variable exists
-fn double(x: isize) -> isize { return x * 2; }
+fn twice(x: isize) -> isize { return x * 2; }
 
 fn main() {
     let y = 3;
-    let z = #run double(y);
+    let z = #run twice(y);
 }

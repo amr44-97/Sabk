@@ -4,7 +4,7 @@ mixed: 5 5 5 7
 long: 42
 abs: 42
 strlen: 5
-own float: 3.14
+float: 3.25
 double: 2.5
-local int: not a type
+fields: 1 2.5
 [exit 0]

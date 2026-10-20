@@ -369,6 +369,23 @@ struct Ambiguous {
 const BUILTIN_TYPES = .["i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32",
                         "u64", "usize", "f32", "f64", "bool", "void", "string"];
 
+// C's type names, which the prelude declares (src/prelude.sabk keeps the
+// same list)
+const C_TYPES = .["char", "uchar", "schar", "short", "ushort", "int", "uint", "long",
+                  "ulong", "longlong", "ulonglong", "float", "double", "size_t",
+                  "ssize_t", "ptrdiff_t", "intptr_t", "uintptr_t"];
+
+// what a name every program has for a type is, or "" when it isn't one
+fn reserved_type(name: string) -> string {
+    for (t in BUILTIN_TYPES)
+        if (t == name)
+            return "a built-in type";
+    for (t in C_TYPES)
+        if (t == name)
+            return "one of C's type names, which every program has for C interop";
+    return "";
+}
+
 fn root_decls(m: *Module) -> *[]*Node {
     switch (m.root.kind) {
     case .Root{decls: &d}: return d;
@@ -948,6 +965,16 @@ fn import_name(imp: *Node) -> string {
 fn is_macro(d: *Node) -> bool { return d.kind is .Fn{is_macro: true}; }
 
 fn declare(r: *Resolver, scope: *Map(ScopeKey, *Node), name: string, n: *Node, where: string = "this scope") {
+    // the built-in types and C's names for them are every program's, as
+    // Jai's are: nothing else can be called that (only the prelude declares
+    // C's). Fields and variants can, being named through their type, as
+    // they can be called `type`. It's still declared, so its uses don't
+    // fail again.
+    let reserved = reserved_type(name);
+    let qualified = n.kind.tag == .Field || n.kind.tag == .Variant;
+    if (reserved.len > 0 && !qualified && !inside(r.prelude, binding_token(n).text.ptr))
+        error(r, binding_token(n), tformat("`%` is %, so it can't name anything else: give this a different name",
+                                           name, reserved));
     let key = ScopeKey.{ .name = name, .color = color_of(r, n) };
     let prev, found = map_get(scope, key);
     if (!found) {

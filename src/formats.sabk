@@ -205,10 +205,10 @@ fn c_spec(raw: string, i: isize) -> (isize, string, string) {
     let conversion = raw[j];
     // a length goes with an integer (and `%lf`, `%Lf` with a double)
     let integer = index_of_char("diouxX", conversion) >= 0;
-    let double = (length == "l" || length == "L") && index_of_char("eEfFgG", conversion) >= 0;
-    if (has_length && !integer && !double)
+    let floating = (length == "l" || length == "L") && index_of_char("eEfFgG", conversion) >= 0;
+    if (has_length && !integer && !floating)
         return 0, "", "";
-    if (has_length && index_of_char("hlzjt", length[0]) < 0 && !double)
+    if (has_length && index_of_char("hlzjt", length[0]) < 0 && !floating)
         return 0, "", "";
     j++;
     let kind_text = switch (conversion) {

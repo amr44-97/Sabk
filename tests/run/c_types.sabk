@@ -4,8 +4,7 @@
 extern fn abs(x: int) -> int;
 extern fn strlen(s: *char) -> size_t;
 
-// a program's own name wins over the prelude's
-struct float { whole: i64; frac: i64; }
+struct Sample { int: int; double: double; }
 
 fn twice(x: long) -> long { return x * 2; }
 
@@ -27,13 +26,17 @@ fn main() {
     println("abs: %", abs(-42));
     println("strlen: %", strlen("hello"));
 
-    let f: float = .{ .whole = 3, .frac = 14 };
-    println("own float: %.%", f.whole, f.frac);
+    let f: float = 3.25;
+    println("float: %", f);
     let d: double = 2.5;
     let e: f64 = d;
     println("double: %", e);
 
-    // and so do locals
-    let int = "not a type";
-    println("local int: %", int);
+    // a field can still be called that, as it can be called `type`
+    let s: Sample = .{ .int = 1, .double = 2.5 };
+    println("fields: % %", s.int, s.double);
 }
+
+// variants too: `CType.long`
+enum CType { char, int, long }
+const WIDEST = CType.long;

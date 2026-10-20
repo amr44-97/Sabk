@@ -1,0 +1,27 @@
+[error]: `int` is one of C's type names, which every program has for C interop, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:2:21]
+     2 | #import "std/io" as int;
+       |                     ^
+[error]: `float` is one of C's type names, which every program has for C interop, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:4:8]
+     4 | struct float { whole: i64; }
+       |        ^
+[error]: `size_t` is one of C's type names, which every program has for C interop, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:5:7]
+     5 | const size_t = 5;
+       |       ^
+[error]: `string` is a built-in type, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:6:6]
+     6 | enum string { A, B }
+       |      ^
+[error]: `i32` is a built-in type, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:7:4]
+     7 | fn i32() {}
+       |    ^
+[error]: `int` is one of C's type names, which every program has for C interop, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:9:7]
+     9 | fn f($int: type, double: f64) {
+       |       ^
+[error]: `double` is one of C's type names, which every program has for C interop, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:9:18]
+     9 | fn f($int: type, double: f64) {
+       |                  ^
+[error]: `long` is one of C's type names, which every program has for C interop, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:10:9]
+    10 |     let long = 3;
+       |         ^
+[error]: `char` is one of C's type names, which every program has for C interop, so it can't name anything else: give this a different name at [tests/errors/reserved_types.sabk:11:10]
+    11 |     for (char in 0..3) {}
+       |          ^

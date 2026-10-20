@@ -1027,6 +1027,13 @@ checked at that point, and every violation is reported, not just the first.
   right refers to an outer `x`.
 - Declaring the same name twice in one scope is an error. An inner block may
   shadow an outer name.
+- **The types every program has can't be declared**, as in Jai: the
+  built-in types (`i32`, `string`, ...) and C's names for them (`int`,
+  `double`, `size_t`, ...) can't name a declaration, a local, a parameter
+  or an import. Fields and enum variants can, since they're named through
+  their type (`s.int`, `CType.long`), as they can be called `type`. The
+  prelude's other names (`Error`, `OS`, `TypeKind`, ...) can be declared
+  again, and a module's own, or its plain imports', hide the prelude's.
 - Parameter defaults see the module scope, but not the other parameters,
   because they're evaluated at the call site.
 - An enum variant's value can refer to the variants before it:
@@ -3095,10 +3102,10 @@ first parameter. `extern` functions use the plain C calling convention:
   `char` is `u8` everywhere, so C strings are `*u8` as std makes them (C's
   `char` is signed on x86, so only arithmetic above 127 differs). The
   generated C checks the sizes with `_Static_assert`, so a C compiler
-  that disagrees stops the build. They aren't keywords: a program's own
-  `int` (a local, or a declaration in the module or one it imports) wins
-  over the prelude's. `long double`, stdint's names (`int32_t` is `i32`)
-  and `wchar_t` are left out.
+  that disagrees stops the build. Like `i32`, nothing else can be called
+  `int` or `double` (see [Name resolution](#name-resolution)).
+  `long double`, stdint's names (`int32_t` is `i32`) and `wchar_t` are
+  left out.
 - `f32` arguments to C variadic functions are passed as `f64`, as C requires.
 
 ## Overloading
@@ -3845,10 +3852,11 @@ A few things to know:
 - `type` is a keyword and also the type of types: `$T: type`,
   `const word: type = i64;`.
 - Names that aren't keywords but are always there: the built-in types
-  (`i32`, `string`, ...), `Code` (for macros), and
+  (`i32`, `string`, ...) and C's names for them (reserved: see
+  [Name resolution](#name-resolution)), `Code` (for macros), and
   the prelude's `Any`, `TypeInfo`, `Error`, `Option`, `Allocator`, `Context`,
-  the target constants `OS`, `ARCH` and `POINTER_SIZE`, and C's type names
-  (`int`, `long`, `char`, `size_t`, ...: see
+  the target constants `OS`, `ARCH` and `POINTER_SIZE`. C's type names are
+  `int`, `long`, `char`, `size_t`, ... (see
   [C interop details](#compiling-and-running)).
 - The lexer also produces `:=`, `::`, `~=` and `@`, which the grammar
   doesn't use yet.

@@ -1,0 +1,14 @@
+// The built-in types and C's names for them can't name anything else.
+#import "std/io" as int;
+
+struct float { whole: i64; }
+const size_t = 5;
+enum string { A, B }
+fn i32() {}
+
+fn f($int: type, double: f64) {
+    let long = 3;
+    for (char in 0..3) {}
+}
+
+fn main() {}

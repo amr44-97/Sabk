@@ -1067,9 +1067,10 @@ Jai's directives, where Sabk puts a function's directives (after the
 signature):
 
 ```
-const libc   = #system_library "c";
-const libm   = #system_library "m";
-const raylib = #library "vendor/raylib";        // vendor/libraylib.a or .so, next to this file
+const libc   = #system_library "libc";
+const libm   = #system_library "libm";
+const raylib = #library "vendor/libraylib";     // vendor/libraylib.a or .so, next to this file
+const libgl  = #system_library,link_always "libGL"; // what libraylib.a needs, linked though nothing names it
 
 fn InitWindow(width: int, height: int, title: *char) #foreign raylib;
 fn close_window() #foreign raylib "CloseWindow";  // the C name, when ours differs
@@ -1078,7 +1079,10 @@ fn sin(x: f64) -> f64 #foreign libm;
 let environ: **char #foreign libc;                // a C variable
 ```
 
-- **A library is a constant.** `#library "path"` is relative to this file and names the library without its prefix and extension; `#system_library "name"` is found where the linker and the dynamic loader look.
+- **A library is a constant.** `#library "path"` is relative to this file and names the library's file without its extension, prefix included, as Jai does (`"vendor/libraylib"`; `.a`, then `.so` or `.dylib`); a path with an extension names the file exactly. The program links the static archive when there is one, and `#run` opens the shared object. `#system_library "libm"` is found where the linker and the dynamic loader look (`-lm`).
+- **No rpath**, as in Jai: a program linked to a shared library finds it next to itself or in the loader's path, and a build script adds `-Wl,-rpath,$ORIGIN` if it wants. `sabk --run` sets `LD_LIBRARY_PATH`. `add_library_dir(dir)` in std/build adds a directory to search (`-L<dir>`, and `--run`'s path).
+- **`,link_always`** (Jai's): the library is linked even when none of its declarations is used, for what a static archive needs (`libraylib.a` needs libGL, libm, ...). Decided Oct 20, 2026.
+- **One C name, declared twice** (two modules each declaring `strlen`, or `fn len(...) #foreign libc "strlen"` next to `fn strlen(...)`), is no error, as in Jai, which makes machine code itself: each declaration is trusted, as one declaration is. The generated C gives each its own name, bound to the C symbol with a GNU asm label (`usize sabk_f(u8 *s) __asm__("strlen");`; `"_strlen"` on macOS), so their prototypes never meet. Decided Oct 20, 2026.
 - **`#foreign lib`** after a signature with no body declares a function the library defines, and `#foreign lib "name"` gives its C name when the Sabk name differs. On a top-level `let`, it declares the library's variable. `...` stays for variadic functions.
 - **Linking follows use:** a library is linked when one of its declarations is used, so a module of bindings links what it binds. `link_library` stays for the rest.
 - **`#run` opens the library:** the VM `dlopen`s its shared object, so compile-time code can call raylib, sqlite or libclang. A library that's only a static archive can't be opened, and a `#run` call into it is an error naming the library.
@@ -1100,8 +1104,9 @@ let draw = dlsym(lib, "draw") as fn(i32) #c_call;         // called with no cont
 
 ### C types
 
-C's names, in the prelude, as built-in names like `i32` (not keywords, so
-a program's own `int` wins). They're aliases, so they mix freely with
+C's names, in the prelude, reserved like `i32`: not keywords, but nothing
+else can be called `int` (decided Oct 20, 2026, as Jai's primitive types
+are; it was "a program's own `int` wins"). They're aliases, so they mix freely with
 Sabk's types. They're for C interop: std and Sabk code keep Sabk's types,
 and `.len` stays an `isize`.
 
@@ -1189,8 +1194,8 @@ dropped: it would break Sabk callbacks passed through C's `void *`.)
 
 ### Open points
 
-- **Finding a library:** from the stem (`vendor/raylib` gives `libraylib.a` and `libraylib.so`; `.dylib`, `.lib` and `.dll` elsewhere), the program links the static archive when there is one and `#run` opens the shared object; a path with an extension names the file exactly.
-- **One C name declared twice**, in two modules: one function when the signatures match, an error when they don't?
+- **Decided Oct 20, 2026** (see above): Jai's spelling for libraries (the file's name with its prefix, `"libm"`), `,link_always`, asm labels for C names declared twice, and `#foreign` with no library for the program's own C (the runtime, `add_c_file`), "linked another way". Confirmed from the user's notes on Jai (jai_language_exploration.pdf, Oct 20), which added: no rpath, as Jai doesn't (a shared library goes next to the program or in the loader's path; `sabk --run` sets `LD_LIBRARY_PATH` itself), and `add_library_dir(dir)` in std/build for libraries outside the default paths (`-L`, and `--run`'s path). `,no_dll` and `,no_static_library` wait for a project that needs them; Jai opens a library while compiling as soon as it's declared, Sabk at the first `#run` call into it.
+- **Names every program has:** a plain import's names outrank the prelude's, so a module exporting `int` or `fn double` changed those for its importers. Decided, after reading how Jai does it: the built-in types and C's names are reserved, as Jai's primitive types are keywords, so nothing can declare them; the prelude's other names (`Error`, `OS`, `TypeKind`) can be declared again and hidden by a module's own or its imports', as Jai's Preload names are. (An error for an exported one, once imported plainly, was built and dropped: its only hit was the compiler's own `TypeKind`, which means to replace the prelude's.)
 - **`Code`:** does it follow `type` as `code`, or stay?
 - **`#align` on fields** as well as structs?
 
@@ -1217,11 +1222,22 @@ dropped: it would break Sabk callbacks passed through C's `void *`.)
 1. **`long` is filled in, not chosen by `#if`:** `prelude_text()` replaces `@C_LONG@` and `@C_ULONG@`, from `c_long_bits()` in src/module.sabk (32 on Windows or a 32-bit target, else 64), which the C check uses too. The bullet under "C types" says so now.
 2. **The C checks are always written**, seven of them (`short`, `int`, `long`, `long long`, `float`, `double`, `size_t`), after the C prelude: simpler than tracking use, and free. `cc -m32` on the generated C stops at the `long` and `size_t` ones, as it should.
 3. **Messages write the Sabk type:** `let n: int = xs.len;` says "expected `i32`, found `isize`", and `type_info(long).name` is `i64`. Aliases have no name of their own.
-4. **A module's own `int` wins**, as a local's does (`let int = "..."`, a parameter or field called `float`, a `struct float`). So does an **imported** one: a module that exports `const int = i64;` changes `int` for every module that imports it plainly, since imports outrank the prelude. `#scope_file` keeps it to the module. Worth a look when bindings start declaring their own C types.
+4. **(Changed after step 2: C's names are reserved now, see below.)** **A module's own `int` wins**, as a local's does (`let int = "..."`, a parameter or field called `float`, a `struct float`). So does an **imported** one: a module that exports `const int = i64;` changes `int` for every module that imports it plainly, since imports outrank the prelude. `#scope_file` keeps it to the module. Worth a look when bindings start declaring their own C types.
 5. **`const int = 5;`** in a program is allowed (its own name), and then `let x: int` says "`int` is a constant whose value isn't a type".
 6. **`fn f(x: int)` next to `fn f(x: i32)`** is "declared twice with the same parameters", as expected for an alias; the message writes both as `i32`.
 7. **The narrowing error doesn't teach the fix** (no "write `xs.len as int`"). It's the same message as for Sabk's own types, so it isn't step 2's; noted for when `int` habits show up in the projects.
 8. **Prelude line numbers moved** by 22, which changed four error and dump tests that point into the prelude.
+
+### Built, after step 2 (Oct 20, 2026): the types every program has are reserved
+
+#### Edge cases met building it (to review)
+
+1. **Where:** `declare` in src/resolve.sabk, which makes every name (top level, locals, parameters, `$T`, `for` variables, an import's `as` name), so one check covers them all. The prelude is the one place allowed to declare C's names; the list is `C_TYPES` next to `BUILTIN_TYPES`, and the prelude's comment points to it.
+2. **Fields and enum variants can be called `int`** (`struct S { int: int; }`, `enum CType { char, int, long }`): they're named through their type, as a field can be called `type`, and a binding generator will want `CType.long`.
+3. **The name is still declared** after the error, so `let int = 3; f(int);` reports once, not again as "`int` is a type, not a value".
+4. **In a macro**, a reserved local is reported once per expansion, each with its "in the expansion of" note, as every error in a macro's body is; in a generic function, once (the template is resolved once).
+5. **The compiler and tests had four:** locals `float` (src/lexer.sabk, now `is_float`) and `double` (src/formats.sabk, now `floating`), and in tests `fn double` (tests/errors/run_local.sabk, now `twice`) and `struct float` (tests/run/c_types.sabk). std had none. Renaming worked in one round: the old seed accepts the new names.
+6. **The prelude's other names stay free:** a module exporting `const OS = ...` hides the prelude's in its plain importers, as in Jai. The compiler relies on that (`enum TypeKind` in src/types.sabk).
 
 ## 9. How it lands
 
