@@ -887,8 +887,9 @@ generic candidates and operators come next.
    ambiguous. Not in the plan: added to avoid that ambiguity.
 3. **A conversion beats a generic parameter** (5 before 6), as the plan's
    order says: `show(small)` with an `i32` picks `show(x: i64)` over
-   `show(x: $T)`. Worth checking against Jai, which may prefer the
-   polymorphic one there.
+   `show(x: $T)`. Confirmed by the user (Oct 20, 2026): a function with a
+   specific type is chosen over the generic one; the generic one handles
+   what the others don't specify.
 4. **C names**: an instance of a generic function in a set gets
    `__generic` (`show__generic__i64`), so it doesn't clash with a
    non-generic `show(x: i64)` (`show__i64`).
