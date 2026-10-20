@@ -1,3 +1,0 @@
-[error]: an `extern let` can't have a value: C defines the variable at [tests/errors/extern_let_value.sabk:2:30]
-     2 | extern let errno_copy: i32 = 0;
-       |                              ^

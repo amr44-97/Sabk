@@ -1,6 +1,8 @@
 #import "../resolve/lib/util";
 #import "lib/helper";
-extern fn printf(fmt: *u8, ...) -> i32;
+#import "std/c";
+
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;
 
 fn main() -> i32 {
     printf("%d %d %d\n", util.helper(), util.LIMIT, util.Color.Green as i32);

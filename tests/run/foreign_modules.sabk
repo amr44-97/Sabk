@@ -6,7 +6,7 @@
 #import "lib/c_strlen_u8";
 #import "lib/c_strlen_void";
 
-const libc = #system_library "libc";
+#import "std/c";
 fn time(t: *i64) -> i64 #foreign libc;
 
 fn main() {

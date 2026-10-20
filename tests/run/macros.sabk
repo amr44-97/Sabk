@@ -1,6 +1,8 @@
 #import "lib/macrolib";
-extern fn printf(fmt: *u8, ...) -> i32;
-extern fn exit(code: i32);
+#import "std/c";
+
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;
+fn exit(code: i32) #foreign libc;
 
 // ---- Code arguments, #text and #location
 fn assert(cond: Code) #expand {

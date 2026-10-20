@@ -127,11 +127,18 @@ fn overload_value(c: *Checker, n: *Node, fns: []*Node, expected: *Type) -> *Node
             array_add(&candidates, f);
     }
 
+    // the only one this code sees (yours hides an import's with the same
+    // parameters): it's the value, and converting it says if it doesn't fit
+    let only = candidates.len == 1 && !generic;
     if (expected != null && expected.kind == .Fn) {
         for (f in candidates)
             if (decl_type(c, f) == expected)
                 return f;
+        if (only)
+            return candidates[0];
         error(c, n.tok, tformat("no `%` has the type %", n.tok.text, qt(expected)));
+    } else if (only) {
+        return candidates[0];
     } else {
         error(c, n.tok, tformat("there are % functions named `%`: a function value needs a type to pick one, like `let f: fn(...) -> ... = %;`",
                                 candidates.len, n.tok.text, n.tok.text));
@@ -573,8 +580,8 @@ fn type_fits(c: *Checker, pattern: *Node, t: *Type) -> bool {
         return t.kind == .Array && type_fits(c, elem, t.elem);
     case .TypeGrowable{elem}:
         return t.kind == .Growable && type_fits(c, elem, t.elem);
-    case .TypeFn{params}:
-        return t.kind == .Fn && t.params.len == params.len;
+    case .TypeFn{params, c_call}:
+        return t.kind == .Fn && t.params.len == params.len && t.is_c_call == c_call;
     case .TypeName, .TypeMember: // List($T): an instance of List
         return (t.kind == .Struct || t.kind == .Union || t.kind == .Enum) && t.decl != null &&
                (t.decl.generic == pattern.decl || t.decl == pattern.decl);

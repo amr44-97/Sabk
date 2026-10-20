@@ -97,7 +97,7 @@ ROOT `#`
   CONST_DECL `MAX`
     type: TYPE_NAME `i32`
     lhs: NUMBER_LITERAL `64`
-  FUN_DECL `printf` [extern] [variadic]
+  FUN_DECL `printf` [foreign libc] [variadic]
     type: TYPE_NAME `i32`
     FUN_PARAM `fmt`
       type: TYPE_PTR `*`

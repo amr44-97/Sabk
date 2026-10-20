@@ -1,0 +1,3 @@
+[error]: a `#c_call` function is ours, for C to call, so it needs a body `{`, found `;`; a C function from a library is `#foreign lib;` at [tests/errors/parse_c_call_no_body.sabk:1:22]
+     1 | fn f() -> int #c_call;
+       |                      ^

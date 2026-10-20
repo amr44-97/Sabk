@@ -1,2 +1,0 @@
-const libc = #system_library "libc";
-extern fn f() #foreign libc;

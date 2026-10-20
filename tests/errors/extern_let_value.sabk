@@ -1,4 +1,0 @@
-// C defines an extern variable, so it can't have a value here
-extern let errno_copy: i32 = 0;
-
-fn main() {}

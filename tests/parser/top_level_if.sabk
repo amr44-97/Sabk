@@ -1,5 +1,5 @@
 #if (OS == .Windows) {
-    extern fn Sleep(ms: u32);
+    fn Sleep(ms: u32) #foreign;
 } else #if (OS == .Linux) {
     struct Stat { size: i64; }
 } else {

@@ -2,22 +2,22 @@ ROOT
   LIBRARY `libc` [#system_library "libc"]
   LIBRARY `gl` [#system_library,link_always "libGL"]
   LIBRARY `raylib` [#library "vendor/libraylib"]
-  FUN_DECL `strlen` [extern] [foreign libc]
+  FUN_DECL `strlen` [foreign libc]
     type: TYPE_NAME `usize`
     FUN_PARAM `s`
       type: TYPE_PTR `*`
         lhs: TYPE_NAME `u8`
-  FUN_DECL `sin` [extern] [foreign libm] [C name sinf]
+  FUN_DECL `sin` [foreign libm] [C name sinf]
     type: TYPE_NAME `f32`
     FUN_PARAM `x`
       type: TYPE_NAME `f32`
-  FUN_DECL `printf` [extern] [foreign libc] [variadic]
+  FUN_DECL `printf` [foreign libc] [variadic]
     type: TYPE_NAME `i32`
     FUN_PARAM `format`
       type: TYPE_PTR `*`
         lhs: TYPE_NAME `u8`
-  FUN_DECL `runtime_hook` [extern]
-  VAR_DECL `environ` [extern] [foreign libc]
+  FUN_DECL `runtime_hook` [foreign]
+  VAR_DECL `environ` [foreign libc]
     type: TYPE_PTR `*`
       lhs: TYPE_PTR `*`
         lhs: TYPE_NAME `u8`

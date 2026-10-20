@@ -1,7 +1,7 @@
 // untaken code still has its names checked: a typo is an error on every
 // platform, while names from any branch are fine
 #if (POINTER_SIZE == 3) {
-    extern fn exotic_sleep(ms: u32);
+    fn exotic_sleep(ms: u32) #foreign;
     struct Exotic { handle: *void; count: i6; }   // a typo in a type
 }
 

@@ -1,4 +1,6 @@
-extern fn printf(fmt: *u8, ...) -> i32;
+#import "std/c";
+
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;
 
 fn main() {
     let a: u8 = 200;

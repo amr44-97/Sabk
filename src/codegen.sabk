@@ -14,6 +14,7 @@
 // their own.
 
 #import "std/array";
+#import "std/c";
 #import "std/fmt";
 #import "std/io";
 #import "std/map";
@@ -435,7 +436,7 @@ fn operator_word(name: string) -> string {
 /* ------------------------------------------------------------------ names */
 
 fn global_name(g: *CodeGen, decl: *Node) -> string {
-    // an `extern fn` with a body is C's to call, under its own name; a
+    // a `#c_call` function is C's to call, under its own name; a
     // foreign function or variable has the name name_foreign gave it
     if (decl.kind.tag == .Fn && is_extern_decl(decl) && !is_foreign(decl))
         return decl.tok.text;
@@ -571,9 +572,15 @@ fn c_type(g: *CodeGen, t: *Type) -> string {
         g.fn_type_count++;
         name = format("fn__%", g.fn_type_count);
         map_put(&g.type_names, t, name); // before the params, in case one mentions t
-        let params = cat(c_type(g, g.c.context_type), "*");
+        // ours take the context first; C's (#c_call) don't
+        let parts: [..]string;
+        if (!t.is_c_call)
+            array_add(&parts, cat(c_type(g, g.c.context_type), "*"));
         for (p in t.params)
-            params = cat(params, ", ", c_type(g, p));
+            array_add(&parts, c_type(g, p));
+        if (t.is_variadic)
+            array_add(&parts, "...");
+        let params = if (parts.len == 0) "void" else join(parts, ", ");
         print_to(&g.fn_typedefs, "typedef % (*%)(%);\n", ret_type(g, t.ret), name, params);
     default:
     }
@@ -682,7 +689,7 @@ fn fn_signature(g: *CodeGen, fun: *Node) -> string {
 }
 
 fn emit_fn_prototype(g: *CodeGen, fun: *Node) {
-    // extern functions with a body are exported for C to call
+    // #c_call functions are exported for C to call
     print_to(&g.protos, "%{}%{}%;\n", if (is_extern_decl(fun)) "" else "static ", fn_signature(g, fun),
              asm_label(g, fun));
 }
@@ -1502,7 +1509,7 @@ fn compound(g: *CodeGen, t: *Type, body: string) -> string {
     return cat("((", c_type(g, t), "){", body, "})");
 }
 
-extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32 #foreign libc;
 
 fn constant(g: *CodeGen, k: Const, t: *Type) -> string {
     switch (k.kind) {
@@ -2050,7 +2057,8 @@ fn call(g: *CodeGen, n: *Node) -> string {
     let fun: *Node = if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl else null;
     if (n.decl != null)
         fun = n.decl; // a generic function's instance
-    let is_extern = fun != null && is_extern_decl(fun);
+    // a C function, or a call through a C function pointer: no context
+    let is_extern = if (fun != null) is_extern_decl(fun) else t.is_c_call;
     let params = if (fun != null) fn_params(fun) else .[];
 
     // a function value, the arguments, then the defaults (evaluated here,
@@ -2250,7 +2258,7 @@ fn reach(g: *CodeGen, decl: *Node, use: *Node) {
 fn find_reachable(g: *CodeGen, main_fn: *Node) {
     reach(g, main_fn, null);
     reach(g, prelude_decl(g, "default_context"), null); // the C main calls it
-    // `extern fn`s with a body exist to be called from C
+    // #c_call functions exist to be called from C
     for (m in g.res.modules)
         for (d in root_list(m))
             if (d.kind is .Fn{is_extern: true, body} && body != null)

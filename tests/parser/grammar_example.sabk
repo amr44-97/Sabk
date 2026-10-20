@@ -37,4 +37,4 @@ const Callback = fn(i32) -> bool;
 
 const MAX: i32 = 64;
 
-extern fn printf(fmt: *u8, ...) -> i32;
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;

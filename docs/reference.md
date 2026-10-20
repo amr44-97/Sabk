@@ -39,6 +39,7 @@ IDENT  NUMBER  FLOAT  STRING  CHAR
 ## Example
 
 ```
+#import "std/c";
 #import "std/fmt";
 #import "std/io";
 #import "std/mem";
@@ -55,7 +56,7 @@ const Callback = fn(i32) -> bool;
 
 const MAX: i32 = 64;
 
-extern fn printf(fmt: *u8, ...) -> i32;
+fn printf(fmt: *char, ...) -> int #foreign libc;   // C's, from std/c's libc
 
 fn main() -> i32 {
     let arena = arena_init(4096);         // from std/mem, no prefix needed
@@ -230,20 +231,20 @@ decl        = fn_decl
             | const_decl
             | let_decl
             | "let" IDENT ":" type foreign ";"      // a variable C defines
-            | "extern" "let" IDENT ":" type ";"     // the same, the old way
             | top_if ;
 
 top_if      = "#if" "(" expr ")" "{" { decl } "}"     // see Compile-time #if
               [ "else" ( top_if | "{" { decl } "}" ) ] ;
 
-fn_decl     = [ "extern" ] "fn" IDENT "(" [ params ] ")"
+fn_decl     = "fn" IDENT "(" [ params ] ")"
               [ "->" ( results | type { "," type } ) ] // -> i64, bool
               { fn_directive }                       // in any order
               [ "#expand" ] ( block | ";" ) ;        // #expand: a macro
 fn_directive = "#format"                             // its format is checked
              | "#nodiscard"                          // its result must be used
              | "#no_bounds_check"                    // its indexing isn't checked
-             | foreign ;                             // C's: no body, `;`
+             | foreign                               // C's: no body, `;`
+             | "#c_call" ;                           // ours, for C to call: a body
 foreign     = "#foreign" [ IDENT [ "." IDENT ] ] [ STRING ] ;
                                                      // its library, its C name
 params      = param { "," param } [ "," "..." ]
@@ -295,12 +296,13 @@ values      = expr { "," expr } ;
   may use `context`, which is how library functions default to the context
   allocator.
 - `fn name(...) #foreign lib;` declares a C function from a library, and
-  `let name: T #foreign lib;` a C variable: see
-  [C interop](#c-interop-libraries-and-foreign). The older `extern fn
-  name(...);` and `extern let name: T;` declare them too, from no library
-  in particular. `extern fn` with a body defines a function with the C ABI.
-  Only C's functions may be variadic (`...`). See [Context](#context) for
-  how C's calling convention differs.
+  `let name: T #foreign lib;` a C variable; `fn name(...) #c_call { ... }`
+  is one of ours that C calls. See
+  [C interop](#c-interop-libraries-and-foreign) and
+  [`#c_call`](#c_call-functions-c-calls-and-c-function-types). Only
+  `#foreign` functions may be variadic (`...`): Sabk code can't read C's
+  `...`. `extern`, the old way to say all three, is an error that shows
+  the new spelling.
 - **Field defaults** (`= expr`) apply wherever a value of the struct is
   made without saying what it is:
 
@@ -377,6 +379,8 @@ type        = "*" type                                  // pointer
             | "[" "]" type                              // slice (pointer + length)
             | "[" ".." "]" type                         // growable array
             | "fn" "(" [ type { "," type } ] ")" [ "->" results ]
+            | "fn" "(" [ type { "," type } [ "," "..." ] ] ")" [ "->" results ] "#c_call"
+                                                        // a C function pointer
             | "?" type                                  // Option(T): a value or None
             | "$" IDENT                                 // declares T (generics)
             | IDENT [ "." IDENT ] [ "(" type { "," type } ")" ] ;
@@ -870,8 +874,8 @@ init        = "." IDENT "=" expr                        // designated: .x = 1
 
 ## Context
 
-Every non-`extern` function receives a hidden pointer to the caller's
-`Context` as its first argument. The `context` keyword refers to it. It's
+Every Sabk function receives a hidden pointer to the caller's `Context`
+as its first argument (C's functions, `#foreign` and `#c_call`, don't). The `context` keyword refers to it. It's
 how a function knows where to allocate, where to log and what to do on a
 panic, without those being parameters of every function.
 
@@ -975,9 +979,11 @@ shouldn't return; if it does, the program aborts after it, because the
 code after a panic can't go on. The runtime's own checks (bounds,
 division by zero, a switch with no case) abort directly.
 
-**`extern` functions** use the plain C calling convention with no hidden
-parameter. Inside an `extern fn` that has a body (a function C code calls
-back into), `context` starts as the default context.
+**C's functions** use the plain C calling convention with no hidden
+parameter: `#foreign` ones, and `#c_call` ones, ours that C calls. C has
+no context to pass, so inside a `#c_call` function `context` starts as
+the default one, whatever context the code that handed C the function
+had (see [`#c_call`](#c_call-functions-c-calls-and-c-function-types)).
 
 **The allocator interface**, declared in the prelude, for writing your
 own:
@@ -1126,6 +1132,7 @@ type until they're used, as in Go and Odin:
 | an unsigned integer  | a wider signed integer                          |
 | `f32`                | `f64`                                           |
 | any pointer          | `*void`                                        |
+| a C function (`#foreign` or `#c_call`), or a `fn(...) #c_call` value | `*void`: C's `void *`, for C APIs that take callbacks that way (see [`#c_call`](#c_call-functions-c-calls-and-c-function-types)) |
 | `*[N]T`, `[N]T`      | `[]T`: a view of the array                      |
 | `[..]T`              | `[]T`: a view of its elements                   |
 | `usize`, `isize`     | `u64`, `i64`                                    |
@@ -1143,7 +1150,9 @@ so a length passed to C takes a cast, `memcpy(dst, src, s.len as usize)`.
 - numbers to numbers (integer casts wrap, like C)
 - integers to and from enums
 - `bool` to an integer
-- between pointer types, `*void` and functions
+- between pointer types, `*void` and functions; between a Sabk function
+  type and a C one (`#c_call`) too, except for a function named directly
+  (`abs as fn(int) -> int` is an error: `abs` is C's)
 - pointers to and from `usize` or `isize`
 - `string` and `[]u8` to each other: the same memory, as text or as bytes
 - `[..]u8` to `string`: a view of its elements, as text
@@ -1953,10 +1962,10 @@ q, r = r, q;                       // several targets: a swap
   - A default is worked out where it's used, so it can use the
     parameters: `-> (string = s, bool = true)`.
   - `return g();` where g gives one value takes the rest from defaults.
-  - A function type can't have them (`fn() -> (i64, bool)`), nor can an
-    `extern` or `#expand` function.
+  - A function type can't have them (`fn() -> (i64, bool)`), nor can a
+    C function (`#foreign` or `#c_call`) or an `#expand` function.
 - In C the results are a struct, which `return` makes and the caller takes
-  apart, so several results cost what returning a struct does. An `extern`
+  apart, so several results cost what returning a struct does. A C
   function (C returns one value) and an `#expand` function return one value
   at most. Function types can have several: `fn(string) -> (i64, bool)`.
 
@@ -3000,7 +3009,7 @@ including the parts nothing calls, so mistakes show up where they're
 written. But the C holds only what's reachable from `main`: the functions
 it calls or uses as values (through variables, struct field defaults,
 default arguments, generic instances), the globals it uses, and every
-`extern fn` with a body, since C may call those. Importing a module costs
+`#c_call` function, since C may call those. Importing a module costs
 nothing for the functions you don't use, and code that only `#run` uses
 isn't in the program at all. `--stats` shows how many functions were
 written out.
@@ -3063,7 +3072,8 @@ arguments, so a build script can take options.
   bug one hides. It covers indexing, slicing and null pointers: division by zero is
   checked either way, and `#run` code keeps its checks. A macro can't be
   `#no_bounds_check`, since its code runs in its caller and is checked as
-  the caller is, and neither can an `extern fn` without a body.
+  the caller is, and neither can a `#foreign` function (C's code isn't
+  Sabk's to check).
 - `new` panics if the allocator returns `null`. What it returns starts as a
   new variable would: its type's defaults, or zeros.
 - Writing to a string literal's bytes isn't checked: the program crashes
@@ -3073,15 +3083,12 @@ arguments, so a build script can take options.
 **The default context** allocates with `calloc`, `realloc` and `free`. It
 supports `Alloc`, `Free` and `Resize`.
 
-**Calling convention.** Normal functions receive the context as a hidden
-first parameter. `extern` functions use the plain C calling convention:
-
-- An `extern fn` declared without a body is a C function to call.
-- An `extern fn` with a body can be called from C. Inside it, `context`
-  starts as the default context.
-- Used as a value, an `extern fn` is a `*void` (a C function pointer, for
-  callbacks such as `qsort`). It can't become one of our `fn(...)` types,
-  because those expect the hidden context parameter.
+**Calling convention.** Sabk functions receive the context as a hidden
+first parameter. C's functions use the plain C calling convention, with
+no context: `#foreign` ones (C's, from a library) and `#c_call` ones
+(ours, for C to call). A function type says which: `fn(i32) -> i32` is a
+Sabk function's, `fn(i32) -> i32 #c_call` a C function pointer's. See
+[`#c_call`](#c_call-functions-c-calls-and-c-function-types).
 
 ### C interop: libraries and `#foreign`
 
@@ -3089,8 +3096,7 @@ As in Jai, a library is a constant, and a C function or variable says
 which library defines it, after its signature:
 
 ```
-const libc   = #system_library "libc";
-const libm   = #system_library "libm";
+#import "std/c";                                  // libc and libm: C's standard library
 const raylib = #library "vendor/libraylib";     // vendor/libraylib.a or .so, next to this file
 
 fn InitWindow(width: int, height: int, title: *char) #foreign raylib;
@@ -3103,6 +3109,15 @@ fn sabk_arg(i: i32) -> *u8 #foreign;              // no library: linked another 
 fn draw(w: *Window) #foreign rl.raylib;           // another module's library
 ```
 
+- **C's standard library comes from std/c**, as Jai's comes from its
+  POSIX module: `#import "std/c";` gives `libc` (everything but math) and
+  `libm` (math; glibc keeps it apart, macOS and musl don't). The prelude
+  has a `libc` of its own for the runtime, private as Jai's
+  Runtime_Support keeps it, so `#foreign libc` without the import is
+  "unknown library `libc`: C's standard library comes from `#import
+  "std/c";`". A file can declare its own `const libc = #system_library
+  "libc";`, which hides std/c's. A module others import shouldn't export
+  one: where two imports export a `libc`, `#foreign libc` is ambiguous.
 - **A library names its file without the extension**, `lib` included, as
   in Jai. `#library "path"` is relative to the file it's written in; the
   program links `path.a` when there is one and `path.so` (`.dylib` on
@@ -3135,6 +3150,118 @@ fn draw(w: *Window) #foreign rl.raylib;           // another module's library
   the one its arguments fit. They don't clash in the generated C either
   (the later one gets an asm label); each is trusted, as one declaration
   is.
+
+### `#c_call`: functions C calls, and C function types
+
+A function C calls is ours, with C's calling convention: `#c_call` after
+its signature. A C function pointer's type says the same:
+`fn(...) -> T #c_call`.
+
+```
+#import "std/c";
+
+const Compare = fn(*void, *void) -> int #c_call;   // a C function pointer
+
+fn qsort(base: *void, count: size_t, size: size_t, compare: Compare) #foreign libc;
+fn dlsym(handle: *void, name: *char) -> *void #foreign libc;
+
+fn ascending(a: *void, b: *void) -> int #c_call {   // ours: C calls it
+    let x, y = (a as *i32).*, (b as *i32).*;
+    return if (x < y) -1 else if (x > y) 1 else 0;
+}
+
+fn main() {
+    let xs: [4]i32 = .[3, 1, 4, 2];
+    qsort(&xs[0], 4, sizeof(i32), ascending);       // 1 2 3 4
+    let c_abs = dlsym(null, "abs") as fn(int) -> int #c_call;
+    let seven = c_abs(-7);                           // called with no context
+}
+```
+
+- **A `#c_call` function has a body**, and C can call it: a callback
+  (qsort's comparator, a GUI's event handler), or a function a C library
+  looks up by name. Its C name is its Sabk name. C has no context to
+  pass, so inside it `context` starts as the default one (the heap, the
+  default logger), not the context of the code that handed it to C. It
+  can't be generic or `#expand`, can't take C's `...` (Sabk code can't
+  read it: take `args: ..Any`), and returns one value at most.
+- **A C function type**, `fn(*void, *void) -> int #c_call`, is the type
+  of a pointer to a C function: a `#foreign` function's value, a
+  `#c_call` function's, or an address C gave. A call through it passes no
+  context. It can be a constant (`const Compare = ...`), a parameter, or a
+  struct field, for C's tables of callbacks. Only a C function type can
+  be variadic: `fn(*char, ...) -> int #c_call` (`let p = printf;` has
+  that type). `null` is one, and `==` compares them.
+- **A Sabk function type and a C one are different types**, even with
+  the same parameters: `fn(i32) -> i32 == fn(i32) -> i32 #c_call` is
+  false, and neither converts to the other on its own.
+
+**One implicit conversion: a C function becomes a `*void`.** A `#foreign`
+function, a `#c_call` function, or any `fn(...) #c_call` value converts
+to `*void` without `as`, because C APIs take callbacks that way: older
+and generated bindings declare a callback parameter as `void *`, and
+`dlsym` gives one back.
+
+```
+fn qsort_untyped(base: *void, count: size_t, size: size_t, compare: *void) #foreign libc "qsort";
+qsort_untyped(&xs[0], 4, sizeof(i32), ascending);   // ascending becomes a *void
+let p: *void = ascending;                           // so does any C function
+```
+
+What doesn't convert on its own:
+
+| From | To | Instead |
+|---|---|---|
+| a Sabk function | `*void` | `f as *void`: C can hold it and give it back (a callback's user data), never call it |
+| `*void` | a C function type | `p as fn(int) -> int #c_call`: Sabk can't know what C's address is |
+| a C function | a Sabk function type | none: it would be called with a context it doesn't take |
+| a Sabk function | a C function type | declare it `#c_call`: C would call it without its context |
+
+The errors say which: "`abs` is a C function, called without a context,
+so it can't be a `fn(i32) -> i32`, which takes one", and "`ours` is a
+Sabk function, which takes a context C doesn't pass, so it can't be a
+`fn(i32) -> i32 #c_call`; for C to call it, declare it `fn ours(...)
+#c_call { ... }`".
+
+**`as` is trusted between function pointers**, as between other
+pointers: a C function pointer comes back from a `*void` with `as`, and
+so does a Sabk function passed through C's `void *`:
+
+```
+fn twice(x: i64) -> i64 { return 2 * x; }
+let held: *void = twice as *void;          // C keeps it as user data...
+let back = held as fn(i64) -> i64;         // ...and gives it back
+back(21);                                   // 42
+```
+
+The compiler can't tell what a `*void` holds, so the one error is where
+it can see the function, named directly: `abs as fn(int) -> int` (`abs`
+is C's) and `twice as fn(i64) -> i64 #c_call` (`twice` is ours). In the
+program, calling a pointer through the wrong kind of type is undefined
+(it crashes, or worse); `#run` code checks every such call and stops
+with "a C function was called through a Sabk function type" or "a Sabk
+function was called through a C function type".
+
+Edge cases:
+- **`#c_call` after a function-type result belongs to the type**:
+  `fn handler() -> fn(int) #c_call { ... }` is a Sabk function returning
+  a C function pointer. For a `#c_call` function returning a Sabk
+  function type, put the result in parentheses: `fn f() -> (fn(int))
+  #c_call { ... }`. `#foreign` isn't a type's, so `fn get() -> fn(int)
+  #c_call #foreign lib;` is a C function returning a C function pointer.
+- **`#run` hands C a closure**: a `#c_call` function passed to C while
+  compiling (qsort's comparator) is a libffi closure that runs it in the
+  compiler, so `#run` can sort with qsort. A Sabk function can't be
+  passed to C there ("C can't call it without its context").
+- **A C function's own type** is its pointer type: `let f = abs;` makes
+  `f` a `fn(int) -> int #c_call`, and messages print it that way.
+- **An overloaded C function as a value** follows the usual rule: the
+  expected type picks one (`let f: fn(f32) -> f32 #c_call = sin;`), or
+  it's the only one the code sees.
+- **`extern`**, the old spelling, is an error that shows the new one:
+  "`extern` is gone: a C function names its library, `fn strlen(...)
+  #foreign libc;`" or "a function C calls is `fn compare(...) #c_call {
+  ... }`".
 
 **C interop details:**
 - Struct layout matches C, so structs can be passed to C as they are.
@@ -3224,8 +3351,13 @@ pick(a, b);   // a, b: i32, with pick(i32, i64) and pick(i64, i32)
   parameters.
 - **A function value** needs a type to pick one: `let f = area;` is an
   error that lists them. A generic one isn't picked as a value.
-- **Not for `extern` functions**, since C has one function per name, and
-  not for `#expand` functions.
+- **C's functions overload too**, by their Sabk names: `fn sin(x: f32) ->
+  f32 #foreign libm "sinf";` next to `fn sin(x: f64) -> f64 #foreign
+  libm;`, or a C function next to one of ours. Two of one set can't be
+  the same C function (C has one per name): give one its C name.
+  `#expand` functions don't overload.
+- A C function's `...` takes any extra argument, as the loosest fit (a
+  bare `$T`'s), so a function that fits without it wins.
 - A variadic candidate (`..T`) takes each extra argument as a `T`, or a
   `..xs` slice whole.
 - In C, each one's name gets its parameters' types: `area__Circle`,
@@ -3236,7 +3368,10 @@ pick(a, b);   // a, b: i32, with pick(i32, i64) and pick(i64, i32)
   parameters; two imports with the same parameters make a call that
   fits both ambiguous, and the error says to name the module
   (`left.shared`). A qualified call, `io.print(...)`, only sees that
-  module's. `extern` functions don't join sets: yours hides theirs.
+  module's. One C function declared in several modules with the same
+  parameters (each binding declaring the `printf` it uses) is one
+  function, not an ambiguity. When yours hides the others and leaves one,
+  it's the function value too: `let p = printf;`.
 
 ### Operators
 
@@ -3396,7 +3531,7 @@ instance. A program with 600 instances spent 72 ms in our compiler and
   instance: `sort_by(items, less_than)` or
   `let f: fn(f64) -> f64 = twice;` work, and `let f = twice;` doesn't.
   A generic function with a `$T: type` parameter can't be a value at all.
-- No generic `extern` or `#expand` functions.
+- No generic C functions (`#foreign`, `#c_call`) or `#expand` functions.
 - No `$N` for array lengths.
 
 ## Compile-time `#if`
@@ -3443,10 +3578,11 @@ is where platform code goes, with the target constants every module sees:
 
 ```
 #if (OS == .Windows) {
-    extern fn Sleep(ms: u32);
+    const kernel32 = #system_library "kernel32";
+    fn Sleep(ms: u32) #foreign kernel32;
     struct Stat { size: i64; mode: u16; }
 } else {
-    extern fn usleep(us: u32) -> i32;
+    fn usleep(us: u32) -> i32 #foreign libc;     // libc: #import "std/c";
     struct Stat { dev: u64; ino: u64; mode: u32; size: i64; }
 }
 
@@ -3488,7 +3624,8 @@ let lookup: [#run table_size()]u8;          // an array length
 **What can run.** Almost any code: loops, recursion, `defer`, macros,
 generics, structs, slices, `new` and the allocators, the standard library,
 and C functions such as `printf` or `qsort` (through libffi, including C
-calling back into an `extern fn` with a body). Values are laid out in memory
+calling back into a `#c_call` function), from the libraries `#foreign`
+declarations name, which `#run` opens. Values are laid out in memory
 exactly as in the compiled program, so integer arithmetic, wrapping and
 struct layout give the same results at compile time as at run time.
 
@@ -3835,7 +3972,8 @@ it offers.
 | `std/logging` | `log(level, fmt, args)` through `context.logger`, skipping levels below `context.log_level`; `capture_logger(&lines)`, `silent_logger()` |
 | `std/array` | for growable arrays, `[..]T`: `array_of(items)` (an allocated copy), `array_add`, `array_add_new` (a pointer to a new last element, to fill in place), `array_append`, `array_pop`, `array_insert`, `array_remove`, `array_remove_unordered`, `array_find(xs, item)` (its index or -1, on any `[]T`) and `array_remove_value` (the first equal one), comparing as std/reflect's `values_equal`, `array_reserve`, `array_clear`, `array_free` |
 | `std/map` | `Map($K, $V)`, a hash map whose `entries`, a growable array, holds its entries in insertion order, for keys of any type; a zero one is ready to use; `make_map` (to pick the allocator or the hashing), `map_put`, `map_find` (a pointer, or null), `map_get` (a copy, and whether it's there), `map_has`, `map_remove`, `map_clear`, `map_free`; `StaticMap($K, $V)`, a read-only map that `#run` can bake into the program, made by `static_map(pairs)` from `Pair`s and read with `static_map_get` and `static_map_has`; `hash_bytes`, `hash_string`, `hash_key`, `keys_equal` |
-| `std/build` | for build scripts (top-level `#run`): `set_output`, `set_release`, `is_release`, `set_bounds_checks`, `add_c_flags`, `link_library`, `add_c_file` |
+| `std/build` | for build scripts (top-level `#run`): `set_output`, `set_release`, `is_release`, `set_bounds_checks`, `add_c_flags`, `link_library`, `add_c_file`, `add_library_dir` |
+| `std/c` | C's standard library for `#foreign`: `libc` and `libm` (see [C interop](#c-interop-libraries-and-foreign)) |
 | `std/checked` | 64-bit arithmetic that reports overflow instead of wrapping: `add_i64`, `sub_i64`, `mul_i64`, `div_i64`, `rem_i64`, `neg_i64`, `shl_i64` and their `u64` versions, each giving the result and whether it fits; `fits_signed(v, bits)`, `fits_unsigned(v, bits)`; `I64_MIN`, `I64_MAX`, `U64_MAX` |
 | `std/reflect` | `values_equal(a, b)` and `hash_value(v)` for values of any type, made per type by compile-time reflection; `hash_memory`, `combine_hashes` |
 | `std/sorting` | `sort`, `sort_by(items, less)`, `is_sorted`, `is_sorted_by`, `binary_search`, `reverse` for slices of any type; introsort, O(n log n) on any input, not stable |
@@ -3895,9 +4033,10 @@ A few things to know:
 - Char literals `'a'` and string literals `"..."`, with the escapes `\n`
   `\t` `\r` `\0` `\\` `\'` `\"` and `\xNN` (two hex digits). A string
   can span lines; its newlines are part of it.
-- Keywords: `fn return let const type struct enum union extern as
+- Keywords: `fn return let const type struct enum union as
   if else for in while do switch case default break continue defer sizeof
-  type_info is new context or_else or_return true false null`.
+  type_info is new context or_else or_return true false null`, and
+  `extern`, kept only to say what replaced it.
   A keyword can still be a field's name, where a field's name goes: in a
   struct's or variant's fields (`type: i32`), after `.` (`t.type`), in
   `.type = 1`, and in a pattern's `type: x`. It can't name a variable, so

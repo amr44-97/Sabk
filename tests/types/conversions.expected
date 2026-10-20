@@ -7,12 +7,13 @@ ROOT
     type: TYPE_NAME `u16` -> builtin : u16
     ENUM_VARIANT `X` : E = 0
     ENUM_VARIANT `Y` : E = 1
-  FUN_DECL `puts` [extern] : fn(*u8) -> i32
+  LIBRARY `libc` [#system_library "libc"]
+  FUN_DECL `puts` [foreign libc] : fn(*u8) -> i32 #c_call
     type: TYPE_NAME `i32` -> builtin : i32
     FUN_PARAM `s` : *u8
       type: TYPE_PTR `*` : *u8
         lhs: TYPE_NAME `u8` -> builtin : u8
-  FUN_DECL `free` [extern] : fn(*void)
+  FUN_DECL `free` [foreign libc] : fn(*void) #c_call
     FUN_PARAM `p` : *void
       type: TYPE_PTR `*` : *void
         lhs: TYPE_NAME `void` -> builtin : void
@@ -20,24 +21,24 @@ ROOT
     rhs: BLOCK
       VAR_DECL `w1` : i16
         type: TYPE_NAME `i16` -> builtin : i16
-        lhs: IDENTIFIER `a` -> FUN_PARAM `a` 6:6 : i8
+        lhs: IDENTIFIER `a` -> FUN_PARAM `a` 7:6 : i8
       VAR_DECL `w2` : i32
         type: TYPE_NAME `i32` -> builtin : i32
-        lhs: IDENTIFIER `b` -> FUN_PARAM `b` 6:13 : u16
+        lhs: IDENTIFIER `b` -> FUN_PARAM `b` 7:13 : u16
       VAR_DECL `w3` : u64
         type: TYPE_NAME `u64` -> builtin : u64
-        lhs: IDENTIFIER `b` -> FUN_PARAM `b` 6:13 : u16
+        lhs: IDENTIFIER `b` -> FUN_PARAM `b` 7:13 : u16
       VAR_DECL `w4` : f64
         type: TYPE_NAME `f64` -> builtin : f64
-        lhs: IDENTIFIER `x` -> FUN_PARAM `x` 6:21 : f32
+        lhs: IDENTIFIER `x` -> FUN_PARAM `x` 7:21 : f32
       VAR_DECL `raw` : *void
         type: TYPE_PTR `*` : *void
           lhs: TYPE_NAME `void` -> builtin : void
-        lhs: IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
+        lhs: IDENTIFIER `s` -> FUN_PARAM `s` 7:29 : *S
       EXPR_STMT `free`
         lhs: CALL `(` : void
-          lhs: IDENTIFIER `free` -> FUN_DECL `free` tests/types/conversions.sabk:4:11 : fn(*void)
-          IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
+          lhs: IDENTIFIER `free` -> FUN_DECL `free` tests/types/conversions.sabk:5:4 : fn(*void) #c_call
+          IDENTIFIER `s` -> FUN_PARAM `s` 7:29 : *S
       VAR_DECL `none` : *S
         type: TYPE_PTR `*` : *S
           lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.sabk:1:8 : S
@@ -58,10 +59,10 @@ ROOT
         type: TYPE_SLICE `[` : []i32
           lhs: TYPE_NAME `i32` -> builtin : i32
         lhs: ADDRESS_OF `&` : *[4]i32
-          lhs: IDENTIFIER `arr` -> VAR_DECL `arr` 16:9 : [4]i32
+          lhs: IDENTIFIER `arr` -> VAR_DECL `arr` 17:9 : [4]i32
       EXPR_STMT `puts`
         lhs: CALL `(` : i32
-          lhs: IDENTIFIER `puts` -> FUN_DECL `puts` tests/types/conversions.sabk:3:11 : fn(*u8) -> i32
+          lhs: IDENTIFIER `puts` -> FUN_DECL `puts` tests/types/conversions.sabk:4:4 : fn(*u8) -> i32 #c_call
           STRING_LITERAL `"c string"` : *u8
       VAR_DECL `cs` : *u8
         type: TYPE_PTR `*` : *u8
@@ -71,16 +72,16 @@ ROOT
         lhs: CAST : *S
           type: TYPE_PTR `*` : *S
             lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.sabk:1:8 : S
-          lhs: IDENTIFIER `raw` -> VAR_DECL `raw` 11:9 : *void
+          lhs: IDENTIFIER `raw` -> VAR_DECL `raw` 12:9 : *void
       VAR_DECL `addr` : usize
         lhs: CAST : usize
           type: TYPE_NAME `usize` -> builtin : usize
-          lhs: IDENTIFIER `s` -> FUN_PARAM `s` 6:29 : *S
+          lhs: IDENTIFIER `s` -> FUN_PARAM `s` 7:29 : *S
       VAR_DECL `p2` : *S
         lhs: CAST : *S
           type: TYPE_PTR `*` : *S
             lhs: TYPE_NAME `S` -> STRUCT `S` tests/types/conversions.sabk:1:8 : S
-          lhs: IDENTIFIER `addr` -> VAR_DECL `addr` 21:9 : usize
+          lhs: IDENTIFIER `addr` -> VAR_DECL `addr` 22:9 : usize
       VAR_DECL `e` : E
         lhs: CAST : E = 1
           type: TYPE_NAME `E` -> ENUM `E` tests/types/conversions.sabk:2:6 : E
@@ -95,11 +96,11 @@ ROOT
           lhs: GROUPED_EXPR `(` : i32
             lhs: CAST : i32
               type: TYPE_NAME `i32` -> builtin : i32
-              lhs: IDENTIFIER `a` -> FUN_PARAM `a` 6:6 : i8
+              lhs: IDENTIFIER `a` -> FUN_PARAM `a` 7:6 : i8
           rhs: GROUPED_EXPR `(` : i32
             lhs: CAST : i32
               type: TYPE_NAME `i32` -> builtin : i32
-              lhs: IDENTIFIER `b` -> FUN_PARAM `b` 6:13 : u16
+              lhs: IDENTIFIER `b` -> FUN_PARAM `b` 7:13 : u16
       VAR_DECL `c` : u8
         lhs: CAST : u8 = 1
           type: TYPE_NAME `u8` -> builtin : u8
@@ -107,7 +108,7 @@ ROOT
       VAR_DECL `fl` : f64
         lhs: CAST : f64
           type: TYPE_NAME `f64` -> builtin : f64
-          lhs: IDENTIFIER `a` -> FUN_PARAM `a` 6:6 : i8
+          lhs: IDENTIFIER `a` -> FUN_PARAM `a` 7:6 : i8
     FUN_PARAM `a` : i8
       type: TYPE_NAME `i8` -> builtin : i8
     FUN_PARAM `b` : u16

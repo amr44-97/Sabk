@@ -1,2 +1,2 @@
-const libc = #system_library "libc";
+#import "std/c";
 fn strlen(s: *void) -> usize #foreign libc;   // disagrees with c_strlen_u8's

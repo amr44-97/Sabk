@@ -7,6 +7,7 @@
 // parser's. A zero byte ends the file, as the end of the text does.
 
 #import "std/array";
+#import "std/c";
 #import "std/checked";
 #import "std/fmt";
 #import "std/mem";
@@ -375,7 +376,7 @@ fn skip_block_comment(l: *Lexer) -> bool {
 
 // ---- the values of number tokens
 
-extern fn strtod(text: *u8, end: **u8) -> f64;
+fn strtod(text: *u8, end: **u8) -> f64 #foreign libc;
 
 fn is_hex(c: u8) -> bool { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 

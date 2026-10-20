@@ -4,6 +4,9 @@
 #import "std/str";
 #import "lib/other_strlen" as other;
 
+#import "std/c";
+
+// a file's own libraries hide std/c's: declaring them is fine, as in Jai
 const libc = #system_library "libc";
 const libm = #system_library "libm";
 

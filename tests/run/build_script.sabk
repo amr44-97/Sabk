@@ -4,8 +4,8 @@
 #import "std/build";
 #import "lib/needs_libm";
 
-extern fn sqrt(x: f64) -> f64;
-extern fn helper_twice(x: i32) -> i32;
+fn sqrt(x: f64) -> f64 #foreign;
+fn helper_twice(x: i32) -> i32 #foreign;
 
 #run configure();
 #run println("a second step, after the first");

@@ -10,9 +10,9 @@
 [error]: `nothing` doesn't return a value, found 2 values at [tests/errors/several_results.sabk:18:15]
     18 |     return 1, 2;                          // returns nothing
        |               ^
-[error]: an `extern` function returns one value at most, as C functions do at [tests/errors/several_results.sabk:21:23]
-    21 | extern fn c_side() -> (i32, i32);         // C returns one value
-       |                       ^
+[error]: a C function returns one value at most, as C functions do at [tests/errors/several_results.sabk:21:16]
+    21 | fn c_side() -> (i32, i32) #foreign;         // C returns one value
+       |                ^
 [error]: `void_result` returns one value, found 2 values at [tests/errors/several_results.sabk:23:45]
     23 | fn void_result() -> (i32, void) { return 1, 2; }
        |                                             ^

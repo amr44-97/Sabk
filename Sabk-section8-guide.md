@@ -567,9 +567,9 @@ only.
 |---|---|---|
 | 1 | `const` names types, `type`, `==` on types | done, 965c228 |
 | 2 | C types in the prelude | done, 02fe18b; reserved names b48ab84 |
-| 3 | `#library`, `#system_library`, `#foreign` | done (uncommitted) |
-| 4 | `#c_call`, C function types; `extern` goes | next |
-| 5 | `#packed`, `#align` | |
+| 3 | `#library`, `#system_library`, `#foreign` | done, 47596a4 |
+| 4 | `#c_call`, C function types; `extern` goes | done (uncommitted) |
+| 5 | `#packed`, `#align` | next |
 | 6 | `is` on types | |
 | 7 | layer 1, `#assert` first | |
 

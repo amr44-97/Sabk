@@ -55,6 +55,11 @@ fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
         return to.kind == .Int && to.bits > from.bits && (to.is_signed || !from.is_signed);
     case .Float:
         return to.kind == .Float && to.bits > from.bits;
+    case .Fn:
+        // a C function pointer is C's `void *` too: C APIs take callbacks
+        // that way (dlsym, pthread_create's argument, qsort's in old
+        // bindings). A Sabk function takes a context C can't pass: `as`.
+        return to.kind == .Rawptr && from.is_c_call;
     case .Ptr:
         if (to.kind == .Rawptr)
             return true;
@@ -164,9 +169,16 @@ fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
         return coerce(c, e, option_value(to)); // why the value doesn't fit what it would hold
     if (from.kind == .UntypedInt && to.kind == .Int && e.cval.kind == .Int) {
         error(c, e.tok, tformat("the constant % doesn't fit in %", i128_to_string(e.cval.i), qt(to)));
-    } else if (to.kind == .Fn && e.decl != null && e.decl.kind is .Fn{is_extern: true}) {
-        error(c, e.tok, tformat("% is an `extern` function, which uses the C calling convention, so it can't be used as a %",
-                                q(e.tok.text), qt(to)));
+    } else if (from.kind == .Fn && to.kind == .Fn && from.is_c_call && !to.is_c_call) {
+        error(c, e.tok, tformat("% is a C function, called without a context, so it can't be a %, which takes one; a C function's type says so: %",
+                                function_named(e), qt(to), qt(from)));
+    } else if (from.kind == .Fn && to.kind == .Fn && !from.is_c_call && to.is_c_call) {
+        let name = if (e.decl != null && e.decl.kind.tag == .Fn) e.decl.tok.text else "f";
+        error(c, e.tok, tformat("% is a Sabk function, which takes a context C doesn't pass, so it can't be a %; for C to call it, declare it `fn %(...) #c_call { ... }`",
+                                function_named(e), qt(to), name));
+    } else if (from.kind == .Fn && to.kind == .Rawptr) {
+        error(c, e.tok, tformat("% is a Sabk function: it becomes a `*void` only with `as` (`% as *void`), for C to hold and give back, never to call; for C to call it, declare it `#c_call`",
+                                function_named(e), text_of(e)));
     } else {
         let qto, qfrom = q2(to, from);
         let bytes = slice_of(&c.types, c.types.u8);
@@ -193,6 +205,13 @@ fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
         explain_pointer_index(c, e);
     }
     return false;
+}
+
+// `abs` for a function's name, else "this function"
+fn function_named(e: *Node) -> string {
+    if ((e.kind.tag == .Identifier || e.kind.tag == .Member) && e.decl != null && e.decl.kind.tag == .Fn)
+        return q(e.tok.text);
+    return "this function";
 }
 
 // `p[i]` on a `*[N]T` or `*[..]T` is the i-th array from `p`, as in C.
@@ -608,16 +627,11 @@ fn value_of_decl(c: *Checker, n: *Node, d: *Node, expected: *Type = null) -> *Ty
             return c.types.error;
         n.decl = f;
         return value_of_decl(c, n, f, expected);
-    case .Fn{is_extern, is_macro}:
+    case .Fn{is_macro}:
         if (is_macro)
             return c.types.error;
-        // extern functions use the C calling convention, which our function
-        // types don't describe: as a value one is an opaque C function
-        // pointer
-        if (is_extern && n != c.extern_callee) {
-            decl_type(c, d);
-            return c.types.rawptr;
-        }
+        // a C function's value is a C function pointer, `fn(...) #c_call`
+        // (its declaration's type), which converts to *void on its own
         // a generic function: its instance is picked by the function type
         // it's converted to (see coerce)
         if (is_template(d))
@@ -748,10 +762,7 @@ fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
             k++;
         }
     } else {
-        if (fun != null)
-            c.extern_callee = callee;
         t = check_expr(c, callee, null);
-        c.extern_callee = null;
         // each argument is checked expecting its parameter's type; past the
         // parameters of a variadic function there's none, and when the
         // callee is broken the arguments only get checked for their own

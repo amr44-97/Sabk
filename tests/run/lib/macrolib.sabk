@@ -1,10 +1,12 @@
 // uses a private function of its own module; callers can't see log_line
+#import "std/c";
+
 fn trace(label: Code) #expand {
     log_line(#text(label));
 }
 
 #scope_file
 
-extern fn printf(fmt: *u8, ...) -> i32;
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;
 
 fn log_line(text: string) { printf("[lib] %s\n", text.ptr); }

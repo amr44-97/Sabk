@@ -1,0 +1,21 @@
+// C's standard library, for binding C functions and variables, as Jai's
+// POSIX module exports it:
+//
+//   #import "std/c";
+//
+//   fn puts(s: *char) -> int #foreign libc;
+//   fn sqrtf(x: float) -> float #foreign libm;
+//   let environ: **char #foreign libc;
+//
+// libc is C's library of everything but math, and libm its math (glibc
+// keeps them apart; macOS and musl don't, and both names work there).
+// Threads, dlopen and POSIX clocks are in libc too (glibc 2.34 and later).
+// A library is only linked when a program uses one of its declarations.
+//
+// Import this module rather than declaring your own `libc` in a module
+// others import: two modules exporting a `libc` make `#foreign libc`
+// ambiguous wherever both are imported. A file's own declaration hides
+// this module's, so a program that declares `libc` itself still works.
+
+const libc = #system_library "libc";
+const libm = #system_library "libm";

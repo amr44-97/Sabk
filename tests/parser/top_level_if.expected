@@ -4,7 +4,7 @@ ROOT `#`
       lhs: IDENTIFIER `OS`
       rhs: ENUM_SHORTHAND `.Windows`
     rhs: BLOCK
-      FUN_DECL `Sleep` [extern]
+      FUN_DECL `Sleep` [foreign]
         FUN_PARAM `ms`
           type: TYPE_NAME `u32`
     extra: STATIC_IF

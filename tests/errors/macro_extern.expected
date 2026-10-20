@@ -1,3 +1,0 @@
-[error]: a C function (`extern` or `#foreign`) can't be `#expand` at [tests/errors/macro_extern.sabk:1:15]
-     1 | extern fn m() #expand {}
-       |               ^

@@ -28,7 +28,7 @@ switch to them at the bootstrap.
 - [x] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
 - [x] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
-- [ ] **C interop:** `#library`, `#system_library`, `#foreign`, `#c_call` and C function types; `extern` goes (section 8). Built: libraries and `#foreign` (step 3); `#c_call` and removing `extern` are next
+- [x] **C interop:** `#library`, `#system_library`, `#foreign`, `#c_call` and C function types; `extern` goes (section 8); `std/c` exports libc and libm
 - [x] **C types** in the prelude: `int`, `long`, `char`, `size_t`, ... (section 8)
 - [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8). Built: everything but `is` and `#distinct`
 - [ ] **Layout:** `#packed` and `#align(n)` on structs (section 8)
@@ -1100,6 +1100,7 @@ let draw = dlsym(lib, "draw") as fn(i32) #c_call;         // called with no cont
 
 - A `#c_call` function with a body can be called from C, and its `context` starts as the default one, as an `extern fn` with a body does today.
 - **C function types:** `fn(...) -> T #c_call` is a C function pointer. A `#c_call` or foreign function is a value of it, a `*void` casts to it with `as`, and calling it passes no context. It can be a struct field, for C's tables of callbacks.
+- **A C function converts to `*void` implicitly** (decided Oct 20, 2026), since C APIs take callbacks as `void *`; nothing else about function types is implicit. docs/reference.md has the table of what doesn't convert, and the edge cases.
 - A C function type and a Sabk one never convert to each other implicitly. `as` is trusted, as between other pointers: a C function pointer is cast to a `#c_call` type, and a Sabk function passed through C's `void *` (a callback's user data) is cast back to its Sabk type, which works today. The compiler can't tell which a `*void` holds, so the only error is where it can see the function: casting a foreign or `#c_call` function to a Sabk function type.
 
 ### C types
@@ -1259,6 +1260,26 @@ dropped: it would break Sabk callbacks passed through C's `void *`.)
 14. **A local named like a C function the program calls** (`let time = time(null);`) hid it in C, where a local's scope starts at its own declarator: valid Sabk, and the C compiler failed. It was so before step 3 too; asm labels on everything would have avoided it. Such a local is now `time_` in C, as a local called `main` or `memset` already was.
 15. **macOS's linker has no `-l:file`**, so there a shared library is linked by its path (its install name says how the program finds it). Untested here.
 16. **Messages print a C function's `...`**: the ambiguity note said `printf(format: *u8)`.
+
+### Built, step 4 (Oct 20, 2026): `#c_call`, C function types; `extern` goes
+
+Decided with the user before building: two rounds; `std/c` exports `libc` and `libm`, as Jai's POSIX module does (the user's research: Jai's Preload exports no C library, and Runtime_Support keeps its own private), so the prelude's `libc` is private; and a `#c_call` function converts to `*void` implicitly, documented with its examples and edge cases, as every implicit rule should be.
+
+#### Edge cases met building it (to review)
+
+1. **Two rounds, the seed refreshed after each:** round 1 taught the compiler `#c_call` and C function types with `extern` still accepted; round 2 moved src/, std/, the prelude and the tests, and made `extern` an error.
+2. **A C function's own type is its pointer type**, `fn(*u8) -> usize #c_call`, so its value has it too. Before, a C function's value was a `*void`, and the checker kept a note of the callee being called (`extern_callee`) to give direct calls the real type; that's gone.
+3. **The implicit conversion** is `fn(...) #c_call` (any C function, or a value of a C function type) to `*void`. A Sabk function to `*void` stays `as` only, and its error says so ("for C to hold and give back, never to call").
+4. **`as` errors where it can see the function, both ways:** the plan named a C function cast to a Sabk type; a Sabk function named directly and cast to a `#c_call` type is the same mistake, so it's an error too.
+5. **The VM calls through a C function pointer with libffi**, building the call's description from the function type (`call_c`, shared with direct C calls). It keeps the set of Sabk functions it handed out as values, so a C address called through a Sabk type, or a Sabk function through a C type, stops `#run` with a message instead of crashing the compiler; in the program, it's undefined. `#run` can pass a `#c_call` function to C (a libffi closure), so qsort sorts at compile time.
+6. **Written function types take `...` only with `#c_call`**, and **`#c_call` after a function-type result belongs to the type**: `fn f() -> fn(i32) #c_call { }` is a Sabk function returning a C function pointer; `-> (fn(i32)) #c_call` makes `f` the C one. `#foreign` isn't a type's, so it never meets this.
+7. **A function with a body can't take C's `...`**, `#c_call` included: Sabk code can't read it.
+8. **The only function of a set this code sees is its value**: a test's own `printf` next to std/io's (which it hides) left one candidate, and `let p = printf;` still said "needs a type" (and "there are 1 functions").
+9. **`libc` follows Sabk's normal rules**, not reserved: a file's own declaration hides std/c's; two imports exporting one make `#foreign libc` ambiguous (the error suggests `module.libc`); neither is "unknown library `libc`: C's standard library comes from `#import "std/c";`". Importing std/io doesn't give you libc: imports aren't passed on. The unknown-library message no longer suggests `"liblibc"`.
+10. **The migration was a script**, so every rule was applied the same way: 41 libc names became `#foreign libc` with `#import "std/c";` in the 15 modules using them; the runtime's and the compiler's own C (`sabk_*`, `vmffi_*`) bare `#foreign`; functions with bodies (the VM's host functions, `closure_entry`) `#c_call`. In the build-script tests, `sqrt` and `cbrt` are bare `#foreign`: their own `link_library("m")` is what those tests test.
+11. **`extern` stays a keyword, only for its error**, which reads the whole declaration first to show the right spelling: `fn %(...) #c_call { ... }` for one with a body, `fn %(...) #foreign libc;` for one without, `let %: T #foreign libc;` for a variable.
+12. **Dumps say what a declaration is**: `[foreign libc]`, `[foreign]` or `[c_call]` replace `[extern]`, and a library has no type (it showed `<error>` in `--types`). `is_extern` keeps its name in the compiler, with a comment: C's calling convention.
+13. **Tests named after `extern` were renamed** (`overload_foreign`, `c_call_value`, ...), and two that became word for word step 3's parse tests were removed.
 
 ## 9. How it lands
 

@@ -1340,9 +1340,15 @@ fn resolve_library(r: *Resolver, name: *Node) {
     }
     let found = lookup(r, name.tok.text, color_of(r, name), name.tok.text.ptr);
     if (found == null) {
-        if (!report_ambiguous(r, name.tok))
-            error(r, name.tok, tformat("unknown library `%`; declare it: `const % = #system_library \"lib%\";`, or `#library \"path/lib%\"` for a file of your own",
-                                       name.tok.text, name.tok.text, name.tok.text, name.tok.text));
+        let n = name.tok.text;
+        let file = if (starts_with(n, "lib")) n else tformat("lib%", n);
+        if (report_ambiguous(r, name.tok)) {
+        } else if (n == "libc" || n == "libm") {
+            error(r, name.tok, tformat("unknown library `%`: C's standard library comes from `#import \"std/c\";`", n));
+        } else {
+            error(r, name.tok, tformat("unknown library `%`; declare it: `const % = #system_library \"%\";`, or `#library \"path/%\"` for a file of your own",
+                                       n, n, file, file));
+        }
         return;
     }
     if (!(found.kind is .Library)) {
@@ -1384,7 +1390,7 @@ fn resolve_fn(r: *Resolver, n: *Node) {
     // generic: every `$T` in a parameter's type declares T for the whole
     // function, so a parameter can use T before the one that says `$T`
     if (f.type_params.len > 0 && f.is_extern)
-        error(r, n.tok, "a C function (`extern` or `#foreign`) can't be generic");
+        error(r, n.tok, "a C function (`#foreign` or `#c_call`) can't be generic: C has one function per name, of one type");
     if (n.kind is .Fn{foreign} && foreign != null)
         resolve_library(r, foreign);
     for (param in f.type_params)

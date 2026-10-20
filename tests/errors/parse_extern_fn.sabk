@@ -1,0 +1,2 @@
+// `extern` is gone: what a C function is now
+extern fn strlen(s: *u8) -> usize;

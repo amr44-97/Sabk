@@ -50,6 +50,9 @@ struct Type {
     params: []*Type;        // Fn
     ret: *Type;             // Fn
     is_variadic: bool;
+    // Fn: C's calling convention, no context: a C function (#foreign) or
+    // one of ours C calls (#c_call), and the pointers to them
+    is_c_call: bool;
     decl: *Node;            // Struct, Union, Enum
     // a tagged enum (an enum whose variants hold values) is a Struct of
     // `tag` (an Enum) and `payload` (a Union of the variants' values). Those
@@ -173,14 +176,16 @@ fn array_type_of(ts: *Types, elem: *Type, len: u64) -> *Type {
     return t;
 }
 
-fn fn_type(ts: *Types, params: []*Type, ret: *Type, is_variadic: bool) -> *Type {
+fn fn_type(ts: *Types, params: []*Type, ret: *Type, is_variadic: bool, is_c_call: bool) -> *Type {
     for (t in ts.fns)
-        if (same_types(t.params, params) && t.ret == ret && t.is_variadic == is_variadic)
+        if (same_types(t.params, params) && t.ret == ret && t.is_variadic == is_variadic &&
+            t.is_c_call == is_c_call)
             return t;
     let t = make(.Fn);
     t.params = clone_slice(params);
     t.ret = ret;
     t.is_variadic = is_variadic;
+    t.is_c_call = is_c_call;
     array_add(&ts.fns, t);
     return t;
 }
@@ -224,6 +229,8 @@ fn type_name(t: *Type) -> string {
         array_add(&s, ')');
         if (t.ret.kind != .Void)
             print_to(&s, " -> %", type_name(t.ret));
+        if (t.is_c_call)
+            append_string(&s, " #c_call");
         return s as string;
     default:
         return t.name;

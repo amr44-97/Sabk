@@ -28,12 +28,13 @@
 // stdout goes through C's buffered stdio, so print and printf output stay
 // in order.
 
+#import "std/c";
 #import "std/fmt";
 #import "std/logging";
 #import "std/mem";
 #import "std/str";
 
-extern fn printf(format: *u8, ...) -> i32;
+fn printf(format: *u8, ...) -> i32 #foreign libc;
 
 // ---- printing
 
@@ -164,21 +165,21 @@ fn file_exists(path: string) -> bool {
 
 #scope_file
 
-extern fn fopen(path: *u8, mode: *u8) -> *void;
-extern fn fclose(file: *void) -> i32;
-extern fn fread(buffer: *void, size: usize, count: usize, file: *void) -> usize;
-extern fn fwrite(buffer: *void, size: usize, count: usize, file: *void) -> usize;
-extern fn ferror(file: *void) -> i32;
-extern fn remove(path: *u8) -> i32;
-extern fn access(path: *u8, mode: i32) -> i32;
-extern fn sabk_errno() -> i32; // the runtime's
-extern fn strerror(errno: i32) -> *u8;
+fn fopen(path: *u8, mode: *u8) -> *void #foreign libc;
+fn fclose(file: *void) -> i32 #foreign libc;
+fn fread(buffer: *void, size: usize, count: usize, file: *void) -> usize #foreign libc;
+fn fwrite(buffer: *void, size: usize, count: usize, file: *void) -> usize #foreign libc;
+fn ferror(file: *void) -> i32 #foreign libc;
+fn remove(path: *u8) -> i32 #foreign libc;
+fn access(path: *u8, mode: i32) -> i32 #foreign libc;
+fn sabk_errno() -> i32 #foreign; // the runtime's
+fn strerror(errno: i32) -> *u8 #foreign libc;
 
 // ---- printing
 
 // C's stdout (buffered) and stderr (not)
-extern let stdout: *void;
-extern let stderr: *void;
+let stdout: *void #foreign libc;
+let stderr: *void #foreign libc;
 
 fn write_formatted(file: *void, fmt: string, args: []Any) {
     if (args.len == 0) {

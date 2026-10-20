@@ -1,10 +1,11 @@
 // .len is an isize, and so is an integer `let` without a type: lengths mix
 // with other signed integers without casts, and counting down stops at 0
+#import "std/c";
 #import "std/io";
 #import "std/str";
 
-extern fn printf(format: *u8, ...) -> i32;
-extern fn memset(memory: *void, value: i32, size: usize) -> *void;
+fn printf(format: *u8, ...) -> i32 #foreign libc;
+fn memset(memory: *void, value: i32, size: usize) -> *void #foreign libc;
 
 fn average(xs: []i64) -> i64 {
     let total: i64 = 0;

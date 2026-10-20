@@ -1,0 +1,18 @@
+[error]: `abs` is a C function, called without a context, so it can't be a `fn(i32) -> i32`, which takes one; a C function's type says so: `fn(i32) -> i32 #c_call` at [tests/errors/c_call.sabk:12:29]
+    12 |     let f: fn(int) -> int = abs;              // C's as ours
+       |                             ^
+[error]: `ours` is a Sabk function, which takes a context C doesn't pass, so it can't be a `fn(i32) -> i32 #c_call`; for C to call it, declare it `fn ours(...) #c_call { ... }` at [tests/errors/c_call.sabk:13:37]
+    13 |     let g: fn(int) -> int #c_call = ours;     // ours as C's
+       |                                     ^
+[error]: `ours` is a Sabk function: it becomes a `*void` only with `as` (`ours as *void`), for C to hold and give back, never to call; for C to call it, declare it `#c_call` at [tests/errors/c_call.sabk:14:20]
+    14 |     let p: *void = ours;                      // only a C function becomes a *void on its own
+       |                    ^
+[error]: `abs` is a C function: called as a `fn(i32) -> i32`, it would get a context it doesn't take; its type is `fn(i32) -> i32 #c_call` at [tests/errors/c_call.sabk:15:17]
+    15 |     let h = abs as fn(int) -> int;            // `as` can't, when it sees the function
+       |                 ^
+[error]: `ours` is a Sabk function: called as a `fn(i32) -> i32 #c_call`, it wouldn't get its context; for C to call it, declare it `fn ours(...) #c_call { ... }` at [tests/errors/c_call.sabk:16:18]
+    16 |     let k = ours as fn(int) -> int #c_call;
+       |                  ^
+[error]: `ours_compare` is a Sabk function, which takes a context C doesn't pass, so it can't be a `fn(*void, *void) -> i32 #c_call`; for C to call it, declare it `fn ours_compare(...) #c_call { ... }` at [tests/errors/c_call.sabk:18:25]
+    18 |     qsort(&xs[0], 2, 4, ours_compare);        // C would call it without its context
+       |                         ^

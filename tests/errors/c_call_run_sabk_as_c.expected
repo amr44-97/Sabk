@@ -1,0 +1,9 @@
+[error]: `#run` failed: a Sabk function was called through a C function type (`#c_call`): it needs the context C doesn't pass; declare it `#c_call` at [tests/errors/c_call_run_sabk_as_c.sabk:10:11]
+    10 | const X = #run wrong();
+       |           ^
+[note]: here at [tests/errors/c_call_run_sabk_as_c.sabk:7:14]
+     7 |     return f(21);
+       |              ^
+[note]: called from here at [tests/errors/c_call_run_sabk_as_c.sabk:10:21]
+    10 | const X = #run wrong();
+       |                     ^

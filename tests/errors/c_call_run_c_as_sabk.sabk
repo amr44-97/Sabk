@@ -1,0 +1,12 @@
+// #run catches a C function called through a Sabk function type (`as` is
+// trusted, and in the program it would crash)
+#import "std/c";
+fn dlsym(handle: *void, name: *u8) -> *void #foreign libc;
+
+fn wrong() -> i32 {
+    let f = dlsym(null, "abs") as fn(i32) -> i32;   // should be #c_call
+    return f(-3);
+}
+
+const X = #run wrong();
+fn main() {}

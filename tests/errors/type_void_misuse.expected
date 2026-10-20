@@ -1,6 +1,6 @@
-[error]: a C function can't take `void`: C has no such parameter at [tests/errors/type_void_misuse.sabk:2:22]
-     2 | extern fn c_takes(x: void);              // C has no void parameter
-       |                      ^
+[error]: a C function can't take `void`: C has no such parameter at [tests/errors/type_void_misuse.sabk:2:15]
+     2 | fn c_takes(x: void) #foreign;              // C has no void parameter
+       |               ^
 [error]: a constant can't have type `void`: its one value is `.{}`, so there's nothing to name at [tests/errors/type_void_misuse.sabk:3:16]
      3 | const NOTHING: void = .{};               // nothing to name
        |                ^

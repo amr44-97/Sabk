@@ -1,7 +1,7 @@
 // a library that links what it needs itself, with its own build step
 #import "std/build";
 
-extern fn cbrt(x: f64) -> f64;
+fn cbrt(x: f64) -> f64 #foreign;
 
 #scope_file
 

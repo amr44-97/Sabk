@@ -1,2 +1,2 @@
-const libc = #system_library "libc";
+#import "std/c";
 let errno_value #foreign libc;

@@ -1,0 +1,6 @@
+// C's standard library isn't in every program (the prelude's is private,
+// as in Jai): it comes from std/c
+fn puts(s: *u8) -> i32 #foreign libc;
+fn sqrt(x: f64) -> f64 #foreign libm;
+
+fn main() {}

@@ -236,24 +236,15 @@ fn top_decl(p: *Parser) -> *Node {
     let decl: *Node;
     switch (peek(p).kind) {
     case .Extern:
+        // `extern` went with section 8 of the plan: what to write instead
         if (at(p, .Let, 1)) {
-            // extern let stdout: *void; a variable C defines
-            next(p);
+            let keyword = next(p);
             next(p); // let
-            let name = expect(p, .Identifier, "a variable name");
-            if (!eat(p, .Colon))
-                fail(p, peek(p), tformat("an `extern let` needs its type: `extern let %: T;`", name.text));
-            let declared = type_(p);
-            let value: *Node = null;
-            if (eat(p, .Equal))
-                value = expr(p);
-            if (value != null)
-                fail(p, value.tok, "an `extern let` can't have a value: C defines the variable");
-            expect(p, .Semicolon, "`;` after the declaration");
-            decl = new_node(name, .Let(declared, null, true, false));
-        } else {
-            decl = fn_decl(p);
+            let name = if (at(p, .Identifier)) peek(p).text else "name";
+            fail(p, keyword, tformat("`extern` is gone: a C variable names its library, `let %: T #foreign libc;` (`libc` comes from `#import \"std/c\";`)",
+                                     name));
         }
+        decl = fn_decl(p); // says what the function would be
     case .Fn:     decl = fn_decl(p);
     case .Struct: decl = aggregate(p, false);
     case .Union:  decl = aggregate(p, true);
@@ -294,7 +285,9 @@ fn import_decl(p: *Parser) -> *Node {
 }
 
 fn fn_decl(p: *Parser) -> *Node {
+    let extern_token = peek(p);
     let is_extern = eat(p, .Extern);
+    let extern_keyword = is_extern;
     expect(p, .Fn, "`fn` after `extern`");
     let name = if (at_operator_name(p)) operator_name(p) else expect(p, .Identifier, "a function name");
     let params: [..]*Node;
@@ -359,15 +352,25 @@ fn fn_decl(p: *Parser) -> *Node {
     let format, nodiscard, no_bounds_check, symmetric = false, false, false, false;
     let no_checks: Token;
     // fn strlen(s: *u8) -> usize #foreign libc: C's, from a library
-    let foreign: Token;
+    // fn by_name(a: *void, b: *void) -> int #c_call { ... }: ours, for C to
+    // call (C's calling convention, no context)
+    let foreign, c_call: Token;
     let library: *Node = null;
     let link_name = "";
     while (true) {
-        if (at_directive(p, "foreign")) {
-            foreign = directive(p);
-            if (is_extern)
-                fail(p, foreign, "`extern` and `#foreign` both say the function is C's: leave out `extern`");
-            library, link_name = foreign_spec(p);
+        if (at_directive(p, "foreign") || at_directive(p, "c_call")) {
+            let t = directive(p);
+            let is_foreign = t.text == "#foreign";
+            if (extern_keyword)
+                fail(p, t, tformat("`extern` and `%` both say C's calling convention: leave out `extern`", t.text));
+            if (foreign.text.len > 0 || c_call.text.len > 0)
+                fail(p, t, "a function is either C's (`#foreign`, with no body) or ours for C to call (`#c_call`, with a body), not both");
+            if (is_foreign) {
+                foreign = t;
+                library, link_name = foreign_spec(p);
+            } else {
+                c_call = t;
+            }
             is_extern = true; // C's calling convention
         } else if (at_directive(p, "symmetric")) {
             // fn operator *(v: Vec2, k: f64) #symmetric: also k * v
@@ -406,7 +409,7 @@ fn fn_decl(p: *Parser) -> *Node {
         if (no_bounds_check)
             fail(p, no_checks, "a macro's code runs in its caller, so it's checked as its caller is; `#no_bounds_check` goes on the caller");
         if (is_extern)
-            fail(p, hash, "a C function (`extern` or `#foreign`) can't be `#expand`");
+            fail(p, hash, "a C function (`#foreign` or `#c_call`) can't be `#expand`: C calls it, and a macro is only expanded");
         let last_variadic = params.len > 0 && params[params.len - 1].kind is .Param{variadic: true};
         if (variadic || last_variadic)
             fail(p, hash, "an `#expand` function can't be variadic");
@@ -420,6 +423,9 @@ fn fn_decl(p: *Parser) -> *Node {
         fail(p, peek(p), "a `#foreign` function is C's, defined in its library, so it has no body: end it with `;`");
     } else if (at(p, .LBrace)) {
         body = block(p);
+    } else if (c_call.text.len > 0) {
+        fail(p, peek(p), tformat("a `#c_call` function is ours, for C to call, so it needs a body `{`, found %; a C function from a library is `#foreign lib;`",
+                                 describe(peek(p))));
     } else if (is_extern) {
         if (no_bounds_check)
             fail(p, no_checks, "`#no_bounds_check` is for a function with a body; C's own code isn't checked");
@@ -427,6 +433,13 @@ fn fn_decl(p: *Parser) -> *Node {
     } else {
         fail(p, peek(p), tformat("expected a function body `{`, found % (only C's functions, `#foreign`, have none)", describe(peek(p))));
     }
+    if (extern_keyword && body != null)
+        fail(p, extern_token, tformat("`extern` is gone: a function C calls is `fn %(...) #c_call { ... }`", name.text));
+    if (extern_keyword)
+        fail(p, extern_token, tformat("`extern` is gone: a C function names its library, `fn %(...) #foreign libc;` (`libc` comes from `#import \"std/c\";`)",
+                                      name.text));
+    if (variadic && body != null)
+        fail(p, dots, "Sabk code can't read C's `...`, so a function with a body can't take it: take `args: ..Any`, or declare C's function `#foreign`");
     let fun = new_node(name, .Fn(params, result, body, is_extern, is_macro,
                                  variadic, format, nodiscard, no_bounds_check));
     if (fun.kind is .Fn{symmetric: &s, foreign: &lib, link_name: &c_name}) {
@@ -2030,7 +2043,12 @@ fn type_(p: *Parser) -> *Node {
         next(p);
         expect(p, .LParen, "`(` after `fn`");
         let params: [..]*Node;
+        let dots: Token;
         while (!at(p, .RParen)) {
+            if (at(p, .Ellipsis3)) {
+                dots = next(p); // C's: only with #c_call
+                break;
+            }
             array_add(&params, type_(p));
             if (!eat(p, .Comma))
                 break;
@@ -2039,7 +2057,16 @@ fn type_(p: *Parser) -> *Node {
         let result: *Node = null;
         if (eat(p, .Arrow))
             result = result_type(p);
-        return new_node(t, .TypeFn(params, result));
+        // fn(*void, *void) -> int #c_call: a C function pointer, called
+        // without a context
+        let c_call = false;
+        if (at_directive(p, "c_call")) {
+            directive(p);
+            c_call = true;
+        }
+        if (dots.text.len > 0 && !c_call)
+            fail(p, dots, "only a C function type can be variadic: `fn(*char, ...) -> int #c_call`");
+        return new_node(t, .TypeFn(params, result, c_call, dots.text.len > 0));
 
     case .Question: // ?T: the prelude's Option(T), whatever `Option` names here
         next(p);

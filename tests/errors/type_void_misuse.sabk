@@ -1,5 +1,5 @@
 // void is a real type with one value, `.{}`; these are what it can't do
-extern fn c_takes(x: void);              // C has no void parameter
+fn c_takes(x: void) #foreign;              // C has no void parameter
 const NOTHING: void = .{};               // nothing to name
 fn g() {}
 fn f() -> i32 {

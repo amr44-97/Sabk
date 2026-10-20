@@ -1,0 +1,3 @@
+[error]: a C function (`#foreign` or `#c_call`) can't be `#expand`: C calls it, and a macro is only expanded at [tests/errors/macro_c_function.sabk:1:16]
+     1 | fn m() #c_call #expand {}
+       |                ^

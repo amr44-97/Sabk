@@ -28,6 +28,7 @@
 //   builder_print(&b, "% items", 42);   any values, formatted (std/fmt)
 //   println(builder_string(&b));
 
+#import "std/c";
 #import "std/mem";
 #import "std/os";
 #import "std/array";
@@ -287,9 +288,9 @@ fn append_string(buf: *[..]u8, s: string) { array_append(buf, s as []u8); }
 
 #scope_file
 
-extern fn strlen(s: *u8) -> usize;
-extern fn memcmp(a: *void, b: *void, size: usize) -> i32;
-extern fn strtod(s: *u8, end: **u8) -> f64;
+fn strlen(s: *u8) -> usize #foreign libc;
+fn memcmp(a: *void, b: *void, size: usize) -> i32 #foreign libc;
+fn strtod(s: *u8, end: **u8) -> f64 #foreign libc;
 
 // ---- comparing and searching
 

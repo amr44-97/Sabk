@@ -1,0 +1,2 @@
+// `extern` is gone: what a C variable is now
+extern let stdout: *void;

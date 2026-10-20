@@ -1,0 +1,6 @@
+[error]: this `puts` and the one before are both C's `puts`, and C has one function per name: give one of them its C name (`#foreign lib "name"`) at [tests/errors/overload_foreign.sabk:6:4]
+     6 | fn puts(s: string) -> i32 #foreign libc;
+       |    ^
+[note]: the other is here at [tests/errors/overload_foreign.sabk:5:4]
+     5 | fn puts(s: *u8) -> i32 #foreign libc;
+       |    ^

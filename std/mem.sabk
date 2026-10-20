@@ -25,6 +25,7 @@
 //   defer arena_destroy(&arena);   blocks and are freed all at once
 //   with_allocator(arena_allocator(&arena)) { ... }
 
+#import "std/c";
 #import "std/map";
 #import "std/os";
 #import "std/str";
@@ -163,11 +164,11 @@ fn arena_destroy(arena: *Arena) {
 
 #scope_file
 
-extern fn memmove(dst: *void, src: *void, size: usize) -> *void;
-extern fn memset(memory: *void, value: i32, size: usize) -> *void;
+fn memmove(dst: *void, src: *void, size: usize) -> *void #foreign libc;
+fn memset(memory: *void, value: i32, size: usize) -> *void #foreign libc;
 // --sanitize: memory an arena takes back is poisoned (the C runtime's)
-extern fn sabk_poison(memory: *void, size: isize);
-extern fn sabk_unpoison(memory: *void, size: isize);
+fn sabk_poison(memory: *void, size: isize) #foreign;
+fn sabk_unpoison(memory: *void, size: isize) #foreign;
 
 // ---- allocating
 

@@ -1,6 +1,6 @@
-[error]: a C function (`extern` or `#foreign`) can't be generic at [tests/errors/generic_declarations.sabk:1:11]
-     1 | extern fn c_generic(x: $T);
-       |           ^
+[error]: a C function (`#foreign` or `#c_call`) can't be generic: C has one function per name, of one type at [tests/errors/generic_declarations.sabk:1:4]
+     1 | fn c_generic(x: $T) #foreign;
+       |    ^
 [error]: an `#expand` function can't be generic at [tests/errors/generic_declarations.sabk:2:22]
      2 | fn macro_generic(x: $T) #expand {}
        |                      ^

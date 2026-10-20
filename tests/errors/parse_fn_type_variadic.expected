@@ -1,0 +1,3 @@
+[error]: only a C function type can be variadic: `fn(*char, ...) -> int #c_call` at [tests/errors/parse_fn_type_variadic.sabk:1:24]
+     1 | const Printf = fn(*u8, ...) -> i32;
+       |                        ^

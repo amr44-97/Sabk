@@ -1,3 +1,3 @@
-const libc = #system_library "libc";
+#import "std/c";
 fn printf(format: *u8, ...) -> i32 #foreign libc;
 fn printf(message: string) -> isize { return message.len; }  // ours, of the same name

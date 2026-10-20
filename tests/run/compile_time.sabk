@@ -1,4 +1,5 @@
 // #run: code that runs while compiling, its result baked into the program
+#import "std/c";
 #import "std/fmt";
 #import "std/io";
 #import "std/str";
@@ -117,8 +118,8 @@ fn a9() -> i64 { let x: i8 = 100; x += 100; return x as i64; }
 fn a10() -> i64 { let a: i64 = -7; return a / 2 + a % 2 * 100; }
 
 // C functions, and C calling back into compile-time code
-extern fn qsort(base: *void, count: usize, size: usize, compare: *void);
-extern fn compare_bytes(a: *u8, b: *u8) -> i32 { return (a.* as i32) - (b.* as i32); }
+fn qsort(base: *void, count: usize, size: usize, compare: *void) #foreign libc;
+fn compare_bytes(a: *u8, b: *u8) -> i32 #c_call { return (a.* as i32) - (b.* as i32); }
 
 fn sorted_letters() -> [5]u8 {
     let letters = u8.['d', 'b', 'e', 'a', 'c'];

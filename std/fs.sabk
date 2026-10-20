@@ -10,6 +10,7 @@
 //   current_dir()                 the working directory: (path, IoError),
 //                                 allocated
 
+#import "std/c";
 #import "std/io";
 #import "std/mem";
 #import "std/os";
@@ -76,11 +77,11 @@ fn current_dir(a: Allocator = context.allocator) -> (string, IoError = .None) {
 
 #scope_file
 
-extern fn opendir(path: *u8) -> *void;
-extern fn closedir(dir: *void) -> i32;
-extern fn mkdir(path: *u8, mode: u32) -> i32;
-extern fn rmdir(path: *u8) -> i32;
-extern fn mkdtemp(template: *u8) -> *u8;
-extern fn getcwd(buffer: *u8, size: usize) -> *u8;
+fn opendir(path: *u8) -> *void #foreign libc;
+fn closedir(dir: *void) -> i32 #foreign libc;
+fn mkdir(path: *u8, mode: u32) -> i32 #foreign libc;
+fn rmdir(path: *u8) -> i32 #foreign libc;
+fn mkdtemp(template: *u8) -> *u8 #foreign libc;
+fn getcwd(buffer: *u8, size: usize) -> *u8 #foreign libc;
 
-extern fn sabk_errno() -> i32; // the runtime's
+fn sabk_errno() -> i32 #foreign; // the runtime's

@@ -1,19 +1,19 @@
-std/mem.sabk:179:15: panic: delete can't free a `*i64`: it frees strings, slices, growable arrays, Maps and Builders; a pointer is freed with free(p)
-[error]: `#run` failed: it called abort() (a panic?) at [std/mem.sabk:55:17]
-    55 |         #insert #run delete_code(type_info(T));
+std/mem.sabk:180:15: panic: delete can't free a `*i64`: it frees strings, slices, growable arrays, Maps and Builders; a pointer is freed with free(p)
+[error]: `#run` failed: it called abort() (a panic?) at [std/mem.sabk:56:17]
+    56 |         #insert #run delete_code(type_info(T));
        |                 ^
 [note]: in `delete` with T = *i64, used here at [tests/errors/delete_unknown.sabk:5:17]
      5 | fn f(p: *i64) { delete(p); }
        |                 ^
-[note]: here at [<prelude>:197:5]
-   197 |     abort();
+[note]: here at [<prelude>:201:5]
+   201 |     abort();
        |     ^
-[note]: called from here at [std/os.sabk:57:52]
-    57 |     handler.procedure(handler.data, what, message, location);
+[note]: called from here at [std/os.sabk:58:52]
+    58 |     handler.procedure(handler.data, what, message, location);
        |                                                    ^
-[note]: called from here at [std/str.sabk:135:60]
-   135 | fn join(parts: []string, separator: string, a: Allocator = context.allocator) -> string {
+[note]: called from here at [std/str.sabk:136:60]
+   136 | fn join(parts: []string, separator: string, a: Allocator = context.allocator) -> string {
        |                                                            ^
-[note]: called from here at [std/mem.sabk:55:34]
-    55 |         #insert #run delete_code(type_info(T));
+[note]: called from here at [std/mem.sabk:56:34]
+    56 |         #insert #run delete_code(type_info(T));
        |                                  ^

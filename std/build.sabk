@@ -65,13 +65,13 @@ fn add_library_dir(dir: string) { sabk_build_add_library_dir(dir.ptr, dir.len); 
 
 // ---- inside: the compiler provides these
 
-extern fn sabk_build_set_output(path: *u8, len: isize);
-extern fn sabk_build_set_release(on: bool);
-extern fn sabk_build_is_release() -> bool;
-extern fn sabk_build_set_bounds_checks(mode: i32);
-extern fn sabk_build_set_strict(on: bool);
-extern fn sabk_build_set_werror(on: bool);
-extern fn sabk_build_add_c_flags(flags: *u8, len: isize);
-extern fn sabk_build_link_library(name: *u8, len: isize);
-extern fn sabk_build_add_c_file(path: *u8, len: isize);
-extern fn sabk_build_add_library_dir(dir: *u8, len: isize);
+fn sabk_build_set_output(path: *u8, len: isize) #foreign;
+fn sabk_build_set_release(on: bool) #foreign;
+fn sabk_build_is_release() -> bool #foreign;
+fn sabk_build_set_bounds_checks(mode: i32) #foreign;
+fn sabk_build_set_strict(on: bool) #foreign;
+fn sabk_build_set_werror(on: bool) #foreign;
+fn sabk_build_add_c_flags(flags: *u8, len: isize) #foreign;
+fn sabk_build_link_library(name: *u8, len: isize) #foreign;
+fn sabk_build_add_c_file(path: *u8, len: isize) #foreign;
+fn sabk_build_add_library_dir(dir: *u8, len: isize) #foreign;

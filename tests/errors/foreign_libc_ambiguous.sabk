@@ -1,0 +1,8 @@
+// Two modules exporting a `libc` make `#foreign libc` ambiguous where both
+// are imported: a module others import takes libc from std/c
+#import "lib/exports_libc_a";
+#import "lib/exports_libc_b";
+
+fn puts(s: *u8) -> i32 #foreign libc;
+
+fn main() {}

@@ -18,7 +18,7 @@ fn nothing() {
     return 1, 2;                          // returns nothing
 }
 
-extern fn c_side() -> (i32, i32);         // C returns one value
+fn c_side() -> (i32, i32) #foreign;         // C returns one value
 
 fn void_result() -> (i32, void) { return 1, 2; }
 

@@ -1,11 +1,12 @@
 // extern let: variables C defines, under their C names
+#import "std/c";
 #import "std/io";
 
-extern let stdout: *void;         // C's FILE *stdout
-extern let environ: **u8;          // the environment, NULL-terminated
-extern let optind: i32;            // getopt's: one we can write to
+let stdout: *void #foreign libc;         // C's FILE *stdout
+let environ: **u8 #foreign libc;          // the environment, NULL-terminated
+let optind: i32 #foreign libc;            // getopt's: one we can write to
 
-extern fn fwrite(data: *void, size: usize, count: usize, file: *void) -> usize;
+fn fwrite(data: *void, size: usize, count: usize, file: *void) -> usize #foreign libc;
 
 fn environment_size() -> isize {
     let n = 0;

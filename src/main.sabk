@@ -3,6 +3,7 @@
 
 #import "std/array";
 #import "std/build";
+#import "std/c";
 #import "std/fmt";
 #import "std/fs";
 #import "std/io";
@@ -34,7 +35,7 @@ fn configure() {
     link_library("ffi");
 }
 
-extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32 #foreign libc;
 
 enum Mode { Build, Run, EmitC, Check, Tokens, Ast, Resolve, Types }
 

@@ -1,5 +1,6 @@
 // only code reachable from main is compiled to C; these functions are
 // reached in roundabout ways, so they must still be there
+#import "std/c";
 #import "std/io";
 
 fn doubled(x: i32) -> i32 { return x * 2; }
@@ -13,8 +14,8 @@ let chosen: fn(i32) -> i32 = doubled;           // a global's initializer
 struct Ops { apply: fn(i32) -> i32 = tripled; } // a field's default
 fn apply(x: i32, f: fn(i32) -> i32 = negated) -> i32 { return f(x); } // a default
 
-extern fn qsort(base: *void, count: usize, size: usize, compare: *void);
-extern fn compare(a: *i32, b: *i32) -> i32 { return a.* - b.*; } // called by C
+fn qsort(base: *void, count: usize, size: usize, compare: *void) #foreign libc;
+fn compare(a: *i32, b: *i32) -> i32 #c_call { return a.* - b.*; } // called by C
 
 const SEVEN = #run only_at_compile_time();
 

@@ -1,3 +1,0 @@
-[error]: the C variable `sabk_no_such_variable` isn't available while compiling, so `#run` code can't use it at [tests/errors/extern_let_missing.sabk:4:27]
-     4 | fn read() -> i32 { return sabk_no_such_variable; }
-       |                           ^

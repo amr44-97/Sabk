@@ -1,0 +1,6 @@
+[error]: `c` is a C function, called without a context, so it can't be a `fn(i32) -> i32`, which takes one; a C function's type says so: `fn(i32) -> i32 #c_call` at [tests/errors/c_call_value.sabk:3:24]
+     3 | fn main() { let f: F = c; let p = &c; }
+       |                        ^
+[error]: a function is already a pointer, use `c` without `&` at [tests/errors/c_call_value.sabk:3:35]
+     3 | fn main() { let f: F = c; let p = &c; }
+       |                                   ^

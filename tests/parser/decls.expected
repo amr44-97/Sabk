@@ -58,15 +58,15 @@ ROOT `#`
     type: TYPE_NAME `u64`
   VAR_DECL `ready`
     lhs: BOOL_LITERAL `false`
-  FUN_DECL `printf` [extern] [variadic]
+  FUN_DECL `printf` [foreign libc] [variadic]
     type: TYPE_NAME `i32`
     FUN_PARAM `fmt`
       type: TYPE_PTR `*`
         lhs: TYPE_NAME `u8`
-  FUN_DECL `exit` [extern]
+  FUN_DECL `exit` [foreign libc]
     FUN_PARAM `code`
       type: TYPE_NAME `i32`
-  FUN_DECL `callback` [extern]
+  FUN_DECL `callback` [c_call]
     type: TYPE_NAME `i32`
     rhs: BLOCK
       RETURN

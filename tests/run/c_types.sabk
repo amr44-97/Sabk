@@ -1,8 +1,9 @@
 // C's type names come from the prelude, as aliases of Sabk's own types.
+#import "std/c";
 #import "std/io";
 
-extern fn abs(x: int) -> int;
-extern fn strlen(s: *char) -> size_t;
+fn abs(x: int) -> int #foreign libc;
+fn strlen(s: *char) -> size_t #foreign libc;
 
 struct Sample { int: int; double: double; }
 

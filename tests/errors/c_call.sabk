@@ -1,0 +1,19 @@
+// A C function type and a Sabk one never convert to each other: C's is
+// called without a context, ours with one
+#import "std/c";
+
+const Compare = fn(*void, *void) -> int #c_call;
+fn abs(x: int) -> int #foreign libc;
+fn qsort(base: *void, count: size_t, size: size_t, compare: Compare) #foreign libc;
+fn ours(x: int) -> int { return x; }
+fn ours_compare(a: *void, b: *void) -> int { return 0; }
+
+fn main() {
+    let f: fn(int) -> int = abs;              // C's as ours
+    let g: fn(int) -> int #c_call = ours;     // ours as C's
+    let p: *void = ours;                      // only a C function becomes a *void on its own
+    let h = abs as fn(int) -> int;            // `as` can't, when it sees the function
+    let k = ours as fn(int) -> int #c_call;
+    let xs: [2]i32;
+    qsort(&xs[0], 2, 4, ours_compare);        // C would call it without its context
+}

@@ -1,5 +1,7 @@
-extern fn printf(fmt: *u8, ...) -> i32;
-extern fn qsort(base: *void, count: usize, size: usize, cmp: *void);
+#import "std/c";
+
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;
+fn qsort(base: *void, count: usize, size: usize, cmp: *void) #foreign libc;
 
 const BinOp = fn(i32, i32) -> i32;
 
@@ -20,7 +22,7 @@ fn fib(n: i32) -> i64 {
 }
 
 // called by C's qsort, so it uses the C calling convention
-extern fn compare(a: *void, b: *void) -> i32 {
+fn compare(a: *void, b: *void) -> i32 #c_call {
     let x = (a as *i32).*;
     let y = (b as *i32).*;
     if (x < y) return -1;

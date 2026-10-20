@@ -1,0 +1,5 @@
+// C's code isn't checked to begin with
+#import "std/c";
+
+fn memset(memory: *void, value: i32, size: usize) -> *void #no_bounds_check #foreign libc;
+fn main() {}

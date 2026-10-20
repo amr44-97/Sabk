@@ -147,17 +147,21 @@ fn error_value(e: Error) -> i64 {
 
 #scope_file
 
+// The C library the runtime uses, private as Jai's Runtime_Support keeps
+// it: a program's own C goes through std/c.
+const libc = #system_library "libc";
+
 // ---- type information, for printing any value (std/fmt) and reflection
 //
 // type_info(T) is a *TypeInfo; the compiler makes one for every type that
 // needs it, at run time and at compile time. A value of any type converts
 // to Any implicitly: a pointer to (a copy of) it and its type.
 
-extern fn calloc(count: usize, size: usize) -> *void;
-extern fn realloc(memory: *void, size: usize) -> *void;
-extern fn free(memory: *void);
-extern fn memset(memory: *void, value: i32, size: usize) -> *void;
-extern fn memcpy(dst: *void, src: *void, size: usize) -> *void;
+fn calloc(count: usize, size: usize) -> *void #foreign libc;
+fn realloc(memory: *void, size: usize) -> *void #foreign libc;
+fn free(memory: *void) #foreign libc;
+fn memset(memory: *void, value: i32, size: usize) -> *void #foreign libc;
+fn memcpy(dst: *void, src: *void, size: usize) -> *void #foreign libc;
 
 fn default_context() -> Context {
     return Context.{
@@ -171,9 +175,9 @@ fn default_context() -> Context {
 
 // ---- the default logger and panic handler, both on stderr
 
-extern fn dprintf(fd: i32, format: *u8, ...) -> i32;
-extern fn fflush(file: *void) -> i32;
-extern fn abort();
+fn dprintf(fd: i32, format: *u8, ...) -> i32 #foreign libc;
+fn fflush(file: *void) -> i32 #foreign libc;
+fn abort() #foreign libc;
 
 // "warning: message"
 fn stderr_logger(data: *void, level: LogLevel, message: string) {
@@ -234,8 +238,8 @@ fn align_forward(address: isize, align: isize) -> isize {
 
 // --sanitize: memory taken back is poisoned, and unpoisoned when it's
 // handed out again (the C runtime's; they do nothing in other builds)
-extern fn sabk_poison(memory: *void, size: isize);
-extern fn sabk_unpoison(memory: *void, size: isize);
+fn sabk_poison(memory: *void, size: isize) #foreign;
+fn sabk_unpoison(memory: *void, size: isize) #foreign;
 
 // `size` bytes from `block`, or null if they don't fit
 fn temp_carve(block: *TempBlock, size: isize, align: isize) -> *void {
@@ -323,4 +327,4 @@ fn temp_proc(data: *void, mode: AllocatorMode, size: isize, align: isize, old: *
 // `if (err is IoError(e))`, `case IoError(.NotFound):`.
 
 // the compiler's table of the enums that became Errors
-extern fn sabk_error_type(id: u32) -> *TypeInfo;
+fn sabk_error_type(id: u32) -> *TypeInfo #foreign;

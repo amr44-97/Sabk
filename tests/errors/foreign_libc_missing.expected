@@ -1,0 +1,6 @@
+[error]: unknown library `libc`: C's standard library comes from `#import "std/c";` at [tests/errors/foreign_libc_missing.sabk:3:33]
+     3 | fn puts(s: *u8) -> i32 #foreign libc;
+       |                                 ^
+[error]: unknown library `libm`: C's standard library comes from `#import "std/c";` at [tests/errors/foreign_libc_missing.sabk:4:33]
+     4 | fn sqrt(x: f64) -> f64 #foreign libm;
+       |                                 ^

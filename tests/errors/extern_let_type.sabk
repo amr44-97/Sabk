@@ -1,4 +1,0 @@
-// an extern variable needs its type: there's no value to take it from
-extern let stdout;
-
-fn main() {}

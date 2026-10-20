@@ -1,0 +1,3 @@
+[error]: Sabk code can't read C's `...`, so a function with a body can't take it: take `args: ..Any`, or declare C's function `#foreign` at [tests/errors/parse_c_call_variadic.sabk:1:19]
+     1 | fn f(format: *u8, ...) #c_call { }
+       |                   ^

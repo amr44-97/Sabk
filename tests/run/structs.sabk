@@ -1,4 +1,6 @@
-extern fn printf(fmt: *u8, ...) -> i32;
+#import "std/c";
+
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;
 
 struct Vec2 { x: f32; y: f32 = 10.0; }
 struct Node { value: i32; next: *Node; }

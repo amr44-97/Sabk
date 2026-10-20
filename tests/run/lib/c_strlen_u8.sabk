@@ -1,2 +1,2 @@
-const libc = #system_library "libc";
+#import "std/c";
 fn strlen(s: *u8) -> i32 #foreign libc;

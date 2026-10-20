@@ -6,6 +6,7 @@
 // can be compared on the same files.
 
 #import "std/array";
+#import "std/c";
 #import "std/fmt";
 #import "std/io";
 #import "std/map";
@@ -69,6 +70,8 @@ enum NodeKind {
     // several functions of one name, in a scope (never in a tree): a call
     // picks one by its arguments; tok: the first's name
     Overloads(fns: []*Node),
+    // is_extern: C's calling convention, no context: `#foreign` (no body)
+    // or `#c_call` (a body C calls)
     Fn(params: []*Node, result: *Node, body: *Node,
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
        nodiscard: bool, no_bounds_check: bool,
@@ -85,7 +88,7 @@ enum NodeKind {
     // Number(i64) has a payload type; Binary(op: Op, ...) fields, a Struct
     Variant(payload: *Node, fields: *Node, value: *Node),
     TypeAlias(aliased: *Node),
-    Let(declared: *Node, value: *Node, is_extern: bool, uninit: bool,
+    Let(declared: *Node, value: *Node, is_extern: bool, uninit: bool, // is_extern: #foreign
         foreign: *Node = null, link_name: string = ""), // as Fn's
     // const raylib = #library "vendor/libraylib"; #system_library "libm":
     // a library foreign declarations name; `dir`: where `path` is relative
@@ -179,7 +182,9 @@ enum NodeKind {
     TypeArray(elem: *Node, len: *Node),
     TypeSlice(elem: *Node),
     TypeGrowable(elem: *Node),
-    TypeFn(params: []*Node, result: *Node),
+    TypeFn(params: []*Node, result: *Node,
+           c_call: bool = false,           // fn(...) #c_call: a C function pointer
+           variadic: bool = false),        // fn(*char, ...) -> int #c_call
     TypeTuple(items: []*Node),               // (i64, bool) after `->`
     TypeParam,                               // $T; tok: the name
     BuiltinType,                             // i32, bool, ...: the resolver's
@@ -200,8 +205,7 @@ fn c_symbol(d: *Node) -> string {
     return d.tok.text;
 }
 
-// a C function or variable declared here and defined elsewhere: `extern
-// fn` without a body, `extern let`, or `#foreign`
+// a C function or variable declared here and defined elsewhere: `#foreign`
 fn is_foreign(d: *Node) -> bool {
     switch (d.kind) {
     case .Fn{is_extern, body}: return is_extern && body == null;
@@ -242,6 +246,7 @@ struct OldShape {
     nodiscard: bool;
     dropped: bool;
     variadic: bool;
+    c_call: bool;       // a C function type
     type_param: bool;
     generic: bool;
 }
@@ -401,7 +406,10 @@ fn old_shape(n: *Node) -> OldShape {
     case .TypeArray{elem, len}: s.tag = "TYPE_ARRAY"; s.lhs = elem; s.rhs = len;
     case .TypeSlice{elem}: s.tag = "TYPE_SLICE"; s.lhs = elem;
     case .TypeGrowable{elem}: s.tag = "TYPE_GROWABLE"; s.lhs = elem;
-    case .TypeFn{params, result}: s.tag = "TYPE_FN"; s.declared = result; s.list = params;
+    case .TypeFn(f):
+        s.tag = "TYPE_FN"; s.declared = f.result; s.list = f.params;
+        s.variadic = f.variadic;
+        s.c_call = f.c_call;
     case .TypeTuple{items}: s.tag = "TYPE_TUPLE"; s.list = items;
     case .TypeParam: s.tag = "TYPE_PARAM";
     case .BuiltinType: s.tag = "BUILTIN_TYPE";
@@ -574,10 +582,13 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
     if (n.caller) append_string(out, " [caller]");
     if (n.color != 0) print_to(out, " [macro %]", n.color);
     if (n.kind is .MacroExpansion{expansion}) print_to(out, " [expansion %]", expansion);
-    if (s.is_extern) append_string(out, " [extern]");
-    if (s.foreign != null) {
+    // C's calling convention: a C function or variable (`#foreign`, and
+    // its library), or one of ours C calls (`#c_call`)
+    if (s.is_extern && s.foreign != null) {
         let module = if (s.foreign.kind is .Member{object}) tformat("%.", object.tok.text) else "";
         print_to(out, " [foreign %{}%]", module, s.foreign.tok.text);
+    } else if (s.is_extern) {
+        append_string(out, if (n.kind.tag == .Fn && s.rhs != null) " [c_call]" else " [foreign]");
     }
     if (s.link_name.len > 0) print_to(out, " [C name %]", s.link_name);
     if (n.kind is .Library{path}) print_to(out, " [% %]", s.library, path.text);
@@ -586,6 +597,7 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
     if (s.nodiscard) append_string(out, " [nodiscard]");
     if (s.dropped) append_string(out, " [dropped]");
     if (s.variadic) append_string(out, " [variadic]");
+    if (s.c_call) append_string(out, " [c_call]");
     if (s.type_param) append_string(out, " [type param]");
     if (s.generic) append_string(out, " [generic]");
     if (n.decl != null)
@@ -652,7 +664,7 @@ fn holds(f: *Module, t: Token) -> bool {
     return t.text.ptr >= text.ptr && t.text.ptr <= text.ptr + text.len;
 }
 
-extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32 #foreign libc;
 
 fn clone_tree(n: *Node, copies: *Map(*Node, *Node)) -> *Node {
     if (n == null)

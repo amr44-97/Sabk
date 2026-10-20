@@ -1644,7 +1644,7 @@ fn name(l: *Lower, n: *Node, d: *Node) -> u32 {
     }
 }
 
-// an `extern let` used at `n` must exist in the compiler, to be read
+// a `#foreign` variable used at `n` must exist while compiling, to be read
 fn c_variable(l: *Lower, n: *Node, d: *Node) -> bool {
     if (!(d.kind is .Let{is_extern: true}))
         return true;
@@ -1957,7 +1957,12 @@ fn call(l: *Lower, n: *Node) -> u32 {
         site.fn_slot = values[0];
         first = 1;
     }
-    let c_call = fun != null && fun.kind is .Fn{is_extern: true};
+    // a C function, or a call through a C function pointer: no context
+    let c_call = if (fun != null) fun.kind is .Fn{is_extern: true} else t.is_c_call;
+    if (fun == null && c_call) {
+        site.c_call = true;
+        site.c_fixed = if (t.is_variadic) t.params.len as i32 else -1;
+    }
     if (!c_call)
         array_add(&site.args, ArgSlot.{ .slot = ctx_slot(l), .size = 8 });
     for (k in first..parts.len) {

@@ -1,6 +1,6 @@
 // what a top-level #if's untaken branch declares isn't part of the program
 #if (POINTER_SIZE == 3) {
-    extern fn exotic_sleep(ms: u32);
+    fn exotic_sleep(ms: u32) #foreign;
     struct Exotic { handle: *void; }
     const EXOTIC_PAGE = 512;
 }

@@ -1,0 +1,2 @@
+// exports its own `libc`, as a module others import shouldn't
+const libc = #system_library "libc";

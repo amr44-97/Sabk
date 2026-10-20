@@ -1,0 +1,2 @@
+// `extern` is gone: what a function C calls is now
+extern fn compare(a: *void, b: *void) -> i32 { return 0; }

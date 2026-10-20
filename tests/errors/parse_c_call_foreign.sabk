@@ -1,0 +1,2 @@
+#import "std/c";
+fn f() #foreign libc #c_call;

@@ -10,6 +10,7 @@
 // which reports it.
 
 #import "std/array";
+#import "std/c";
 #import "std/fs";
 #import "std/fmt";
 #import "std/io";
@@ -88,6 +89,11 @@ struct VmCallSite {
     ret_slot: u32;
     ret_size: u32;
     ret_type: *Type;
+    // a call through a C function pointer (`fn(...) #c_call`): the value is
+    // a C address, called with libffi; c_fixed: a variadic one's fixed
+    // parameters, else -1
+    c_call: bool;
+    c_fixed: i32;
     // a C call's libffi description, prepared the first time it runs
     prepared: bool;
     cif: *void;
@@ -115,7 +121,7 @@ struct VmFunction {
     is_abort: bool;         // stopped instead of called
     is_exit: bool;
 
-    // an `extern fn` with a body, passed to C: a libffi closure that runs it
+    // a #c_call function, passed to C: a libffi closure that runs it
     closure_code: *void;    // what C calls
     closure_args: [..]*void;
 }
@@ -132,6 +138,9 @@ struct VmError {
 struct Vm {
     c: *Checker;
     functions: Map(*Node, *VmFunction);
+    // the *VmFunctions handed out as values: what a Sabk function value
+    // can hold (a C address there came through `as`, and C can't run it)
+    function_values: Map(*void, bool);
     globals: Map(*Node, *u8);
     type_infos: Map(*Type, *u8);
     stack: []u8;
@@ -454,6 +463,7 @@ fn vm_function_for(vm: *Vm, decl: *Node) -> *VmFunction {
             f.address, f.unavailable = vm_foreign_address(decl);
     }
     map_put(&vm.functions, decl, f);
+    map_put(&vm.function_values, f, true);
     return f;
 }
 
@@ -614,8 +624,8 @@ fn vm_evaluate(vm: *Vm, n: *Node, at: *Node) -> ([]u8, bool) {
 
 /* --------------------------------------------------------- calls into C */
 
-// a function C code can call: a C function, or a closure for an `extern
-// fn` with a body; null if there's none
+// a function C code can call: a C function, or a closure for a `#c_call`
+// function; null if there's none
 fn vm_c_address(vm: *Vm, f: *VmFunction) -> *void {
     if (f.native)
         return f.address;
@@ -811,23 +821,23 @@ fn write_float(p: *u8, k: VmKind, v: f64) {
 
 /* ------------------------------------------------------------------ C */
 
-extern fn vmffi_dlsym(name: *u8) -> *void;
-extern fn vmffi_dlopen(path: *u8) -> *void;
-extern fn vmffi_dlsym_in(library: *void, name: *u8) -> *void;
-extern fn vmffi_dlerror() -> *u8;
+fn vmffi_dlsym(name: *u8) -> *void #foreign;
+fn vmffi_dlopen(path: *u8) -> *void #foreign;
+fn vmffi_dlsym_in(library: *void, name: *u8) -> *void #foreign;
+fn vmffi_dlerror() -> *u8 #foreign;
 
 let opened_libraries: Map(*Node, *void); // #run's handles, by library
-extern fn vmffi_type(kind: i32) -> *void;
-extern fn vmffi_cif(fixed: i32, count: i32, types: **void, ret: *void) -> *void;
-extern fn vmffi_call(cif: *void, f: *void, ret: *void, args: **void);
-extern fn vmffi_closure(cif: *void, entry: *void, data: *void) -> *void;
-extern fn memset(p: *void, c: i32, size: usize) -> *void;
-extern fn memcmp(a: *void, b: *void, size: usize) -> i32;
-extern fn fflush(file: *void) -> i32;
-extern fn dup(fd: i32) -> i32;
-extern fn dup2(from: i32, to: i32) -> i32;
-extern fn close(fd: i32) -> i32;
-extern fn sabk_errno() -> i32;
+fn vmffi_type(kind: i32) -> *void #foreign;
+fn vmffi_cif(fixed: i32, count: i32, types: **void, ret: *void) -> *void #foreign;
+fn vmffi_call(cif: *void, f: *void, ret: *void, args: **void) #foreign;
+fn vmffi_closure(cif: *void, entry: *void, data: *void) -> *void #foreign;
+fn memset(p: *void, c: i32, size: usize) -> *void #foreign libc;
+fn memcmp(a: *void, b: *void, size: usize) -> i32 #foreign libc;
+fn fflush(file: *void) -> i32 #foreign libc;
+fn dup(fd: i32) -> i32 #foreign libc;
+fn dup2(from: i32, to: i32) -> i32 #foreign libc;
+fn close(fd: i32) -> i32 #foreign libc;
+fn sabk_errno() -> i32 #foreign;
 
 fn ffi_type_for(vm: *Vm, t: *Type) -> *void { return vmffi_type(kind_of(concrete(vm, t)) as i32); }
 
@@ -856,40 +866,40 @@ fn host_path(p: *u8, len: isize) -> string {
 fn from_parts(p: *u8, len: isize) -> string { return p[0..len] as string; }
 
 // std/build's functions call these, with strings as (pointer, length)
-extern fn host_set_output(p: *u8, len: isize) { building().output = host_path(p, len); }
-extern fn host_set_release(on: bool) { building().release = on; }
-extern fn host_is_release() -> bool { return building().release; }
-extern fn host_set_bounds_checks(mode: i32) { building().bounds_checks = mode as BoundsChecks; }
-extern fn host_set_strict(on: bool) { building().strict = on; }
-extern fn host_set_werror(on: bool) { building().werror = on; }
-extern fn host_add_c_flags(p: *u8, len: isize) {
+fn host_set_output(p: *u8, len: isize) #c_call { building().output = host_path(p, len); }
+fn host_set_release(on: bool) #c_call { building().release = on; }
+fn host_is_release() -> bool #c_call { return building().release; }
+fn host_set_bounds_checks(mode: i32) #c_call { building().bounds_checks = mode as BoundsChecks; }
+fn host_set_strict(on: bool) #c_call { building().strict = on; }
+fn host_set_werror(on: bool) #c_call { building().werror = on; }
+fn host_add_c_flags(p: *u8, len: isize) #c_call {
     array_add(&building().c_flags, copy_string(from_parts(p, len)));
 }
-extern fn host_link_library(p: *u8, len: isize) {
+fn host_link_library(p: *u8, len: isize) #c_call {
     let name = copy_string(from_parts(p, len));
     for (have in building().libraries)
         if (have == name)
             return; // several modules can ask for the same one
     array_add(&building().libraries, name);
 }
-extern fn host_add_c_file(p: *u8, len: isize) { array_add(&building().c_files, host_path(p, len)); }
-extern fn host_add_library_dir(p: *u8, len: isize) {
+fn host_add_c_file(p: *u8, len: isize) #c_call { array_add(&building().c_files, host_path(p, len)); }
+fn host_add_library_dir(p: *u8, len: isize) #c_call {
     let dir = host_path(p, len);
     array_add(&building().library_dirs, path_real(dir) or_else dir);
 }
 
 // args() (std/os) while compiling
-extern fn host_arg_count() -> i32 { return building().program_args.len as i32; }
-extern fn host_arg(i: i32) -> *u8 { return vm_intern(running_vm, building().program_args[i]); }
+fn host_arg_count() -> i32 #c_call { return building().program_args.len as i32; }
+fn host_arg(i: i32) -> *u8 #c_call { return vm_intern(running_vm, building().program_args[i]); }
 
 // errno (std/io), of the C functions #run called
-extern fn host_errno() -> i32 { return sabk_errno(); }
+fn host_errno() -> i32 #c_call { return sabk_errno(); }
 
 // --sanitize's poisoning (the C runtime's); #run code isn't built with it
-extern fn host_poison(memory: *void, size: isize) {}
+fn host_poison(memory: *void, size: isize) #c_call {}
 
 // error_enum() (the prelude's): the TypeInfo of the enum an Error came from
-extern fn host_error_type(id: u32) -> *void {
+fn host_error_type(id: u32) -> *void #c_call {
     let enums = running_vm.c.error_enums;
     if (id == 0 || (id as isize) > enums.len)
         return null;
@@ -1025,7 +1035,7 @@ struct ClosureData {
     f: *VmFunction;
 }
 
-extern fn closure_entry(cif: *void, ret: *void, args: **void, data: *void) {
+fn closure_entry(cif: *void, ret: *void, args: **void, data: *void) #c_call {
     let d = data as *ClosureData;
     call_from_c(d.vm, d.f, ret as *u8, args);
 }
@@ -1077,31 +1087,38 @@ fn call_native(vm: *Vm, call: *VmCallSite, f: *VmFunction, frame: *u8) -> bool {
                           else tformat("the C function `%` isn't available while compiling", f.name), false);
         return false;
     }
+    let fixed: i32 = if (f.decl.ty.is_variadic) f.decl.ty.params.len as i32 else -1;
+    return call_c(vm, call, f.address, tformat("the C function `%`", f.name), fixed, frame);
+}
+
+// calls C code at `address` with libffi: `what` names it in errors;
+// `fixed`, a variadic function's fixed parameters, else -1
+fn call_c(vm: *Vm, call: *VmCallSite, address: *void, what: string, fixed: i32, frame: *u8) -> bool {
+    let none: Token; // execute() puts the call's location in
     if (!call.prepared) {
         call.ffi_args.len = 0;
         for (t in call.arg_types) {
-            if (t.kind == .Fn) {
-                vm_fail(vm, none, tformat("can't pass a function to the C function `%` at compile time", f.name), false);
+            // a C function pointer is an address C can call; a Sabk function
+            // isn't (it would need a context)
+            if (t.kind == .Fn && !t.is_c_call) {
+                vm_fail(vm, none, tformat("can't pass a Sabk function to % at compile time: C can't call it without its context", what), false);
                 return false;
             }
             if (!is_scalar(t)) {
-                vm_fail(vm, none, tformat("can't call the C function `%` at compile time: it takes a % by value",
-                                          f.name, type_name(t)), false);
+                vm_fail(vm, none, tformat("can't call % at compile time: it takes a % by value", what, type_name(t)), false);
                 return false;
             }
             array_add(&call.ffi_args, ffi_type_for(vm, t));
         }
         let ret = call.ret_type;
         if (ret.kind != .Void && !is_scalar(ret)) {
-            vm_fail(vm, none, tformat("can't call the C function `%` at compile time: it returns a %",
-                                      f.name, type_name(ret)), false);
+            vm_fail(vm, none, tformat("can't call % at compile time: it returns a %", what, type_name(ret)), false);
             return false;
         }
         let ret_ffi = if (ret.kind == .Void) vmffi_type(-1) else ffi_type_for(vm, ret);
-        let fixed: i32 = if (f.decl.ty.is_variadic) f.decl.ty.params.len as i32 else -1;
         call.cif = vmffi_cif(fixed, call.ffi_args.len as i32, call.ffi_args.ptr, ret_ffi);
         if (call.cif == null) {
-            vm_fail(vm, none, tformat("can't call the C function `%`", f.name), false);
+            vm_fail(vm, none, tformat("can't call %", what), false);
             return false;
         }
         call.prepared = true;
@@ -1110,7 +1127,7 @@ fn call_native(vm: *Vm, call: *VmCallSite, f: *VmFunction, frame: *u8) -> bool {
     for (i in 0..call.args.len)
         values[i] = frame + call.args[i].slot as isize;
     let result: [2]u64 = .[0, 0]; // at least an ffi_arg
-    vmffi_call(call.cif, f.address, &result, values.ptr);
+    vmffi_call(call.cif, address, &result, values.ptr);
     if (vm.failed)
         return false; // a callback from C failed
     if (call.ret_size != 0)
@@ -1249,10 +1266,22 @@ fn run(vm: *Vm, fp: **VmFunction, framep: **u8, pcp: *isize, callers: *[..]Calle
         case .Call:
             let call = &f.calls[i.imm];
             let callee = call.callee;
+            if (callee == null && call.c_call) { // through a C function pointer
+                let address = (slot(frame, call.fn_slot) as **void).*;
+                if (address == null)
+                    return fail_at(vm, f, i, "a null C function pointer was called");
+                if (map_has(&vm.function_values, address))
+                    return fail_at(vm, f, i, "a Sabk function was called through a C function type (`#c_call`): it needs the context C doesn't pass; declare it `#c_call`");
+                if (!call_c(vm, call, address, "this C function pointer", call.c_fixed, frame))
+                    return false;
+                continue;
+            }
             if (callee == null) {
                 callee = (slot(frame, call.fn_slot) as **VmFunction).*;
                 if (callee == null)
                     return fail_at(vm, f, i, "a null function pointer was called");
+                if (!map_has(&vm.function_values, callee))
+                    return fail_at(vm, f, i, "a C function was called through a Sabk function type: give the type `#c_call`");
             }
             if (callee.native) {
                 if (!call_native(vm, call, callee, frame))

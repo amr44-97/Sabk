@@ -1,7 +1,7 @@
 // #foreign needs a library, and a library is only for #foreign
 #import "lib/clibs" as clibs;
 
-const libc = #system_library "libc";
+#import "std/c";
 const not_a_library = 5;
 
 fn f() #foreign not_a_library;

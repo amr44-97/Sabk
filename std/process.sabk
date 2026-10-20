@@ -11,6 +11,7 @@
 // expand it; run_shell's command is read by the shell, so quote what goes
 // into it with shell_quote.
 
+#import "std/c";
 #import "std/io";
 #import "std/logging";
 #import "std/mem";
@@ -78,12 +79,12 @@ fn shell_quote(s: string, a: Allocator = context.allocator) -> string {
 
 #scope_file
 
-extern fn posix_spawnp(pid: *i32, file: *u8, actions: *void, attributes: *void,
-                       argv: **u8, envp: **u8) -> i32;
-extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32;
-extern fn system(command: *u8) -> i32;
-extern let environ: **u8;
-extern fn sabk_errno() -> i32; // the runtime's
+fn posix_spawnp(pid: *i32, file: *u8, actions: *void, attributes: *void,
+                       argv: **u8, envp: **u8) -> i32 #foreign libc;
+fn waitpid(pid: i32, status: *i32, options: i32) -> i32 #foreign libc;
+fn system(command: *u8) -> i32 #foreign libc;
+let environ: **u8 #foreign libc;
+fn sabk_errno() -> i32 #foreign; // the runtime's
 
 // a failure, logged: "can't run cc: no such program"
 fn logged(err: ProcessError, program: string) -> ProcessError {

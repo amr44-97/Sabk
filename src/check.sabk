@@ -80,7 +80,6 @@ struct Checker {
     error_enums: [..]*Type;     // the enums that became Errors; id = index + 1
     error_ids: Map(*Type, u32);
     type_infos: [..]*Type;      // the types type_info(T) or Any needs
-    extern_callee: *Node;       // the callee being checked in a direct call
     expanding: [..]*Node;       // macro expansions being checked
 
     // generics: one instance per (template, types)
@@ -500,6 +499,8 @@ fn decl_type(c: *Checker, d: *Node) -> *Type {
         check_fn_signature(c, d);
     case .Let, .Const:
         check_var(c, d);
+    case .Library:
+        // no type: a library is only ever named by #foreign
     default:
         // params, loop variables and enum variants are typed by their
         // parent before anything can refer to them
@@ -840,10 +841,9 @@ fn check_fn_body(c: *Checker, fun: *Node) {
 
 fn leave_place(c: *Checker) -> Place {
     let p = Place.{ .mod = c.mod, .current_fn = c.current_fn, .current_instance = c.current_instance,
-                    .extern_callee = c.extern_callee, .expanding = c.expanding };
+                    .expanding = c.expanding };
     let none: [..]*Node;
     c.expanding = none;
-    c.extern_callee = null;
     return p;
 }
 
@@ -851,7 +851,6 @@ fn return_to_place(c: *Checker, p: *Place) {
     c.mod = p.mod;
     c.current_fn = p.current_fn;
     c.current_instance = p.current_instance;
-    c.extern_callee = p.extern_callee;
     c.expanding = p.expanding;
 }
 
@@ -958,7 +957,7 @@ fn type_from_node(c: *Checker, n: *Node) -> *Type {
                 else if (elems.len == 1) elems[0]
                 else tuple_of(&c.types, elems);
 
-    case .TypeFn{params, result}:
+    case .TypeFn{params, result, c_call, variadic}:
         let param_types: [..]*Type;
         let ok = true;
         for (p in params) {
@@ -968,7 +967,7 @@ fn type_from_node(c: *Checker, n: *Node) -> *Type {
         }
         let ret = if (result != null) type_from_node(c, result) else c.types.void_;
         if (ok && ret.kind != .Error)
-            t = fn_type(&c.types, param_types, ret, false);
+            t = fn_type(&c.types, param_types, ret, variadic, c_call);
 
     default:
     }
@@ -1229,10 +1228,12 @@ fn check_signature(c: *Checker, d: *Node, fn_params: []*Node, result: *Node, is_
     }
     let ret = if (result != null) type_from_node(c, result) else c.types.void_;
     if (ret.is_tuple && is_extern) {
-        error(c, result.tok, "an `extern` function returns one value at most, as C functions do");
+        error(c, result.tok, "a C function returns one value at most, as C functions do");
         ret = c.types.error;
     }
-    d.ty = fn_type(&c.types, params, ret, variadic);
+    // a C function's type is C's, the type of a pointer to it: `fn(*u8) ->
+    // usize #c_call`
+    d.ty = fn_type(&c.types, params, ret, variadic, is_extern);
     if (is_format) { // fn print(fmt: string, args: ..Any) #format
         let ps = fn_params;
         let ok = ps.len >= 2 && is_variadic_param(ps[ps.len - 1]) &&
@@ -1271,7 +1272,6 @@ struct Place {
     mod: *Module;
     current_fn: *Node;
     current_instance: *Node;
-    extern_callee: *Node;
     expanding: [..]*Node;
 }
 

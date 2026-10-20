@@ -16,6 +16,7 @@
 // path_normalize works on the text alone, like C++'s lexically_normal:
 // `a/../b` is `b` even when `a` is a link.
 
+#import "std/c";
 #import "std/io";
 #import "std/mem";
 #import "std/str";
@@ -132,8 +133,8 @@ fn path_real(p: string, alloc: Allocator = context.allocator) -> (string, IoErro
 
 #scope_file
 
-extern fn getcwd(buffer: *u8, size: usize) -> *u8;
-extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+fn getcwd(buffer: *u8, size: usize) -> *u8 #foreign libc;
+fn realpath(path: *u8, resolved: *u8) -> *u8 #foreign libc;
 
 const PATH_MAX = 4096; // Linux's; macOS's is 1024
 

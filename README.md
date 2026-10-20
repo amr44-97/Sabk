@@ -123,10 +123,12 @@ $ ./sabk --run example.sabk
   loops like a slice and passes as one; std/array grows it
   (`array_add(&xs, x)`), and nothing allocates without a call.
 - **`defer`**, slicing (`s[a..b]`), array and slice literals (`.[1, 2]`), untyped
-  constants, and C interop as in Jai: `const libm = #system_library
-  "libm";`, `fn sinf(x: float) -> float #foreign libm;`, linked when used
-  and callable from `#run`, with C's type names (`int`, `long`, `size_t`,
-  ...) in every program.
+  constants, and C interop as in Jai: `#import "std/c";` then `fn
+  sinf(x: float) -> float #foreign libm;` (or `#library "vendor/libfoo"`
+  for your own), linked when used and callable from `#run`; `#c_call`
+  functions for C to call and C function pointer types (`fn(*void, *void)
+  -> int #c_call`); C's type names (`int`, `long`, `size_t`, ...) in every
+  program.
 
 The full language reference is [docs/reference.md](docs/reference.md).
 It starts with a section for C programmers, and covers

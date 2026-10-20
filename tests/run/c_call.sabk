@@ -1,0 +1,84 @@
+// #c_call: functions C calls, and C function pointer types, called with no
+// context. A #c_call function converts to *void on its own.
+#import "std/io";
+#import "std/str";
+
+#import "std/c";
+
+const Compare = fn(*void, *void) -> int #c_call;            // a C function pointer type
+
+fn qsort(base: *void, count: size_t, size: size_t, compare: Compare) #foreign libc;
+// the same function, the way older bindings declare a callback: a *void
+fn qsort_untyped(base: *void, count: size_t, size: size_t, compare: *void) #foreign libc "qsort";
+fn dlsym(handle: *void, name: *char) -> *void #foreign libc;
+fn printf(format: *char, ...) -> int #foreign libc;
+fn abs(x: int) -> int #foreign libc;
+
+// C calls these: C's calling convention, and the default context inside
+fn ascending(a: *void, b: *void) -> int #c_call {
+    let x, y = (a as *i32).*, (b as *i32).*;
+    return if (x < y) -1 else if (x > y) 1 else 0;
+}
+fn descending(a: *void, b: *void) -> int #c_call { return ascending(b, a); }
+
+// a C table of callbacks
+struct Sorter {
+    name: string;
+    compare: Compare;
+}
+
+// a Sabk function, passed through C's `void *` (a callback's user data)
+// and cast back: `as` is trusted for that round trip
+fn twice(x: i64) -> i64 { return 2 * x; }
+
+fn sorted(compare: Compare) -> [4]i32 {
+    let xs: [4]i32 = .[3, 1, 4, 2];
+    qsort(&xs[0], 4, sizeof(i32), compare);
+    return xs;
+}
+
+fn untyped_sorted() -> [4]i32 {
+    let xs: [4]i32 = .[3, 1, 4, 2];
+    qsort_untyped(&xs[0], 4, sizeof(i32), descending); // #c_call -> *void, implicitly
+    return xs;
+}
+
+fn through_dlsym() -> int {
+    let found = dlsym(null, "abs");                       // RTLD_DEFAULT: what's loaded
+    let c_abs = found as fn(int) -> int #c_call;
+    return c_abs(-7);
+}
+
+fn round_trip() -> i64 {
+    let held: *void = twice as *void;
+    let back = held as fn(i64) -> i64;
+    return back(21);
+}
+
+const ASCENDING = #run sorted(ascending);
+const UNTYPED = #run untyped_sorted();
+const FROM_DLSYM = #run through_dlsym();
+const ROUND_TRIP = #run round_trip();
+
+fn main() {
+    let sorters: [2]Sorter = .[.{ .name = "up", .compare = ascending }, .{ .name = "down", .compare = descending }];
+    for (s in sorters)
+        println("%: %", s.name, sorted(s.compare));
+    println("untyped: %", untyped_sorted());
+    println("dlsym: %", through_dlsym());
+    println("round trip: %", round_trip());
+
+    let f: fn(int) -> int #c_call = abs;                 // a C function as a value
+    let none: Compare = null;
+    println("values: % % %", f(-3), none == null, f != null);
+    let p = printf;                                       // variadic: fn(*char, ...) -> int #c_call
+    p("printf through a pointer: %d %s\n", 42, "ok");
+    println("ascending(&1, &2) from Sabk: %", call_direct());
+    println("#run: % % % %", ASCENDING, UNTYPED, FROM_DLSYM, ROUND_TRIP);
+}
+
+fn call_direct() -> int {
+    let a: i32 = 1;
+    let b: i32 = 2;
+    return ascending(&a, &b);                              // ours, called directly too
+}

@@ -1,0 +1,3 @@
+[error]: a function is either C's (`#foreign`, with no body) or ours for C to call (`#c_call`, with a body), not both at [tests/errors/parse_c_call_foreign.sabk:2:22]
+     2 | fn f() #foreign libc #c_call;
+       |                      ^

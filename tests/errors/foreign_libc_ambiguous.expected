@@ -1,0 +1,9 @@
+[error]: `libc` is ambiguous: both "lib/exports_libc_a" and "lib/exports_libc_b" have it; write `exports_libc_a.libc` or `exports_libc_b.libc` at [tests/errors/foreign_libc_ambiguous.sabk:6:33]
+     6 | fn puts(s: *u8) -> i32 #foreign libc;
+       |                                 ^
+[note]: one `libc` is declared here at [tests/errors/lib/exports_libc_a.sabk:2:7]
+     2 | const libc = #system_library "libc";
+       |       ^
+[note]: one `libc` is declared here at [tests/errors/lib/exports_libc_b.sabk:2:7]
+     2 | const libc = #system_library "libc";
+       |       ^

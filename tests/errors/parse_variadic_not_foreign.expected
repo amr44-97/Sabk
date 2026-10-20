@@ -1,0 +1,3 @@
+[error]: only C functions can be variadic: `fn f(...) #foreign lib;` at [tests/errors/parse_variadic_not_foreign.sabk:1:6]
+     1 | fn f(...) {}
+       |      ^

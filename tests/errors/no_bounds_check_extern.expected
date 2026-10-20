@@ -1,3 +1,0 @@
-[error]: `#no_bounds_check` is for a function with a body; C's own code isn't checked at [tests/errors/no_bounds_check_extern.sabk:2:67]
-     2 | extern fn memset(memory: *void, value: i32, size: usize) -> *void #no_bounds_check;
-       |                                                                   ^

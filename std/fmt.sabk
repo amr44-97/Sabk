@@ -62,6 +62,7 @@
 //   an Any: the value it holds
 // Pointers aren't followed, so a value that points at itself prints fine.
 
+#import "std/c";
 #import "std/mem";
 #import "std/str";
 
@@ -278,8 +279,8 @@ fn append_formatted(b: *Builder, value: Any, spec: FormatSpec) {
 
 #scope_file
 
-extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
-extern fn strtod(text: *u8, end: **u8) -> f64;
+fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32 #foreign libc;
+fn strtod(text: *u8, end: **u8) -> f64 #foreign libc;
 
 fn is_kind(c: u8) -> bool {
     switch (c) {

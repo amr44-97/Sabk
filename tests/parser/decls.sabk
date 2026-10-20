@@ -26,7 +26,7 @@ const MAX: i32 = 64;
 let counter: u64;
 let ready = false;
 
-extern fn printf(fmt: *u8, ...) -> i32;
-extern fn exit(code: i32);
-extern fn callback(x: i32) -> i32 { return x; }
+fn printf(fmt: *u8, ...) -> i32 #foreign libc;
+fn exit(code: i32) #foreign libc;
+fn callback(x: i32) -> i32 #c_call { return x; }
 fn alloc(size: usize, a: mem.Allocator = context.allocator) -> *void { return null; }

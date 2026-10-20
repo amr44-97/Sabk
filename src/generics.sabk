@@ -659,6 +659,20 @@ fn check_cast(c: *Checker, n: *Node) -> *Type {
         error(c, n.tok, tformat("can't cast % to %", qt(from), qt(to)));
         return to;
     }
+    // `as` is trusted between function pointers (a C one comes back from
+    // a `*void`), except where it can see the function: a C function
+    // can't be called as a Sabk one, with a context, nor ours by C
+    let named = (value.kind.tag == .Identifier || value.kind.tag == .Member) && value.decl != null &&
+                value.decl.kind.tag == .Fn;
+    if (named && from.kind == .Fn && to.kind == .Fn && from.is_c_call != to.is_c_call) {
+        if (from.is_c_call)
+            error(c, n.tok, tformat("`%` is a C function: called as a %, it would get a context it doesn't take; its type is %",
+                                    value.tok.text, qt(to), qt(from)));
+        else
+            error(c, n.tok, tformat("`%` is a Sabk function: called as a %, it wouldn't get its context; for C to call it, declare it `fn %(...) #c_call { ... }`",
+                                    value.tok.text, qt(to), value.tok.text));
+        return to;
+    }
     // a failure enum `as Error` is the same widening as without `as`
     if (to.is_failure && can_coerce(c, value, from, to)) {
         coerce(c, value, to);

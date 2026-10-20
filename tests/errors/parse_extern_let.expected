@@ -1,0 +1,3 @@
+[error]: `extern` is gone: a C variable names its library, `let stdout: T #foreign libc;` (`libc` comes from `#import "std/c";`) at [tests/errors/parse_extern_let.sabk:2:1]
+     2 | extern let stdout: *void;
+       | ^

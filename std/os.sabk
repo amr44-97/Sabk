@@ -13,11 +13,12 @@
 //   get_env("HOME")       an environment variable, and whether it's set:
 //                         let home = get_env("HOME") or_else "/";
 
+#import "std/c";
 #import "std/mem";
 #import "std/str";
 
-extern fn exit(code: i32);
-extern fn abort();
+fn exit(code: i32) #foreign libc;
+fn abort() #foreign libc;
 
 // the location printed is where the message is written
 fn panic(message: Code) #expand {
@@ -49,8 +50,8 @@ fn get_env(name: string) -> (string, bool) {
 
 #scope_file
 
-extern fn getenv(name: *u8) -> *u8;
-extern fn fflush(file: *void) -> i32;
+fn getenv(name: *u8) -> *u8 #foreign libc;
+fn fflush(file: *void) -> i32 #foreign libc;
 
 fn fail(location: string, what: string, message: string) {
     let handler = context.panic_handler;
@@ -62,5 +63,5 @@ fn fail(location: string, what: string, message: string) {
 let saved_args: []string;
 
 // the C runtime keeps argc and argv for these
-extern fn sabk_arg_count() -> i32;
-extern fn sabk_arg(i: i32) -> *u8;
+fn sabk_arg_count() -> i32 #foreign;
+fn sabk_arg(i: i32) -> *u8 #foreign;
