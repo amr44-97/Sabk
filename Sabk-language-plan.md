@@ -28,6 +28,10 @@ switch to them at the bootstrap.
 - [x] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
 - [x] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
+- [ ] **C interop:** `#library`, `#system_library`, `#foreign`, `#c_call` and C function types; `extern` goes (section 8)
+- [ ] **C types** in the prelude: `int`, `long`, `char`, `size_t`, ... (section 8)
+- [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8)
+- [ ] **Layout:** `#packed` and `#align(n)` on structs (section 8)
 
 ## 1. Formatting
 
@@ -273,8 +277,8 @@ that code made later will declare may need declaring up front (Jai's
 
 ### Types as values
 
-Sabk does it Jai's way: generic structs (`struct List($T)`), `$T: Type`,
-`type_info(T)`, plus:
+Sabk does it Jai's way: generic structs (`struct List($T)`), `$T: type`
+(`Type` until section 8), `type_info(T)`, plus:
 
 - **`#insert` inside struct and enum bodies** (today: "expected a field name, found `#`").
 - **Value parameters on structs** (layer 1).
@@ -295,7 +299,7 @@ enum FieldOf($T) { #insert #run variant_names(type_info(T)); }
 let which: FieldOf(Particle) = .mass;
 ```
 
-Functions that return a `Type` (`fn uint_for($bits: isize) -> Type`) may
+Functions that return a `type` (`fn uint_for($bits: isize) -> type`) may
 come later. Zig's `@Type` (a type built from a description) stays out:
 `#insert` already builds types.
 
@@ -1040,24 +1044,173 @@ a += b;                       // from operator +
     copy is now declared at the function's top, like a slice literal's
     elements. Both have tests; the second also shows under `--sanitize`.
 
-## 8. How it lands
+## 8. C interop, and types as constants
+
+Decided with the user on Oct 20, 2026: Jai's directives, C's type names in
+the prelude, `const` for types, `type` as the type of types, `==` and `is`
+on types, and `#distinct` later. The rest is proposed, and the open points
+are at the end.
+
+Most projects in Sabk-projects.md bind a C library, and `extern` leaves
+four gaps:
+
+- A declaration doesn't say which library it's from. Linking is a separate `link_library` in a build script, and `#run` finds symbols with `dlsym(RTLD_DEFAULT)`, so it can only call what the compiler itself links: not raylib or sqlite.
+- The C name is the Sabk name: no renaming, and `extern` functions can't overload (`extern fn sin(x: f64)` next to `fn sin(x: f32)` is an error).
+- C function pointers are `*void`, with no type to cast them to that calls them correctly: `dlsym(...) as fn(*u8) -> i32` compiles, but a Sabk function type passes the context as the first argument, and the call printed garbage.
+- No C types, and no layout control (glibc's `struct epoll_event` is packed on x86-64).
+
+### Libraries and foreign declarations
+
+Jai's directives, where Sabk puts a function's directives (after the
+signature):
+
+```
+const libc   = #system_library "c";
+const libm   = #system_library "m";
+const raylib = #library "vendor/raylib";        // vendor/libraylib.a or .so, next to this file
+
+fn InitWindow(width: int, height: int, title: *char) #foreign raylib;
+fn close_window() #foreign raylib "CloseWindow";  // the C name, when ours differs
+fn sin(x: f32) -> f32 #foreign libm "sinf";       // so foreign functions can overload
+fn sin(x: f64) -> f64 #foreign libm;
+let environ: **char #foreign libc;                // a C variable
+```
+
+- **A library is a constant.** `#library "path"` is relative to this file and names the library without its prefix and extension; `#system_library "name"` is found where the linker and the dynamic loader look.
+- **`#foreign lib`** after a signature with no body declares a function the library defines, and `#foreign lib "name"` gives its C name when the Sabk name differs. On a top-level `let`, it declares the library's variable. `...` stays for variadic functions.
+- **Linking follows use:** a library is linked when one of its declarations is used, so a module of bindings links what it binds. `link_library` stays for the rest.
+- **`#run` opens the library:** the VM `dlopen`s its shared object, so compile-time code can call raylib, sqlite or libclang. A library that's only a static archive can't be opened, and a `#run` call into it is an error naming the library.
+- **Foreign functions overload** like any others: the Sabk name is a name, and the C name is separate.
+- **Big bindings are generated**, as in Jai (its Bindings_Generator, over libclang, with the output committed per OS). Once `#run` can call libclang, the generator can be a Sabk build script; that comes later.
+- **`extern` goes:** `extern fn f();` becomes `fn f() #foreign libc;`, `extern fn f() { ... }` becomes `#c_call`, and `extern let` becomes `#foreign`. About 94 declarations in std and the compiler.
+
+### `#c_call`: C's calling convention
+
+```
+fn by_name(a: *void, b: *void) -> int #c_call { ... }    // C calls it
+const Compare = fn(*void, *void) -> int #c_call;          // a C function pointer
+let draw = dlsym(lib, "draw") as fn(i32) #c_call;         // called with no context
+```
+
+- A `#c_call` function with a body can be called from C, and its `context` starts as the default one, as an `extern fn` with a body does today.
+- **C function types:** `fn(...) -> T #c_call` is a C function pointer. A `#c_call` or foreign function is a value of it, a `*void` casts to it with `as`, and calling it passes no context. It can be a struct field, for C's tables of callbacks.
+- A C function type and a Sabk one never convert to each other implicitly. `as` is trusted, as between other pointers: a C function pointer is cast to a `#c_call` type, and a Sabk function passed through C's `void *` (a callback's user data) is cast back to its Sabk type, which works today. The compiler can't tell which a `*void` holds, so the only error is where it can see the function: casting a foreign or `#c_call` function to a Sabk function type.
+
+### C types
+
+C's names, in the prelude, as built-in names like `i32` (not keywords, so
+a program's own `int` wins). They're aliases, so they mix freely with
+Sabk's types. They're for C interop: std and Sabk code keep Sabk's types,
+and `.len` stays an `isize`.
+
+| Name | 64-bit Linux, macOS, BSD | 64-bit Windows | 32-bit |
+|---|---|---|---|
+| `char`, `uchar`, `schar` | `u8`, `u8`, `i8` | same | same |
+| `short`, `ushort` | `i16`, `u16` | same | same |
+| `int`, `uint` | `i32`, `u32` | same | same |
+| `long`, `ulong` | `i64`, `u64` | `i32`, `u32` | `i32`, `u32` |
+| `longlong`, `ulonglong` | `i64`, `u64` | same | same |
+| `float`, `double` | `f32`, `f64` | same | same |
+| `size_t`, `ssize_t` | `usize`, `isize` | same | same |
+| `ptrdiff_t`, `intptr_t`, `uintptr_t` | `isize`, `isize`, `usize` | same | same |
+
+- **Sizes come from the target's data model** (LP64, LLP64, ILP32), chosen by `#if` on `OS` and `POINTER_SIZE`: the checker needs them before there's any C. The generated C checks each C type the program uses (`_Static_assert(sizeof(long) == 8, ...)`), so a C compiler that disagrees stops the build.
+- **`char` is `u8` everywhere**, so C strings stay `*u8`, as std makes them. C's `char` is signed on x86 and unsigned on ARM; the size is the same, so only arithmetic above 127 differs.
+- **Left out:** `long double` (Sabk has no type for it), stdint's names (`int32_t` is `i32`), and `wchar_t` until a binding needs it.
+- With `char` taken, a UTF-8 character type will need another name (`rune`, as in Go and Odin).
+- **The habit to watch in the projects:** `int` in ordinary code is 32 bits. Mixing it with `.len` is a narrowing error (loud); going past 2³¹ wraps (silent). If it bites, a `--strict` warning for C types outside C declarations.
+
+### Layout: `#packed` and `#align`
+
+```
+struct EpollEvent #packed { events: u32; data: u64; }      // glibc's, on x86-64
+struct Vec4 #align(16) { x: f32; y: f32; z: f32; w: f32; }
+```
+
+The directive goes where a function's does: after the name (and type
+parameters), before the body. No bit fields: they're rare in APIs, and
+shifts do it by hand.
+
+### `const` names types
+
+```
+const Compare = fn(*void, *void) -> int #c_call;
+const Names   = Map(string, i64);
+const word: type = i64;              // the annotation is optional
+```
+
+- **`const` names anything known while compiling:** numbers, strings, libraries and types, as Jai's `::` does. A `const` whose value is a type is an alias: the same type.
+- **`type X = T;` declarations go** (3 in std and the compiler).
+- **Only written types:** no type chosen by an `if` or made by `#run` (that's "functions that return a `type`", long term). A type per target is chosen with `#if`.
+- **No generic aliases** (`const Pairs($T) = ...`) for now: a generic struct does it.
+- **No `#type` marker.** Jai needs one before a procedure type after `::`, because it looks like the start of a procedure. Sabk declares functions with `fn name(`, has no function literals, and `*` before a name isn't a dereference, so after `const X =`, `fn(i32) -> i32` and `*i32` can only be types. The parser already reads them; today the checker rejects them.
+- **Later, `#distinct`:** a new type that doesn't mix with its base without `as`, `const Meters = #distinct f64;` (Jai's `#type,distinct`, Odin's `distinct`).
+
+### `type`: the type of types
+
+`type` stays a keyword, and names what `Type` names today: `$T: type`,
+`const word: type = i64;`. `Type` goes. Built-in types are lowercase
+(`i32`, `bool`, `string`), and Zig spells it the same way. Fields can still
+be called `type`, since keywords work as field names; locals and
+parameters can't.
+
+### Comparing types: `==` and `is`
+
+```
+#if (word == f32) { ... }                      // only the branch taken is checked, as today
+if word == i64 then println("64-bit words");   // a constant condition: both branches checked
+#assert(word != f32, "word must be an integer");
+const WIDE = word == i64;
+
+#if (T is []$E) { ... }                        // a slice, and E is its element type
+#if (T is *$P) { ... }                         // a pointer to P
+#if (T is Map($K, $V)) { ... }                 // any Map, with its key and value types
+#if (T is enum) { ... }                        // also struct, union, fn
+```
+
+- **`==` and `!=` compare types** wherever a constant `bool` fits. Today only `#if` takes them.
+- **`is` matches a type's shape**, as it matches a value against a pattern, and its bindings live in that branch.
+- **`T == Map` (any instance) becomes `T is Map`**, so `==` always means the same type.
+
+### Order
+
+1. `const` names types, `type` becomes the type of types, and `==` and `!=` work on types everywhere.
+2. C types in the prelude, with the `_Static_assert`s.
+3. `#library`, `#system_library` and `#foreign`, with linking from use and `dlopen` for `#run`.
+4. `#c_call` and C function types; std and the compiler move off `extern`, which goes.
+5. `#packed` and `#align`.
+6. `is` on types.
+7. Layer 1 (section 3), `#assert` first.
+
+(A first step, making every `*void` cast to a function type an error, was
+dropped: it would break Sabk callbacks passed through C's `void *`.)
+
+### Open points
+
+- **Finding a library:** from the stem (`vendor/raylib` gives `libraylib.a` and `libraylib.so`; `.dylib`, `.lib` and `.dll` elsewhere), the program links the static archive when there is one and `#run` opens the shared object; a path with an extension names the file exactly.
+- **One C name declared twice**, in two modules: one function when the signatures match, an error when they don't?
+- **`Code`:** does it follow `type` as `code`, or stay?
+- **`#align` on fields** as well as structs?
+
+## 9. How it lands
 
 1. **Port the checker** (done), matching the C++ on existing programs, but built for this plan: a job queue; instances keyed by constant values as well as types; `Option` and error enums as rules of the type system; flow facts for narrowing; notes kept on declarations and fields.
 2. **Port the C backend and the VM** (done).
 3. **Bootstrap** (done): the compiler compiles itself; std and the compiler move to the new syntax.
-4. **Build the features**, each with tests, in about this order: formatting; error enums, logged failures, result defaults, taking results, `%w`, `--strict` and `--werror`; `!is`, checked access and narrowing; `#import`, `#load` and the scopes; function overloading and operators (section 7); optional parentheses; layer 1; layer 2; types as values; layer 3; the smaller additions. A feature can start as soon as the phase it needs exists in the new compiler.
+4. **Build the features**, each with tests, in about this order: formatting; error enums, logged failures, result defaults, taking results, `%w`, `--strict` and `--werror`; `!is`, checked access and narrowing; `#import`, `#load` and the scopes; function overloading and operators (section 7); optional parentheses; C interop and types as constants (section 8); layer 1; layer 2; types as values; layer 3; the smaller additions. A feature can start as soon as the phase it needs exists in the new compiler.
 
-## 9. Long term
+## 10. Long term
 
 - **Compile time** is fine for now and stays as it is. Later: better generated C, the choice of C compiler, or our own IR or x64 backend.
 - **Inline assembly**: passed to the C compiler's `__asm__` (cheap, GCC syntax, per CPU), or Jai's `#asm` with the compiler choosing registers (needs our own backend). `#run` can't run either.
 - **`Error` keeping payloads** (section 5).
 - **A `#modify`-style block** that can change T, if `#where` isn't enough.
-- **Functions that return a `Type`.**
+- **Functions that return a `type`.**
+- **`#distinct` types** (section 8).
 - **`io :: #import "std/io"` and module parameters.**
 - **`#import` inside a top-level `#if`** (today an error).
 
 Still deferred, outside this plan (see Sabk-decisions.md and the review's
-checklist): C types (`c_int`, ...), Jai's `,,` syntax, assigning to
+checklist): Jai's `,,` syntax, assigning to
 parameters, by-pointer loops, writable `.len`/`.ptr`, UTF-8 and the
 math, random and thread modules.
