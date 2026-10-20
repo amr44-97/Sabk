@@ -1,0 +1,3 @@
+[error]: a name for a type is a constant: `const Callback = ...;` at [tests/errors/parse_old_type_alias.sabk:2:1]
+     2 | type Callback = fn(i32) -> bool;
+       | ^

@@ -3,7 +3,7 @@ enum Color { Red, Green }
 struct Point { x: i32; y: i32; }
 struct Inner { q: Color; }
 struct Box { p: Point; }
-type I = i32;
+const I = i32;
 let g: Box = .{ .p = .{ .x = .{ .q = .Red } } };   // .x is an i32
 fn none() { return .Red; }                         // returns nothing
 fn f() {

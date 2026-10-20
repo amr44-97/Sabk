@@ -1,0 +1,2 @@
+// the old spelling of a type parameter
+fn size_of($T: Type) -> isize { return sizeof(T); }

@@ -1,0 +1,10 @@
+struct List($T) { x: T; }
+const N = 4;
+const X: i64 = i32;            // a type where the declared type wants a value
+const L = List;                // generic: it needs its types
+fn main() {
+    let x = 1;
+    let a: N;                  // a constant whose value isn't a type
+    if (x == i32) {}           // a value against a type
+    if (List(3) == i32) {}     // 3 isn't a type
+}

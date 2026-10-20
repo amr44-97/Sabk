@@ -510,7 +510,7 @@ fn rank_generic_call(c: *Checker, f: *Node, args: []*Node) -> ([]i32, bool) {
         let last = params.len - 1;
         let p = if (i < params.len) params[i] else params[last]; // past the end: a `..T`
         let arg = args[i];
-        if (is_type_param(p)) { // `$T: Type`: a type goes there
+        if (is_type_param(p)) { // `$T: type`: a type goes there
             ranks[i] = if (arg.kind.tag == .TypeExpr) 6 else 0;
         } else if (arg.kind.tag == .TypeExpr) {
             ranks[i] = 0;

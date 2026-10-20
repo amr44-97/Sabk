@@ -7,7 +7,7 @@ enum AllocatorMode { Alloc, Free, Resize, FreeAll }
 //            `old_memory`, the rest zeroed; `old_memory` is freed
 //   FreeAll  frees everything the allocator handed out, if it can
 // Running out of memory returns null. `alignment` is a power of two.
-type AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
+const AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
 
 struct Allocator {
     procedure: AllocatorProc;
@@ -26,7 +26,7 @@ enum LogLevel { Debug, Info, Warning, Error }
 
 // A logger: (data, level, message). The message is only valid during the
 // call, so a logger that keeps it copies it.
-type LoggerProc = fn(*void, LogLevel, string);
+const LoggerProc = fn(*void, LogLevel, string);
 
 struct Logger {
     procedure: LoggerProc;
@@ -37,7 +37,7 @@ struct Logger {
 // `what` "panic" or "assertion failed" and the location "file:line:col".
 // It shouldn't return: if it does, the program aborts there anyway, since
 // the code after a panic can't go on.
-type PanicProc = fn(*void, string, string, string);
+const PanicProc = fn(*void, string, string, string);
 
 struct PanicHandler {
     procedure: PanicProc;

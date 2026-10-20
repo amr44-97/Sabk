@@ -1,0 +1,2 @@
+// the old spelling of a type alias
+type Callback = fn(i32) -> bool;

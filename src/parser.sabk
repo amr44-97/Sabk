@@ -258,7 +258,10 @@ fn top_decl(p: *Parser) -> *Node {
     case .Struct: decl = aggregate(p, false);
     case .Union:  decl = aggregate(p, true);
     case .Enum:   decl = enum_decl(p);
-    case .Type:   decl = type_alias(p);
+    case .Type:
+        let t = peek(p);
+        return fail(p, t, tformat("a name for a type is a constant: `const % = ...;`",
+                                  if (at(p, .Identifier, 1)) peek(p, 1).text else "Name"));
     case .Const:  decl = const_decl(p);
     case .Let:
         decl = let_decl(p);
@@ -272,7 +275,7 @@ fn top_decl(p: *Parser) -> *Node {
         if (t.kind == .Identifier && t.text == "import")
             return fail(p, t, tformat("an import is written `#import %;`",
                                       if (at(p, .String, 1)) peek(p, 1).text else "\"path\""));
-        return fail(p, t, tformat("expected a declaration (fn, struct, union, enum, type, const, let or #import), found %", describe(t)));
+        return fail(p, t, tformat("expected a declaration (fn, struct, union, enum, const, let or #import), found %", describe(t)));
     }
     return decl;
 }
@@ -305,12 +308,12 @@ fn fn_decl(p: *Parser) -> *Node {
             break;
         }
         if (at(p, .Dollar)) {
-            // $T: Type, a parameter that takes a type: make_list(i32)
+            // $T: type, a parameter that takes a type: make_list(i32)
             let declared = type_(p);
-            expect(p, .Colon, "`: Type` after the type parameter");
-            let kind = expect(p, .Identifier, "`Type`");
-            if (kind.text != "Type")
-                fail(p, kind, tformat("a `$%` parameter takes a type, so it's written `$%: Type`",
+            expect(p, .Colon, "`: type` after the type parameter");
+            let kind = next(p);
+            if (kind.kind != .Type)
+                fail(p, kind, tformat("a `$%` parameter takes a type, so it's written `$%: type`",
                                       declared.tok.text, declared.tok.text));
             array_add(&params, new_node(declared.tok, .Param(declared, null, true, false)));
             if (!eat(p, .Comma))
@@ -571,19 +574,20 @@ fn type_args_count(n: *Node) -> isize {
     return 0;
 }
 
-fn type_alias(p: *Parser) -> *Node {
-    next(p); // type
-    let name = expect(p, .Identifier, "a type name");
-    expect(p, .Equal, "`=` after the type name");
-    let aliased = type_(p);
-    expect(p, .Semicolon, "`;` after the type alias");
-    return new_node(name, .TypeAlias(aliased));
-}
-
 fn const_decl(p: *Parser) -> *Node {
     next(p); // const
     let name = expect(p, .Identifier, "a constant name");
     let declared: *Node = null;
+    if (at(p, .Colon) && at(p, .Type, 1)) {
+        // const Names: type = Map(string, i64); its value is a type, so
+        // it's another name for that type
+        next(p);
+        next(p);
+        expect(p, .Equal, "`=` and a type (a constant needs a value)");
+        let aliased = type_(p);
+        expect(p, .Semicolon, "`;` after the constant");
+        return new_node(name, .TypeAlias(aliased));
+    }
     if (eat(p, .Colon))
         declared = type_(p);
     expect(p, .Equal, "`=` and a value (a constant needs a value)");
@@ -1983,6 +1987,9 @@ fn type_(p: *Parser) -> *Node {
         // $T: declares a type parameter, bound to whatever type is here
         next(p);
         return new_node(expect(p, .Identifier, "a type parameter name after `$`"), .TypeParam);
+
+    case .Type:
+        return fail(p, t, "`type`, the type of types, is only known while compiling: a `$T: type` parameter takes one, and `const X: type = ...` names one");
 
     default:
         return fail(p, t, tformat("expected a type, found %", describe(t)));

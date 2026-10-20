@@ -1,0 +1,18 @@
+[error]: `i32` is a type, not a value at [tests/errors/type_constants.sabk:3:16]
+     3 | const X: i64 = i32;            // a type where the declared type wants a value
+       |                ^
+[error]: `List` is generic: give its types, `List(T)` at [tests/errors/type_constants.sabk:4:11]
+     4 | const L = List;                // generic: it needs its types
+       |           ^
+[error]: `N` is a constant whose value isn't a type at [tests/errors/type_constants.sabk:7:12]
+     7 |     let a: N;                  // a constant whose value isn't a type
+       |            ^
+[note]: `N` is declared here at [tests/errors/type_constants.sabk:2:7]
+     2 | const N = 4;
+       |       ^
+[error]: can't compare a type with a value at [tests/errors/type_constants.sabk:8:9]
+     8 |     if (x == i32) {}           // a value against a type
+       |         ^
+[error]: can't compare a type with a value at [tests/errors/type_constants.sabk:9:17]
+     9 |     if (List(3) == i32) {}     // 3 isn't a type
+       |                 ^

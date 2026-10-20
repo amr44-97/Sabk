@@ -1,0 +1,9 @@
+// type constants another module uses: plain, qualified, and private ones
+const Id = u32;
+const Ids = []Id;
+
+#scope_file
+const Hidden = u8;
+#scope_export
+
+fn hidden_size() -> isize { return sizeof(Hidden); }

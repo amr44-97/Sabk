@@ -6,7 +6,7 @@
 #import "std/map";
 #import "std/str";
 
-fn kind($T: Type) -> string {
+fn kind($T: type) -> string {
     #if (T == Map) return "a Map";
     else #if (T == map.Map) return "never: the same test";
     else #if (T == [..]i64) return "a [..]i64";

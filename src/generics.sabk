@@ -30,7 +30,7 @@ struct Candidates {
 // works out the type parameters of a call to a generic function and returns
 // the instance for them; `expected` is the type the call's context wants
 fn instantiate_call(c: *Checker, n: *Node, templ: *Node, expected: *Type) -> *Node {
-    let given: Map(*Node, *Type); // from `$T: Type` arguments
+    let given: Map(*Node, *Type); // from `$T: type` arguments
     let found: Candidates;
     let from_context: Candidates;
     let callee: *Node = null;

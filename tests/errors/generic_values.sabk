@@ -1,5 +1,5 @@
 fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
-fn make($T: Type) -> i32 { return 0; }
+fn make($T: type) -> i32 { return 0; }
 fn f() {
     let g = max;                               // no function type to say which
     let h: fn(i32, i32) -> bool = max;         // max(i32, i32) returns i32

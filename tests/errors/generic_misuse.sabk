@@ -1,7 +1,7 @@
 fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
 struct List($T) { items: []T; }
 struct Vec2 { x: f32; }
-fn make($T: Type) -> List(T) { let l: List(T); return l; }
+fn make($T: type) -> List(T) { let l: List(T); return l; }
 fn f() {
     let a: List;
     let b: Vec2(i32);

@@ -1,8 +1,8 @@
 struct List($T) { items: []T; }
 struct Box($T) { value: T; }
 struct Same($T) { a: T; b: T; }
-fn zero_of($T: Type) -> T { let z: T; return z; }
-fn make($T: Type, n: usize) -> List(T) { let l: List(T); return l; }
+fn zero_of($T: type) -> T { let z: T; return z; }
+fn make($T: type, n: usize) -> List(T) { let l: List(T); return l; }
 fn f() {
     let a = zero_of();                    // nothing says what T is
     let b = make(4);                      // ... here either

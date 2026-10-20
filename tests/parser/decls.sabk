@@ -16,11 +16,11 @@ struct Empty {}
 enum Color: u8 { Red, Green, Blue = 10, }
 enum Plain { A }
 
-type Callback = fn(i32, *u8) -> bool;
-type Handler = fn();
-type Grid = [4][4]f32;
-type Bytes = []u8;
-type Alloc = mem.Allocator;
+const Callback = fn(i32, *u8) -> bool;
+const Handler = fn();
+const Grid = [4][4]f32;
+const Bytes = []u8;
+const Alloc = mem.Allocator;
 
 const MAX: i32 = 64;
 let counter: u64;

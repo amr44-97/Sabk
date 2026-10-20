@@ -1,0 +1,80 @@
+#import "std/io";
+#import "std/map";
+#import "lib/type_names";
+
+// ---- a constant whose value is a type is another name for it
+const word = i64;
+const Names = Map(string, i64);
+const Compare = fn(i64, i64) -> bool;
+const IntPtr = *i32;
+const Grid = [2][3]i32;
+const Bytes: type = []u8;           // `: type` says it outright
+const Later = Point;                // declared below
+const Chain = Later;                // a constant naming another
+struct Point { x: word; y: word; }
+enum Color { Red, Green }
+const Paint = Color;
+
+const WIDE = word == i64;           // a constant bool
+
+// chosen per target, with a top-level #if
+#if (POINTER_SIZE == 8) { const half = i32; } else { const half = i16; }
+#if (half == i32) { const HALF_BITS = 32; } else { const HALF_BITS = 16; }
+
+fn less(a: i64, b: i64) -> bool { return a < b; }
+
+// ---- $T: type, and types compared in plain code
+fn describe($T: type) -> string {
+    if (T == word) return "a word";
+    if T == Bytes then return "bytes";
+    return "something else";
+}
+
+fn element_size(items: []$T) -> isize {
+    const Elem = T;                 // a local one, in each instance
+    let first: Elem;
+    return sizeof(Elem) + sizeof(first) - sizeof(T);
+}
+
+fn with_local(body: Code) #expand {
+    const Count = i16;
+    let n: Count = 3;
+    #insert body;
+}
+
+fn takes(x: word) -> string { return "word"; }
+fn takes(x: f64) -> string { return "f64"; }
+
+fn main() {
+    let w: word = 5;
+    let names: Names;
+    map_put(&names, "a", 1);
+    let p: Chain = .{ .x = 1, .y = 2 };
+    let q = Later.{ .x = 3 };
+    let b: Bytes = "hi" as []u8;
+    let g: Grid;
+    let cmp: Compare = less;
+    let c: Paint = .Green;
+    let n: i32 = 7;
+    let ptr: IntPtr = &n;
+    println("% % % % % % %", w, map_get(&names, "a") or_else 0, p, q.x, b.len, g[1].len, c);
+    println("% % % %", cmp(1, 2), ptr.*, WIDE, Paint.Red);
+    println("% %", sizeof(half) * 8, HALF_BITS);
+
+    println("% / % / %", describe(i64), describe([]u8), describe(f32));
+    println("%", element_size(.[1.5, 2.5]));
+    with_local() { println("in a macro"); }
+    println("% %", takes(1), takes(1.5));
+
+    // another module's
+    let id: Id = 7;
+    let ids: type_names.Ids = .[id, 8];
+    println("% % % %", id, ids.len, sizeof(type_names.Id), hidden_size());
+
+    const Local = [4]u16;           // a local type constant
+    let arr: Local;
+    println("% %", arr.len, sizeof(Local));
+
+    #if (word == f32) println("never"); else println("#if compares them too");
+    if word != i32 then println("word isn't i32");
+}

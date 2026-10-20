@@ -39,7 +39,7 @@ fn main() -> i32 {
 
 enum Color: u8 { Red, Green, Blue = 10 }
 
-type Callback = fn(i32) -> bool;
+const Callback = fn(i32) -> bool;
 
 const MAX: i32 = 64;
 

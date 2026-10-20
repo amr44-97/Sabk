@@ -3,9 +3,9 @@
 #import "std/map";
 
 fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
-fn zero_of($T: Type) -> T { let z: T; return z; }
+fn zero_of($T: type) -> T { let z: T; return z; }
 
-fn type_name($T: Type) -> string {
+fn type_name($T: type) -> string {
     #if (T == isize) return "isize";
     else #if (T == i32) return "i32";
     else #if (T == u8) return "u8";
@@ -21,7 +21,7 @@ struct Pair($A, $B) { first: A; second: B; }
 struct Bag($T) { items: []T; count: i32; }
 
 // a growable array with room for `capacity`; T comes from where it's used
-fn make_array($T: Type, capacity: isize = 0) -> [..]T {
+fn make_array($T: type, capacity: isize = 0) -> [..]T {
     let xs: [..]T;
     array_reserve(&xs, capacity);
     return xs;
@@ -35,7 +35,7 @@ fn total(xs: [..]f32) -> f32 {
 fn fresh() -> [..]u8 { return make_array(); }       // the return type decides
 
 fn main() {
-    // `$T: Type` arguments left out: the context says what T is
+    // `$T: type` arguments left out: the context says what T is
     let xs: [..]i32 = make_array();
     let names: [..]string = make_array(16);            // 16 is the capacity
     array_add(&xs, 4);

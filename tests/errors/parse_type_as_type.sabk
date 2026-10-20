@@ -1,0 +1,2 @@
+// `type` only exists while compiling
+fn main() { let t: type; }

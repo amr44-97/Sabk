@@ -89,10 +89,11 @@ ROOT `#`
     ENUM_VARIANT `Green`
     ENUM_VARIANT `Blue`
       lhs: NUMBER_LITERAL `10`
-  TYPE_ALIAS `Callback`
-    type: TYPE_FN
-      type: TYPE_NAME `bool`
-      TYPE_NAME `i32`
+  CONST_DECL `Callback`
+    lhs: TYPE_EXPR
+      lhs: TYPE_FN
+        type: TYPE_NAME `bool`
+        TYPE_NAME `i32`
   CONST_DECL `MAX`
     type: TYPE_NAME `i32`
     lhs: NUMBER_LITERAL `64`

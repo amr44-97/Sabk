@@ -622,7 +622,7 @@ fn fn_signature(g: *CodeGen, fun: *Node) -> string {
     params.allocator = context.temp_allocator;
     if (!is_extern_decl(fun))
         print_to(&params, "% *ctx", c_type(g, g.c.context_type));
-    let k = 0; // `$T: Type` parameters aren't passed at run time
+    let k = 0; // `$T: type` parameters aren't passed at run time
     for (param in fn_params(fun)) {
         if (is_type_param(param))
             continue;

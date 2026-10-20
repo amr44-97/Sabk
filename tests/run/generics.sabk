@@ -20,7 +20,7 @@ struct List($T) {
     count: isize;
 }
 
-fn make_list($T: Type, capacity: isize = 4) -> List(T) {
+fn make_list($T: type, capacity: isize = 4) -> List(T) {
     return List(T).{ .items = new([]T, capacity) };
 }
 
@@ -57,9 +57,9 @@ fn largest(items: []$T) -> T {
 }
 
 struct Point { x: i32; y: i32; }
-type Points = List(Point);
+const Points = List(Point);
 
-fn size_of($T: Type) -> isize { return sizeof(T); }
+fn size_of($T: type) -> isize { return sizeof(T); }
 
 fn main() {
     // inference: the typed argument decides, untyped constants follow it

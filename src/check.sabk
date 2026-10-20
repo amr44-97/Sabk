@@ -1201,7 +1201,7 @@ fn check_signature(c: *Checker, d: *Node, fn_params: []*Node, result: *Node, is_
     let seen_default = false;
     for (p in fn_params) {
         if (is_type_param(p))
-            continue; // `$T: Type` is bound when the function is instantiated
+            continue; // `$T: type` is bound when the function is instantiated
         let declared = declared_of(p);
         let pt = type_from_node(c, declared);
         if (pt.kind == .Void && is_extern) {

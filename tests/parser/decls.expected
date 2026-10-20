@@ -27,26 +27,30 @@ ROOT `#`
       lhs: NUMBER_LITERAL `10`
   ENUM `Plain`
     ENUM_VARIANT `A`
-  TYPE_ALIAS `Callback`
-    type: TYPE_FN
-      type: TYPE_NAME `bool`
-      TYPE_NAME `i32`
-      TYPE_PTR `*`
-        lhs: TYPE_NAME `u8`
-  TYPE_ALIAS `Handler`
-    type: TYPE_FN
-  TYPE_ALIAS `Grid`
-    type: TYPE_ARRAY `[`
+  CONST_DECL `Callback`
+    lhs: TYPE_EXPR
+      lhs: TYPE_FN
+        type: TYPE_NAME `bool`
+        TYPE_NAME `i32`
+        TYPE_PTR `*`
+          lhs: TYPE_NAME `u8`
+  CONST_DECL `Handler`
+    lhs: TYPE_EXPR
+      lhs: TYPE_FN
+  CONST_DECL `Grid`
+    lhs: TYPE_EXPR `[`
       lhs: TYPE_ARRAY `[`
-        lhs: TYPE_NAME `f32`
+        lhs: TYPE_ARRAY `[`
+          lhs: TYPE_NAME `f32`
+          rhs: NUMBER_LITERAL `4`
         rhs: NUMBER_LITERAL `4`
-      rhs: NUMBER_LITERAL `4`
-  TYPE_ALIAS `Bytes`
-    type: TYPE_SLICE `[`
-      lhs: TYPE_NAME `u8`
-  TYPE_ALIAS `Alloc`
-    type: TYPE_MEMBER `Allocator`
-      lhs: TYPE_NAME `mem`
+  CONST_DECL `Bytes`
+    lhs: TYPE_EXPR `[`
+      lhs: TYPE_SLICE `[`
+        lhs: TYPE_NAME `u8`
+  CONST_DECL `Alloc`
+    lhs: MEMBER `Allocator`
+      lhs: IDENTIFIER `mem`
   CONST_DECL `MAX`
     type: TYPE_NAME `i32`
     lhs: NUMBER_LITERAL `64`

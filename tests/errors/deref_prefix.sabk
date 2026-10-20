@@ -1,6 +1,6 @@
 // C's `*p` isn't a dereference: that's `p.*`; `*T` is only a type
 struct Node { value: i64; }
-fn make($T: Type) -> isize { return sizeof(T); }
+fn make($T: type) -> isize { return sizeof(T); }
 
 fn f(x: i32, q: *i32, pp: **i32) {
     let b = *q;

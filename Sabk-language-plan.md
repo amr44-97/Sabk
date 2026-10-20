@@ -30,7 +30,7 @@ switch to them at the bootstrap.
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 - [ ] **C interop:** `#library`, `#system_library`, `#foreign`, `#c_call` and C function types; `extern` goes (section 8)
 - [ ] **C types** in the prelude: `int`, `long`, `char`, `size_t`, ... (section 8)
-- [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8)
+- [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8). Built: everything but `is` and `#distinct`
 - [ ] **Layout:** `#packed` and `#align(n)` on structs (section 8)
 
 ## 1. Formatting
@@ -1191,6 +1191,22 @@ dropped: it would break Sabk callbacks passed through C's `void *`.)
 - **One C name declared twice**, in two modules: one function when the signatures match, an error when they don't?
 - **`Code`:** does it follow `type` as `code`, or stay?
 - **`#align` on fields** as well as structs?
+
+### Built, step 1 (Oct 20, 2026): `const` names types, `type`, `==` on types
+
+#### Edge cases met building it (to review)
+
+1. **When a constant is a type:** when its value names one, decided before anything else is resolved, since a field or a top-level `#if` may use it as a type. One naming another (`const A = B;`, `B` declared later or in another module) waits for it, so the pass repeats until nothing changes; it runs again after each top-level `#if` and `#insert`, and covers the branches not taken (their names are still checked).
+2. **A declared type that isn't `type`** keeps the value a value: `const X: i64 = i32;` is "`i32` is a type, not a value".
+3. **Two constants naming each other** (`const T = U; const U = T;`) aren't types, so the cycle is reported as a constant's, "the definition of `T` depends on itself", as `type` reported it. Used as a type, a constant that isn't one says "`T` is a constant whose value isn't a type", with a note at it.
+4. **A generic struct without its types** (`const L = List;`) is "give its types". Generic aliases stay out (section 8 above).
+5. **A type against a value** (`x == i32`, `List(3) == i32`) is "can't compare a type with a value", now at the value (it was at the `==`). An unknown name on one side is an unknown type.
+6. **`T == Map`**, any instance, works in plain code as in `#if`, until `is` on types takes it over (step 6).
+7. **A plain `if` on a type comparison checks both branches**: `if (T == string) return hash_string(key);` fails for `T = i64`, where `#if` doesn't. The reference says so.
+8. **Local type constants**: in functions, in each generic instance (`const Elem = T;`), and in macros, hygienic like other locals; checked even when unused.
+9. **The prelude isn't one of the program's modules**, so a top-level `#if` there isn't decided: step 2 (C types per target) needs that.
+10. **The old spellings are errors** that show the new one: `$T: Type` ("written `$T: type`") and `type X = T;` ("a name for a type is a constant: `const X = ...;`"). `type` anywhere else as a type says it only exists while compiling.
+11. **The seed was refreshed twice**: once with both spellings accepted, so std and the compiler could move, then after they had.
 
 ## 9. How it lands
 

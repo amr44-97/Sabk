@@ -29,7 +29,7 @@ fn sum(xs: ..i32) -> i32 {
 }
 
 // type_info: what printing uses, and anyone can
-fn field_names($T: Type) -> string {
+fn field_names($T: type) -> string {
     let b = make_builder();
     for (f in type_info(T).fields)
         builder_print(&b, "%:% ", f.name, f.info.name);

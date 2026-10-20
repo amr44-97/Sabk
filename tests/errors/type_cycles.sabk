@@ -1,4 +1,4 @@
 const X = Y + 1;
 const Y = X * 2;
-type T = U;
-type U = T;
+const T = U;
+const U = T;

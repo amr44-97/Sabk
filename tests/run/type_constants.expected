@@ -1,0 +1,12 @@
+5 1 {x = 1, y = 2} 3 2 3 Green
+true 7 true Red
+32 32
+a word / bytes / something else
+8
+in a macro
+word f64
+7 2 4 1
+4 8
+#if compares them too
+word isn't i32
+[exit 0]

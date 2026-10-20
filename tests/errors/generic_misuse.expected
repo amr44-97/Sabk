@@ -10,6 +10,6 @@
 [error]: `T` takes a type here, like `i32` or `[]u8` at [tests/errors/generic_misuse.sabk:9:20]
      9 |     let e = make(1 + 2);
        |                    ^
-[error]: a type can't be used as a value here; types are only passed to `$T: Type` parameters at [tests/errors/generic_misuse.sabk:10:13]
+[error]: a type can't be used as a value here: a type is named (`const X = T;`), compared (`T == i32`), or passed to a `$T: type` parameter at [tests/errors/generic_misuse.sabk:10:13]
     10 |     let t = []u8;
        |             ^

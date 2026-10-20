@@ -60,7 +60,7 @@ struct Map($K, $V) {
     allocator: Allocator;
 }
 
-fn make_map($K: Type, $V: Type, a: Allocator = context.allocator,
+fn make_map($K: type, $V: type, a: Allocator = context.allocator,
                 hash: fn(K) -> u64 = hash_key,
                 equal: fn(K, K) -> bool = keys_equal) -> Map(K, V) {
     let m = Map(K, V).{ .hash = hash, .equal = equal, .allocator = a };

@@ -19,7 +19,7 @@ ROOT
     STRUCT_FIELD `pos`
       type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/resolve/order.sabk:5:8
     STRUCT_FIELD `size`
-      type: TYPE_NAME `Size` -> TYPE_ALIAS `Size` tests/resolve/order.sabk:3:6
+      type: TYPE_NAME `Size` -> TYPE_ALIAS `Size` tests/resolve/order.sabk:3:7
   STRUCT `Vec2`
     STRUCT_FIELD `x`
       type: TYPE_NAME `f32` -> builtin

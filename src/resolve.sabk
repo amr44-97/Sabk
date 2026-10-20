@@ -99,6 +99,7 @@ fn resolve_program(r: *Resolver, root_path: string) -> bool {
     r.prelude = parse_module(r, "<prelude>", prelude_source());
     collect_decls(r, r.prelude);
     load(r, root_path);
+    name_type_constants(r);
 
     // every reachable module is loaded by now. Declarations made by a
     // top-level `#insert`, and those in the branch a top-level `#if` takes,
@@ -113,12 +114,14 @@ fn resolve_program(r: *Resolver, root_path: string) -> bool {
                 j++;
                 continue;
             }
+            name_type_constants(r); // the ones the last #if or #insert made
             r.mod = m;
             r.region = map_get(&m.regions, d) or_else null;
             let made = if (d.kind.tag == .StaticIf) taken_decls(r, d) else inserted_decls(r, d);
             splice(decls, j, made); // and look at what was made: it may insert more
         }
     }
+    name_type_constants(r);
 
     // a #run may have needed some of these resolved already
     for (d in root_decls(r.prelude).*)
@@ -136,6 +139,38 @@ fn resolve_program(r: *Resolver, root_path: string) -> bool {
             ensure_resolved(r, d);
     }
     return r.error_count == 0 && (r.checker == null || r.checker.error_count == 0);
+}
+
+// `const Names = Map(string, i64);`: a constant whose value is a type is
+// another name for it, as `const Names: type = ...` says outright. That's
+// decided before the declarations are resolved, since any of them (a
+// field, an #if condition) may use the name as a type; a constant naming
+// another one waits for it, so this repeats until nothing changes.
+fn name_type_constants(r: *Resolver) {
+    let saved = r.mod;
+    let changed = true;
+    while (changed) {
+        changed = name_type_constants_in(r, r.prelude, root_decls(r.prelude).*);
+        for (m in r.modules) {
+            if (name_type_constants_in(r, m, root_decls(m).*))
+                changed = true;
+            if (name_type_constants_in(r, m, m.untaken)) // checked for names too
+                changed = true;
+        }
+    }
+    r.mod = saved;
+}
+
+fn name_type_constants_in(r: *Resolver, m: *Module, decls: []*Node) -> bool {
+    r.mod = m;
+    let changed = false;
+    for (d in decls) {
+        if (d.kind is .Const{declared, value} && declared == null && names_type(r, value)) {
+            d.kind = .TypeAlias(expr_to_type(value));
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 /* --------------------------------------------------------------- position */
@@ -825,7 +860,7 @@ fn taken_decls(r: *Resolver, n: *Node) -> []*Node {
         then = t;
         else_ = e;
     }
-    resolve_condition(r, cond);
+    resolve_expr(r, cond);
     let value, known = decide_condition(r, cond, true);
     let taken: *Node = if (!known) null else if (!value) else_ else then;
     for (branch in .[then, else_])
@@ -858,7 +893,7 @@ fn taken_decls(r: *Resolver, n: *Node) -> []*Node {
 // can only be named from code that isn't taken either
 fn set_aside(r: *Resolver, branch: *Node, in_if: *Node) {
     if (branch.kind is .StaticIf{cond, then, else_}) { // `else #if`, not taken either
-        resolve_condition(r, cond);
+        resolve_expr(r, cond);
         set_aside(r, then, in_if);
         if (else_ != null)
             set_aside(r, else_, in_if);
@@ -1523,7 +1558,15 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
     case .Let{declared, value}:
         resolve_local(r, n, declared, value);
     case .Const{declared, value}:
+        if (declared == null && names_type(r, value)) { // const Pairs = []Pair;
+            n.kind = .TypeAlias(expr_to_type(value));
+            resolve_stmt(r, n);
+            return;
+        }
         resolve_local(r, n, declared, value);
+    case .TypeAlias{aliased}:
+        resolve_type(r, aliased);
+        resolve_local(r, n, null, null); // declared where a constant would be
 
     case .LetValues{names, values}:
         if (n.caller) {
@@ -1623,7 +1666,7 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
         // one; but a branch that inserts code made by `#run` would run it,
         // so then the condition is decided now (in an instance, its types
         // are known) and only the branch taken is resolved
-        resolve_condition(r, cond);
+        resolve_expr(r, cond);
         if (has_string_insert(then) || has_string_insert(else_)) {
             let value, known = decide_condition(r, cond, false);
             if (known) {
@@ -2027,11 +2070,11 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
         resolve_call(r, n);
 
     case .TypeExpr:
-        error(r, n.tok, "a type can't be used as a value here; types are only passed to `$T: Type` parameters");
+        error(r, n.tok, "a type can't be used as a value here: a type is named (`const X = T;`), compared (`T == i32`), or passed to a `$T: type` parameter");
 
     case .Unary{op: .PointerType, operand}:
         if (names_type(r, operand)) {
-            error(r, n.tok, "a type can't be used as a value here; types are only passed to `$T: Type` parameters");
+            error(r, n.tok, "a type can't be used as a value here: a type is named (`const X = T;`), compared (`T == i32`), or passed to a `$T: type` parameter");
             return;
         }
         if (operand.kind is .ArrayLiteral{elem} && elem != null) {
@@ -2091,6 +2134,9 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
 
     case .Number, .Float, .String, .Char, .Bool, .Null:
 
+    case .Binary{op, lhs, rhs} if ((op == .EqEq || op == .NotEq) && (names_type(r, lhs) || names_type(r, rhs))):
+        resolve_type_compare(r, n, lhs, rhs);
+
     default:
         // unary, binary, grouping and indexing: just the children
         let s = old_shape(n);
@@ -2131,7 +2177,7 @@ fn resolve_call(r: *Resolver, n: *Node) {
     let params: []*Node;
     if (fn_decl != null && fn_decl.kind is .Fn{params: ps, is_macro: false})
         params = ps;
-    // A `$T: Type` argument can be left out when the context says what T
+    // A `$T: type` argument can be left out when the context says what T
     // is: `let xs: List(i32) = make_list();`. It's left out when what's in
     // its place isn't a type and the arguments leave room for that; a
     // placeholder keeps the later arguments lined up with their parameters.
@@ -2152,7 +2198,7 @@ fn resolve_call(r: *Resolver, n: *Node) {
         let arg = args.*[i];
         if (arg.kind is .TypeExpr{declared} && declared == null)
             continue; // left out: inferred from the context
-        // the argument for a `$T: Type` parameter is a type
+        // the argument for a `$T: type` parameter is a type
         if (i < params.len && params[i].kind is .Param{is_type: true}) {
             let made = expr_to_type(arg);
             if (made == null) {
@@ -2207,7 +2253,10 @@ fn resolve_type(r: *Resolver, n: *Node) {
             error(r, n.tok, tformat("unknown type `%`%", n.tok.text, qualified_hint(r, n.tok.text, color_of(r, n))));
         else if (d.kind.tag == .Import)
             error(r, n.tok, tformat("`%` is a module, not a type", n.tok.text));
-        else if (!is_type_decl(d))
+        else if (d.kind.tag == .Const) { // a value, or a type naming itself: const T = U; const U = T;
+            error(r, n.tok, tformat("`%` is a constant whose value isn't a type", n.tok.text));
+            note(r, d.tok, tformat("`%` is declared here", n.tok.text));
+        } else if (!is_type_decl(d))
             error(r, n.tok, tformat("`%` is not a type", n.tok.text));
         else {
             n.decl = d;
@@ -2339,39 +2388,29 @@ fn expr_to_type(e: *Node) -> *Node {
     return t;
 }
 
-// An #if condition: like any expression, except that `==` and `!=` can
-// compare types (`T == []u8`)
-fn resolve_condition(r: *Resolver, n: *Node) {
-    switch (n.kind) {
-    case .Binary{op: .And, lhs, rhs}:
-        resolve_condition(r, lhs);
-        resolve_condition(r, rhs);
-    case .Binary{op: .Or, lhs, rhs}:
-        resolve_condition(r, lhs);
-        resolve_condition(r, rhs);
-    case .Unary{op: .Not, operand}:
-        resolve_condition(r, operand);
-    case .Grouped{inner}:
-        resolve_condition(r, inner);
-    case .Binary{op, lhs, rhs} if (op == .EqEq || op == .NotEq):
-        if (names_type(r, lhs) || names_type(r, rhs)) {
-            let left, right = expr_to_type(lhs), expr_to_type(rhs);
-            if (left == null || right == null) {
-                error(r, n.tok, "can't compare a type with a value");
-                return;
-            }
-            n.kind = .TypeCompare(left, right);
-            r.any_instance_ok = left;
-            resolve_type(r, left);
-            r.any_instance_ok = right;
-            resolve_type(r, right);
-            r.any_instance_ok = null;
+// `T == []u8`, `word != i64`: two types compared, a constant `bool`. A
+// generic struct without its types is any of its instances (`T == Map`).
+fn resolve_type_compare(r: *Resolver, n: *Node, lhs: *Node, rhs: *Node) {
+    n.decl = null; // no operator function compares types
+    let left, right = expr_to_type(lhs), expr_to_type(rhs);
+    for (side in .[lhs, rhs]) {
+        // an unknown name is reported as an unknown type, below
+        let unknown = side.kind.tag == .Identifier && lookup(r, side.tok.text, color_of(r, side), side.tok.text.ptr) == null;
+        if (!names_type(r, side) && !unknown) {
+            error(r, side.tok, "can't compare a type with a value");
             return;
         }
-        resolve_expr(r, n);
-    default:
-        resolve_expr(r, n);
     }
+    if (left == null || right == null) { // List(3)
+        error(r, n.tok, "can't compare a type with a value");
+        return;
+    }
+    n.kind = .TypeCompare(left, right);
+    r.any_instance_ok = left;
+    resolve_type(r, left);
+    r.any_instance_ok = right;
+    resolve_type(r, right);
+    r.any_instance_ok = null;
 }
 
 // List(i32): the type arguments a generic type needs, and only it

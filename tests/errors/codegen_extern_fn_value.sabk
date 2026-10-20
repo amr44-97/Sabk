@@ -1,3 +1,3 @@
 extern fn c(x: i32) -> i32 { return x; }
-type F = fn(i32) -> i32;
+const F = fn(i32) -> i32;
 fn main() { let f: F = c; let p = &c; }

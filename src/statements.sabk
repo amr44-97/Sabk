@@ -49,6 +49,9 @@ fn check_stmt(c: *Checker, n: *Node) {
         check_var(c, n);
         n.check_state = 2;
 
+    case .TypeAlias: // const Pairs = []Pair; checked here even if unused
+        decl_type(c, n);
+
     case .LetValues:
         check_let_values(c, n);
 

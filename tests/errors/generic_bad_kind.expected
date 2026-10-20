@@ -1,3 +1,3 @@
-[error]: a `$T` parameter takes a type, so it's written `$T: Type` at [tests/errors/generic_bad_kind.sabk:1:17]
+[error]: a `$T` parameter takes a type, so it's written `$T: type` at [tests/errors/generic_bad_kind.sabk:1:17]
      1 | fn bad_kind($T: Kind) {}
        |                 ^

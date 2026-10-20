@@ -51,7 +51,7 @@ struct Vec2 {
 
 enum Color: u8 { Red, Green, Blue = 10 }
 
-type Callback = fn(i32) -> bool;
+const Callback = fn(i32) -> bool;
 
 const MAX: i32 = 64;
 
@@ -226,7 +226,6 @@ decl        = fn_decl
             | struct_decl
             | union_decl
             | enum_decl
-            | type_decl
             | const_decl
             | let_decl
             | "extern" "let" IDENT ":" type ";"     // a variable C defines
@@ -248,7 +247,7 @@ results     = result | "(" result { "," result } ")" ; // several: (i64, bool)
 result      = type [ "=" expr ] ;                    // a default: ParseError = .None
 param       = IDENT ":" type [ "=" expr ]
             | IDENT ":" ".." type                     // any number: a []type
-            | "$" IDENT ":" "Type" ;                  // takes a type: generics
+            | "$" IDENT ":" "type" ;                  // takes a type: generics
 
 struct_decl = "struct" IDENT [ type_params ] "{" { field } "}" ;
 union_decl  = "union"  IDENT [ type_params ] "{" { field } "}" ;
@@ -262,9 +261,8 @@ payload     = type                                // Number(i64)
             | IDENT ":" type [ "=" expr ] { "," IDENT ":" type [ "=" expr ] } ;
                                                   // Binary(op: Op, lhs: *Expr)
 
-type_decl   = "type" IDENT "=" type ";" ;
-
-const_decl  = "const" IDENT [ ":" type ] "=" expr ";" ;
+const_decl  = "const" IDENT [ ":" type ] "=" expr ";"
+            | "const" IDENT ":" "type" "=" type ";" ;   // a name for a type
 let_decl    = let_binding ";" ;
 let_binding = "let" IDENT [ ":" type ] [ "=" expr ]
             | "let" IDENT ":" type "=" "---"           // a local, left uninitialized
@@ -333,8 +331,25 @@ values      = expr { "," expr } ;
   println("%", b.u);              // 1065353216: the float's bits
   ```
 
-- **`type Name = T;`** is another name for `T`, as C's `typedef` is: the
-  two are the same type and mix freely. `type Handler = fn(i64) -> i64;`
+- **A constant whose value is a type** is another name for it, as C's
+  `typedef` is: the two are the same type and mix freely.
+
+  ```
+  const Handler = fn(i64) -> i64;
+  const Names = Map(string, i64);
+  const word: type = i64;          // `: type` says so outright
+  ```
+
+  `type` is the type of types, and it only exists while compiling: a
+  `$T: type` parameter takes one, and a constant names one. A type
+  constant can be local too, and one can name another declared later. The
+  value is a type as written (`i64`, `[]u8`, `List(T)`): to pick one per
+  target, use a top-level [`#if`](#compile-time-if).
+- **Types compare with `==` and `!=`** wherever a constant `bool` goes:
+  `if T == string then ...`, `const WIDE = word == i64;`, and `#if`
+  conditions. The comparison is decided while compiling, so a plain `if`
+  on it costs nothing, but both its branches must still compile for the
+  types in hand; `#if` is the one that checks only the branch taken.
 - **Functions are values.** A function's name is a value of its function
   type, which can be stored, passed and called; `null` is no function.
   There are no closures: a function sees its parameters and globals, so
@@ -967,7 +982,7 @@ own:
 enum AllocatorMode { Alloc, Free, Resize, FreeAll }
 
 // (data, mode, size, alignment, old_memory, old_size) -> memory
-type AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
+const AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
 
 struct Allocator { procedure: AllocatorProc; data: *void; }
 ```
@@ -3195,7 +3210,7 @@ struct List($T) {                         // a generic struct
 
 fn push(list: *List($T), item: T) { ... }
 
-fn make_list($T: Type) -> List(T) {      // a type passed as an argument
+fn make_list($T: type) -> List(T) {      // a type passed as an argument
     return List(T).{ .items = new([]T, 4) };
 }
 
@@ -3208,7 +3223,7 @@ push(&xs, max(3, 7));
   function: its parameters, its return type and its body.
 - `$T` can sit anywhere inside a type: `[]$T`, `*List($T)`,
   `fn($A) -> $B`.
-- A `$T: Type` parameter takes a type as its argument: `make_list(i32)`.
+- A `$T: type` parameter takes a type as its argument: `make_list(i32)`.
   Any type can be passed this way, including `*u8`, `[]u8`, `List(f32)` and
   `fn(i32) -> bool`.
 - A struct or union declares its type parameters after its name:
@@ -3237,11 +3252,11 @@ uses `T = isize`):
 ```
 let xs: List(i32) = make_list();          // T = i32, from the declared type
 let names: List(string) = make_list(16);  // 16 is the capacity
-let n: i64 = parse(text);                 // fn parse($T: Type, s: string) -> T
+let n: i64 = parse(text);                 // fn parse($T: type, s: string) -> T
 let small: u8 = max(1, 2);                // untyped arguments: the context, u8
 ```
 
-- **Leaving out a `$T: Type` argument.** You can leave it out when the
+- **Leaving out a `$T: type` argument.** You can leave it out when the
   context decides, as `make_list()` and `make_list(16)` do. It counts as left
   out when what's in its place isn't a type and the call has room for that,
   so `make_list(16)` passes 16 as the capacity.
@@ -3292,7 +3307,7 @@ instance. A program with 600 instances spent 72 ms in our compiler and
 - A generic function used as a value needs a function type to pick its
   instance: `sort_by(items, less_than)` or
   `let f: fn(f64) -> f64 = twice;` work, and `let f = twice;` doesn't.
-  A generic function with a `$T: Type` parameter can't be a value at all.
+  A generic function with a `$T: type` parameter can't be a value at all.
 - No generic `extern` or `#expand` functions.
 - No `$N` for array lengths.
 
@@ -3317,7 +3332,8 @@ fn hash_key(key: $T) -> u64 {
 **The condition** must be a `bool` known at compile time:
 - type comparisons: `T == string`, `T != *u8`, `T == List(i32)`; a
   generic struct without its types matches any instance: `T == Map` is
-  true for every `Map(K, V)`
+  true for every `Map(K, V)`. They work outside `#if` too (see
+  [Declarations](#declarations))
 - constants and `sizeof`: `sizeof(T) == 8`, `DEBUG`
 - any of these combined with `&&`, `||` and `!`
 
@@ -3801,8 +3817,10 @@ A few things to know:
 - `$` declares a type parameter (`$T`), `...` is a C function's variadic
   parameters, `..` a range, a slice or a `..` parameter, and `---` leaves a
   local uninitialized.
+- `type` is a keyword and also the type of types: `$T: type`,
+  `const word: type = i64;`.
 - Names that aren't keywords but are always there: the built-in types
-  (`i32`, `string`, ...), `Type` and `Code` (for generics and macros), and
+  (`i32`, `string`, ...), `Code` (for macros), and
   the prelude's `Any`, `TypeInfo`, `Error`, `Option`, `Allocator`, `Context`
   and the target constants `OS`, `ARCH` and `POINTER_SIZE`.
 - The lexer also produces `:=`, `::`, `~=` and `@`, which the grammar
