@@ -286,8 +286,8 @@ fn generate(g: *CodeGen) -> string {
 
 #scope_file
 
-const C_PRELUDE = #run read_text("src/runtime_start.c");
-const C_RUNTIME = #run read_text("src/runtime_new.c");
+const C_PRELUDE = #embed("runtime_start.c");
+const C_RUNTIME = #embed("runtime_new.c");
 
 // The prelude's C types (int, long, ...) have the sizes the checker gave
 // them; these stop the build if the C compiler disagrees. Always written:
@@ -308,13 +308,6 @@ fn c_type_checks() -> string {
 fn c_size_check(out: *[..]u8, name: string, c: string, size: isize) {
     append_string(out, tformat("_Static_assert(sizeof(%) == %, \"Sabk's % is % bytes, but this C compiler's % isn't\");\n",
                                c, size, name, size, c));
-}
-
-fn read_text(path: string) -> string {
-    let text, err = read_file(path);
-    if (err != .None)
-        panic(tformat("can't read % (build from the repository's top): %", path, io_error_message(err)));
-    return text;
 }
 
 // names C (or the generated code) already uses

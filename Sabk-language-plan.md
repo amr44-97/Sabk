@@ -13,7 +13,7 @@ switch to them at the bootstrap.
 
 - [x] **Formatting:** letter directives (`%s %q %w %x %X %b %o %e %f %c`), `%{}` before a letter, errors that teach (section 1)
 - [x] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2); `pub` and `import` are ordinary names now
-- [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3). Built: `#assert` (section 8's step 7), `#caller_location`
+- [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3). Built: `#assert` (section 8's step 7), `#caller_location`, `#embed`
 - [ ] **Metaprogramming, layer 2:** `#code` values and syntax trees in std/compiler (section 3)
 - [ ] **Metaprogramming, layer 3:** a build script that sees every declaration as it's checked (section 3)
 - [ ] **Types as values:** `#insert` in struct and enum bodies, value parameters on structs (section 3)
@@ -1336,6 +1336,18 @@ Decided with the user: the value is the prelude's `struct Location { file: strin
 4. **A parameter of another type** (`at: string = #caller_location`) is the signature's type error alone; calls add nothing, so it isn't reported again at each call.
 5. **Through a function value** the default isn't used (as no default is), so the caller passes a `Location`.
 6. **`Location` is a prelude name**, not reserved: a program's own `Location` hides it, as with `TypeKind`.
+
+### Built (Oct 21, 2026): `#embed`
+
+Decided with the user: the value is a `string` (`as []u8` for bytes), anywhere a string literal goes; the path is a string literal, relative to the file the `#embed` is written in; a missing file is an error with the path looked for; no size limit; and the compiler itself embeds its prelude and C runtime.
+
+#### Edge cases met building it (to review)
+
+1. **The parser reads the file** and makes a string literal of it, so every later phase sees a literal (`--ast` shows the contents). A missing file is reported and parsing goes on, with an empty string in its place.
+2. **Bytes go through exactly**: a NUL, 0xff and `\x41` before an `F` (which a careless C hex escape would merge) all survive, since the C output writes octal escapes.
+3. **In `#insert`-made code** the path is relative to the generated module's name, which isn't a directory; an absolute path works there.
+4. **The compiler embeds `prelude.sabk`, `runtime_start.c` and `runtime_new.c`** instead of reading them from the current directory, so it no longer has to be built from the repository's top: built from elsewhere, it writes the same C. Two rounds with the seed, the first teaching it `#embed`.
+5. **`.len` of a string constant didn't work** (`"xy".len` was "`untyped string` has no member `len`"), which `#embed` made common: an untyped string now takes its type, `string`, for `.len` and `.ptr`, and a literal's or a string constant's `.len` is a constant, as an array's is (`let buffer: [WORDS.len]u8;`).
 
 ## 9. How it lands
 

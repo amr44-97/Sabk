@@ -75,15 +75,12 @@ fn system_error_text(err: IoError) -> string {
 #scope_file
 
 // The prelude's text, with the target's names in it: the compiler builds
-// for the machine it runs on, so its own OS and ARCH say which. Read from
-// src/prelude.sabk while the compiler is compiled.
+// for the machine it runs on, so its own OS and ARCH say which. Embedded
+// from prelude.sabk, next to this file, while the compiler is compiled.
 const PRELUDE = #run prelude_text();
 
 fn prelude_text() -> string {
-    let text, err = read_file("src/prelude.sabk");
-    if (err != .None)
-        panic(tformat("can't read src/prelude.sabk (build from the repository's top): %",
-                      io_error_message(err)));
+    let text = #embed("prelude.sabk");
     let with_os = replace_all(text, "@OS@", tformat("%", OS));
     let with_arch = replace_all(with_os, "@ARCH@", tformat("%", ARCH));
     let bits = c_long_bits();

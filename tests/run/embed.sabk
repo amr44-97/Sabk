@@ -1,0 +1,24 @@
+// #embed("file"): its contents as a constant string, the path relative to
+// the file the #embed is written in
+#import "std/io";
+#import "lib/embedder";
+
+const WORDS = #embed("lib/embed/words.txt");
+const BYTES = #embed("lib/embed/bytes.bin") as []u8;   // any bytes: a NUL, 0xff, ...
+
+fn count_lines(text: string) -> isize {
+    let n = 0;
+    for (c in text) if (c == '\n') n += 1;
+    return n;
+}
+const LINES = #run count_lines(#embed("lib/embed/words.txt"));   // in #run too
+const SIZE = WORDS.len;                     // a constant string's length is a constant
+
+fn main() {
+    print(WORDS);
+    println("same from the library: %", WORDS == WORDS_FROM_LIB);
+    println("bytes: % [% % % % %]", BYTES.len, BYTES[0], BYTES[1], BYTES[2], BYTES[3], BYTES[4]);
+    println("lines: % %", LINES, count_lines(#embed("lib/embed/words.txt")));
+    let copy: [SIZE]u8;
+    println("size: % % % %", SIZE, copy.len, "literal".len, WORDS.ptr[0]);
+}

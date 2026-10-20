@@ -800,6 +800,7 @@ primary     = NUMBER | FLOAT | STRING | CHAR
             | "#insert" unary              // an expression made by code (not IDENT)
             | ( "#text" | "#location" ) "(" IDENT ")"   // macros only
             | "#caller_location"                       // a parameter's default only
+            | "#embed" "(" STRING ")"                  // a file's contents, a string
             | "#run" unary                              // runs while compiling
             | "(" expr ")"
             | "switch" expr "{" { value_case } "}"
@@ -1382,6 +1383,7 @@ default:    return .Name;        // no default needed, but usually wanted
 
 - `.len` counts bytes, and `s[i]` is the i-th byte, bounds-checked. Text
   is usually UTF-8, so a byte isn't always a character.
+- **A literal's `.len` is a constant**, and so is a string constant's (`const NAME = "sabk";`, or one `#embed` made): `NAME.len` is 4 while compiling, and can size an array.
 - Strings aren't NUL-terminated, and can hold NUL bytes. A C function that
   wants a `char *` takes a literal as it is (`printf("hi\n")`); any other
   string needs a copy with a NUL at the end, `to_cstring(s)`, and a
@@ -3829,6 +3831,30 @@ called. A `#run` runs as soon as the checker reaches it, so the functions it
 calls are checked first, wherever they are. After an error has been
 reported, later `#run`s are skipped, since the code they'd run may be
 broken.
+
+### Embedding a file
+
+**`#embed("file")`** is the file's contents as a constant string, read
+while compiling: data tables, templates, shaders, a font, a word list.
+
+```
+const WORDS = #embed("data/words.txt");             // next to this source file
+const LOGO = #embed("assets/logo.png") as []u8;     // any bytes, viewed as bytes
+const LINES = #run count_lines(#embed("data/words.txt"));
+```
+
+- **The path** is relative to the source file the `#embed` is written in
+  (a macro's own file, for one in a macro), as `#import`'s and `#load`'s
+  are; an absolute path stays as it is. It's a string literal.
+- **The value** is a `string` holding the file's bytes exactly, NUL bytes
+  included: `as []u8` views a binary file as bytes, at no cost. It goes
+  wherever a string literal does, `#run` code included, and its `.len` is
+  a constant, as a literal's is: `let buffer: [WORDS.len]u8;`.
+- **A file that can't be read** is an error at the `#embed`, with the
+  path it looked for.
+- The file is read on every build, so a change to it is in the next one.
+  Its bytes go into the C output as a string literal; a file of many
+  megabytes makes the C compiler slower.
 
 ### Inserting code made at compile time
 

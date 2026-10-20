@@ -264,6 +264,19 @@ fn place_text(e: *Node) -> string {
     }
 }
 
+// the string literal `e` is, directly or through constants; else null
+fn string_literal_of(e: *Node) -> *Node {
+    switch (e.kind) {
+    case .String: return e;
+    case .Grouped{inner}: return string_literal_of(inner);
+    case .Identifier, .Member:
+        if (e.decl != null && e.decl.kind is .Const{value} && value != null)
+            return string_literal_of(value);
+        return null;
+    default: return null;
+    }
+}
+
 // `abs` for a function's name, else "this function"
 fn function_named(e: *Node) -> string {
     if ((e.kind.tag == .Identifier || e.kind.tag == .Member) && e.decl != null && e.decl.kind.tag == .Fn)
@@ -1648,6 +1661,18 @@ fn check_member(c: *Checker, n: *Node) -> *Type {
     let t = check_expr(c, object, null);
     if (t.kind == .Error)
         return t;
+    // a string literal, or a constant holding one (`#embed`'s): a `string`,
+    // whose length is known while compiling, as an array's is
+    if (t.kind == .UntypedString) {
+        let literal = string_literal_of(object);
+        t = default_type(c, object);
+        if (name == "len" && literal != null) {
+            let quoted = if (literal.kind is .String{quoted: q} && q.len > 0) q else literal.tok.text;
+            let bytes, _, _ = decode_escapes(quoted[1..quoted.len - 1]);
+            n.cval = int_const(i128_u(bytes.len as u64));
+            return c.types.isize;
+        }
+    }
     let through_ptr = t.kind == .Ptr;
     if (through_ptr) // p.x is (*p).x
         t = t.elem;

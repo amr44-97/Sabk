@@ -1,0 +1,8 @@
+one
+two
+three
+same from the library: true
+bytes: 5 [0 1 255 65 70]
+lines: 3 3
+size: 14 14 7 111
+[exit 0]

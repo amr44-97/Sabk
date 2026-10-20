@@ -1,0 +1,3 @@
+// #embed of a file that isn't there
+const TEXT = #embed("no/such/file.txt");
+fn main() {}

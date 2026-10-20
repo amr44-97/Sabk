@@ -9,8 +9,10 @@
 
 #import "std/array";
 #import "std/fmt";
+#import "std/io";
 #import "std/mem";
 #import "std/os";
+#import "std/path";
 #import "std/str";
 #import "ast";
 #import "source";
@@ -289,6 +291,23 @@ fn static_assert(p: *Parser) -> *Node {
     expect(p, .RParen, "`)` after `#assert`'s condition and message");
     expect(p, .Semicolon, "`;` after `#assert(...)`");
     return new_node(t, .StaticAssert(cond, message));
+}
+
+// `#embed("words.txt")`: the file's contents, as a string literal made
+// here, so everything after sees a literal; the path is relative to the
+// file the #embed is written in
+fn embed(p: *Parser, t: Token) -> *Node {
+    expect(p, .LParen, "`(` and a file's path after `#embed`, like `#embed(\"words.txt\")`");
+    let spec_tok = expect(p, .String, "a file's path, a string: `#embed(\"words.txt\")`");
+    expect(p, .RParen, "`)` after `#embed`'s path");
+    let spec = spec_tok.text[1..spec_tok.text.len - 1];
+    let path = if (path_is_absolute(spec)) spec else path_normalize(path_join(path_dir(p.src.path), spec));
+    let text, err = read_file(path);
+    if (err != .None) {
+        report_error(p, spec_tok, tformat("`#embed` can't read `%` (looked for `%`): %", spec, path, io_error_message(err)));
+        text = "";
+    }
+    return new_node(t, .String(quote_string(text)));
 }
 
 // `#import "std/io";`, `#import "std/io" as io;`
@@ -1978,6 +1997,8 @@ fn primary(p: *Parser) -> *Node {
             return new_node(name, .Run(unary(p)));
         if (d == "caller_location") // `at: Location = #caller_location`
             return new_node(name, .CallerLocation);
+        if (d == "embed")
+            return embed(p, name);
         if (d == "text" || d == "location") {
             expect(p, .LParen, tformat("`(` after `#%`", d));
             let code = expect(p, .Identifier, "a Code parameter");
