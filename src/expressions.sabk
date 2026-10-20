@@ -303,6 +303,9 @@ fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
         return assignable(c, object, why);
     case .Deref, .Context:
         return true;
+    case .Call{callee} if (callee.decl != null && is_operator_fn(callee.decl) && callee.decl.tok.text == "[]"):
+        why.* = "`operator []` gives a value, not a variable (only `x[i] = v` goes to `operator []=`)";
+        return false;
     default:
         why.* = "it's a temporary value";
         return false;

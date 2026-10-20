@@ -1,0 +1,26 @@
+// operator declarations that can't work, and `operator []`'s values
+struct V { x: f64; y: f64; }
+
+fn operator -(a: *V, b: *V) -> V { return a.*; }               // `p - q` on pointers stays built in
+fn operator ==(a: V, b: V) -> i64 { return 1; }                // not a bool
+fn operator +(a: V, b: V) -> V #symmetric { return a; }        // both V: nothing to swap
+fn operator *(v: V, k: f64) -> V #symmetric { return v; }
+fn operator *(k: f64, v: V) -> V { return v; }                 // #symmetric already takes these
+
+struct Grid { cells: [4]i64; }
+fn operator [](g: *Grid, i: isize) -> i64 { return g.cells[i]; }
+fn operator []=(g: *Grid, i: isize, value: i64) { g.cells[i] = value; }
+
+const ONE = V.{ .x = 1, .y = 1 };
+const TWO = ONE + ONE;                                         // a call: `#run` it
+
+fn main() {
+    let a = V.{ .x = 1, .y = 2 };
+    let same = a != a;                                         // nothing more: the `==` is reported
+    let b = a + a;                                             // nor here: the `#symmetric` is
+    let c = 2.0 * a;                                           // nor here: the duplicate is
+    let g: Grid;
+    g[1] += 2;                                                 // `[]` gives a value
+    g[1]++;
+    let p = &g[1];
+}

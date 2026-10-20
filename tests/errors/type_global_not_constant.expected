@@ -1,6 +1,12 @@
 [error]: a top-level constant must be known at compile time at [tests/errors/type_global_not_constant.sabk:2:12]
      2 | const X = n();
        |            ^
+[note]: a call runs with the program; to run it while compiling, write `#run` before it at [tests/errors/type_global_not_constant.sabk:2:12]
+     2 | const X = n();
+       |            ^
 [error]: a global variable's initial value must be known at compile time at [tests/errors/type_global_not_constant.sabk:3:15]
+     3 | let y: i32 = n();
+       |               ^
+[note]: a call runs with the program; to run it while compiling, write `#run` before it at [tests/errors/type_global_not_constant.sabk:3:15]
      3 | let y: i32 = n();
        |               ^

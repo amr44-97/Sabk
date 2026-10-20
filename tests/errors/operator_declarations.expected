@@ -1,0 +1,30 @@
+[error]: `operator *` is declared twice with the same parameters: operator *(k: f64, v: V) -> V at [tests/errors/operator_declarations.sabk:8:13]
+     8 | fn operator *(k: f64, v: V) -> V { return v; }                 // #symmetric already takes these
+       |             ^
+[note]: `#symmetric` here already takes them this way round: operator *(k: f64, v: V) -> V at [tests/errors/operator_declarations.sabk:7:13]
+     7 | fn operator *(v: V, k: f64) -> V #symmetric { return v; }
+       |             ^
+[error]: `operator -` needs a struct, union or enum among its parameters, by value: on pointers, `-` keeps its built-in meaning at [tests/errors/operator_declarations.sabk:4:13]
+     4 | fn operator -(a: *V, b: *V) -> V { return a.*; }               // `p - q` on pointers stays built in
+       |             ^
+[error]: `operator ==` gives a `bool`, found `i64` at [tests/errors/operator_declarations.sabk:5:13]
+     5 | fn operator ==(a: V, b: V) -> i64 { return 1; }                // not a bool
+       |             ^
+[error]: `#symmetric` swaps the two parameters, but both are `V`: `operator +` takes them either way already; leave `#symmetric` out at [tests/errors/operator_declarations.sabk:6:13]
+     6 | fn operator +(a: V, b: V) -> V #symmetric { return a; }        // both V: nothing to swap
+       |             ^
+[error]: a top-level constant must be known at compile time at [tests/errors/operator_declarations.sabk:15:17]
+    15 | const TWO = ONE + ONE;                                         // a call: `#run` it
+       |                 ^
+[note]: a call runs with the program; to run it while compiling, write `#run` before it at [tests/errors/operator_declarations.sabk:15:17]
+    15 | const TWO = ONE + ONE;                                         // a call: `#run` it
+       |                 ^
+[error]: can't assign to this: `operator []` gives a value, not a variable (only `x[i] = v` goes to `operator []=`) at [tests/errors/operator_declarations.sabk:23:10]
+    23 |     g[1] += 2;                                                 // `[]` gives a value
+       |          ^
+[error]: can't modify this: `operator []` gives a value, not a variable (only `x[i] = v` goes to `operator []=`) at [tests/errors/operator_declarations.sabk:24:9]
+    24 |     g[1]++;
+       |         ^
+[error]: can't take the address of this: `operator []` gives a value, not a variable (only `x[i] = v` goes to `operator []=`) at [tests/errors/operator_declarations.sabk:25:13]
+    25 |     let p = &g[1];
+       |             ^

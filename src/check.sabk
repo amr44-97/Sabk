@@ -711,9 +711,12 @@ fn check_var(c: *Checker, d: *Node) {
     }
 
     // only top-level declarations have an owner
-    if (d.owner != null && value != null && value.ty.kind != .Error && !is_constant(value))
+    if (d.owner != null && value != null && value.ty.kind != .Error && !is_constant(value)) {
         error(c, value.tok, if (is_const) "a top-level constant must be known at compile time"
                             else "a global variable's initial value must be known at compile time");
+        if (ungroup(value).kind.tag == .Call) // `A + A` with an `operator +` too
+            note(c, value.tok, "a call runs with the program; to run it while compiling, write `#run` before it");
+    }
 
     d.ty = if (t != null) t else c.types.error;
 }

@@ -16,6 +16,18 @@ fn operator []=(g: *Grid, i: isize, value: i64) { g.cells[i] = value * 10; }
 enum Color { Red, Green }
 fn operator +(a: Color, b: Color) -> Color { return .Green; }   // an enum too
 
+// a tagged enum: its values reach the operator checked once
+enum Tok { Num(n: i64), Word(text: string), End }
+fn size(t: Tok) -> i64 { switch t { case .Num{n}: return n; case .Word{text}: return text.len; default: return 0; } }
+fn operator ==(a: Tok, b: Tok) -> bool { return size(a) == size(b); }
+struct Tape { cells: [2]Tok; }
+fn operator [](t: *Tape, at: Tok) -> Tok { return t.cells[size(at)]; }
+fn operator []=(t: *Tape, i: isize, value: Tok) { t.cells[i] = value; }
+
+fn doubled(v: Vec2) -> Vec2 #expand { return v + v; }       // in a macro's body
+fn add_to(acc: Code, v: Code) #expand { #insert acc += #insert v; }
+fn total(xs: []$T) -> T { let s = xs[0]; for (x in xs[1..]) s = s + x; return s; }   // in a generic's
+
 fn show(v: Vec2) -> string { return tformat("(%, %)", v.x, v.y); }
 
 #import "std/fmt";
@@ -36,6 +48,13 @@ fn main() {
     println("% %", g[4], g.cells[4]);
     let red = Color.Red;
     println("% %", red + red, red == .Red);       // == on an enum: the built-in one
+    let tape: Tape;
+    tape[1] = Tok.Num(1);                         // a variant's value, as `[]=`'s value
+    println("% % %", Tok.Num(2) == Tok.Word{ .text = "hi" }, tape[Tok.Num(1)] == Tok.Num(1), Tok.End == Tok.Num(5));
+    let m = a;
+    add_to(m, b);
+    let vs = Vec2.[a, b, a];
+    println("% % %", show(doubled(a)), show(m), show(total(vs[..])));
     let n = 2 + 3;                                // built-in types: built-in operators
     println("% %", n, DOUBLED);
 }

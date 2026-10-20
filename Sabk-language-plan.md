@@ -970,6 +970,28 @@ a += b;                       // from operator +
     the same parameters" check typed the generic declaration itself,
     whose parameters aren't types until a call, and the instances copied
     that broken type. A generic one now neither hides nor is hidden.
+12. **Found reviewing it (Oct 20, 2026)**, each now an error where it's
+    declared, so it can't fail later at a use:
+    - `operator -(a: *V, b: *V)`: on pointers `p - q` keeps its built-in
+      meaning, so a binary operator needs a struct, union or enum by value
+      (`[]` and `[]=` may take theirs by pointer: `&m` is passed);
+    - `operator ==` giving something other than a `bool` (`!=` from it
+      would break);
+    - `#symmetric` with both parameters of one type (nothing to swap), and
+      an `operator *(k: f64, v: V)` written out next to a `#symmetric` one
+      that already takes it (the note says so);
+    - `g[i] += v`, `g[i]++` and `&g[i]` with an `operator []`: it gives a
+      value, not a variable; only `g[i] = v` goes to `operator []=`. Open:
+      `g[i] += v` could become `g[i] = g[i] + v` (Jai has `operator *[]`,
+      giving a pointer, for this).
+    A use of a declaration reported this way adds no second error.
+13. **Two compiler bugs found the same way**: `k == K.Wrap(3)` with a single
+    `operator ==` crashed the compiler (the operands were checked twice,
+    and a variant's value can't be); and, older, a value made inside a GNU C
+    statement expression (`if (e is .V(x)) x else 0`, a value `switch`)
+    passed as `Any` pointed at a copy that was gone, printing garbage. The
+    copy is now declared at the function's top, like a slice literal's
+    elements. Both have tests; the second also shows under `--sanitize`.
 
 ## 8. How it lands
 
