@@ -134,6 +134,9 @@ fn resolve_program(r: *Resolver, root_path: string) -> bool {
             if (d.kind is .Run{value}) { // a build step
                 r.mod = m;
                 resolve_expr(r, value);
+            } else if (d.kind is .StaticAssert{cond}) {
+                r.mod = m;
+                resolve_expr(r, cond);
             } else {
                 ensure_resolved(r, d);
             }
@@ -647,8 +650,8 @@ fn collect_decls(r: *Resolver, m: *Module) {
             // they're written in
             if (r.region != null)
                 map_put(&m.regions, n, r.region);
-        case .Run:
-            n.owner = m; // a build step: it declares nothing
+        case .Run, .StaticAssert:
+            n.owner = m; // a build step or a check: it declares nothing
         case .Import{alias, module}:
             let spec = import_spec(n);
             if (module == null) {
@@ -904,8 +907,8 @@ fn taken_decls(r: *Resolver, n: *Node) -> []*Node {
                 import_in_if(r, d);
                 continue;
             }
-            if (d.kind.tag == .Run)
-                d.owner = r.mod; // a build step: it declares nothing
+            if (d.kind.tag == .Run || d.kind.tag == .StaticAssert)
+                d.owner = r.mod; // a build step or a check: it declares nothing
             else if (d.kind.tag != .InsertString && d.kind.tag != .StaticIf)
                 collect_decl(r, r.mod, d);
             array_add(&decls, d);
@@ -1711,6 +1714,9 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
         push_scope(r);
         resolve_stmts(r, stmts);
         pop_scope(r);
+
+    case .StaticAssert{cond}:
+        resolve_expr(r, cond);
 
     case .InsertString{value}:
         // where one statement goes (an `if` body): the statements as a block

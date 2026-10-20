@@ -1,0 +1,3 @@
+[error]: expected the message after the condition, a string: `#assert(cond, "why")`, found `5` at [tests/errors/parse_assert_message.sabk:1:15]
+     1 | #assert(true, 5);
+       |               ^

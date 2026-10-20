@@ -570,7 +570,7 @@ only.
 | 3 | `#library`, `#system_library`, `#foreign` | done, 47596a4 |
 | 4 | `#c_call`, C function types; `extern` goes | done, 71adc59 |
 | 5 | `#packed`, `#align` | done, 177aaed |
-| 6 | `is` on types | done (uncommitted) |
-| 7 | layer 1, `#assert` first | next |
+| 6 | `is` on types | done, b5598d0 |
+| 7 | layer 1, `#assert` first | `#assert` done (uncommitted); the rest of layer 1 is discussed first |
 
 Update this table as steps land.

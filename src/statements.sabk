@@ -101,6 +101,9 @@ fn check_stmt(c: *Checker, n: *Node) {
         else if (else_ != null && always_leaves(else_))
             add_facts(c, cond, true);
 
+    case .StaticAssert:
+        check_static_assert(c, n);
+
     case .StaticIf{cond}:
         // only the branch taken is checked: the other may not even make
         // sense for these types

@@ -451,6 +451,37 @@ fn check_program(c: *Checker) -> bool {
     return c.error_count == 0;
 }
 
+// #assert(condition, "message"): a condition known while compiling, which
+// must be true; in a function, it's checked in each instance
+fn check_static_assert(c: *Checker, n: *Node) {
+    let cond, message: *Node;
+    if (n.kind is .StaticAssert{cond: x, message: m})
+        cond, message = x, m;
+    let t = check_expr(c, cond, null);
+    if (t.kind == .Error)
+        return;
+    if (t.kind != .Bool) {
+        error(c, cond.tok, tformat("`#assert` needs a `bool` condition, found %", qt(t)));
+        return;
+    }
+    if (cond.cval.kind != .Bool) {
+        error(c, cond.tok, "`#assert` needs a condition known while compiling, like `sizeof(T) <= 8`; one only known when the program runs takes std/os's `assert(...)`");
+        return;
+    }
+    if (cond.cval.i.lo != 0)
+        return;
+    let why = if (message != null) message.tok.text[1..message.tok.text.len - 1] else tformat("`%` is false", text_of(cond));
+    error(c, n.tok, tformat("`#assert` failed: %", why));
+    // `sizeof(Header) == 16`: what the side that isn't a literal is
+    if (cond.kind is .Binary{lhs, rhs}) {
+        for (side in .[lhs, rhs]) {
+            let literal = side.kind.tag == .Number || side.kind.tag == .Float || side.kind.tag == .Bool;
+            if (!literal && side.cval.kind == .Int)
+                note(c, side.tok, tformat("`%` is %", text_of(side), i128_to_string(side.cval.i)));
+        }
+    }
+}
+
 fn root_list(m: *Module) -> []*Node {
     if (m.root.kind is .Root{decls})
         return decls;
@@ -1104,6 +1135,8 @@ fn check_top(c: *Checker, n: *Node) {
     switch (n.kind) {
     case .Run: // a build step: once the whole program checks
         array_add(&c.build_steps, n);
+    case .StaticAssert:
+        check_static_assert(c, n);
     case .Import, .ScopeRegion:
     case .Fn{is_macro: true}: // checked where it's expanded
     case .Fn{body}:

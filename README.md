@@ -70,7 +70,8 @@ $ ./sabk --run example.sabk
 - **Generics**, as in Jai: `$T` type parameters on functions and structs.
   Each set of types gets one instance, and `--stats` shows what that costs.
   A compile-time `#if` lets generic code do something different for some
-  types (`#if (T == string)`).
+  types (`#if (T == string)`, `#if (T is []$E)`), and `#assert(sizeof(T)
+  <= 8, "...")` checks what it needs of them, per instance.
 - **Safety where it's cheap:**
   - returning (or storing away) memory that's gone when the function
     returns, like `&local` or a slice literal, is a compile error

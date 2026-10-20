@@ -1,0 +1,21 @@
+// #assert: a condition known while compiling, checked at the top level and
+// in each instance of a generic function
+#import "std/io";
+
+struct Header #packed { magic: u32; size: u32; flags: u8; }
+#assert(sizeof(Header) == 9, "Header is 9 bytes in the file format");
+#assert(POINTER_SIZE == 8);                          // the message is optional
+#if (OS == .Linux) { #assert(OS != .Windows); }      // in a top-level #if's branch
+
+fn triangle(n: isize) -> isize { return if (n == 0) 0 else n + triangle(n - 1); }
+#assert(#run triangle(4) == 10, "#run computes the condition");
+
+fn small($T: type) -> isize {
+    #assert(sizeof(T) <= 8, "small takes values of at most 8 bytes");   // per instance
+    return sizeof(T);
+}
+
+fn main() {
+    #assert(1 + 1 == 2);
+    println("% % %", small(i32), small(f64), small(*Header));
+}

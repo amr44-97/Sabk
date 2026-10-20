@@ -231,7 +231,10 @@ decl        = fn_decl
             | const_decl
             | let_decl
             | "let" IDENT ":" type foreign ";"      // a variable C defines
+            | static_assert
             | top_if ;
+
+static_assert = "#assert" "(" expr [ "," STRING ] ")" ";" ;  // checked while compiling
 
 top_if      = "#if" "(" expr ")" "{" { decl } "}"     // see Compile-time #if
               [ "else" ( top_if | "{" { decl } "}" ) ] ;
@@ -562,6 +565,7 @@ stmt        = block
             | "#insert" IDENT ";"                          // macros only
             | "#insert" expr ";"           // statements made by code (not IDENT)
             | "#if" "(" expr ")" stmt [ "else" stmt ]      // compile-time if (top level: top_if)
+            | static_assert                                // checked while compiling, per instance
             | "_" "=" expr ";"                             // drops a value on purpose
             | simple_stmt ";"
             | call block ;               // a macro call with a trailing block
@@ -3663,6 +3667,36 @@ A condition that's only known at run time is an error: use a plain `if`.
 - The missing-return check follows the branch taken too.
 - Each branch is its own scope, like an `if` body.
 - `#if` works in any function, generic or not.
+
+**`#assert(condition, "message")`** checks a condition known while
+compiling, which must be true: a C struct's size in a binding, what a
+generic function needs of its types, a platform assumption.
+
+```
+struct Header #packed { magic: u32; size: u32; flags: u8; }
+#assert(sizeof(Header) == 9, "Header is 9 bytes in the file format");
+#assert(POINTER_SIZE == 8);                     // the message is optional
+
+fn small($T: type) -> isize {
+    #assert(sizeof(T) <= 8, "small takes values of at most 8 bytes");
+    return sizeof(T);
+}
+```
+
+- **Where:** at the top level (also in a top-level `#if`'s branch) and as
+  a statement. It declares nothing and leaves no code.
+- **The condition** is a `bool` known while compiling, as an `#if`'s is:
+  constants, `sizeof`, `==` and `is` on types, `#run`. One only known
+  when the program runs is an error that points to std/os's `assert`.
+- **A false one** is an error at the `#assert`: "`#assert` failed:"
+  and the message, or without one the condition's text ("`sizeof(Header)
+  == 12` is false"). When it compares a computed value with a literal,
+  a note says what the value is: "`sizeof(Header)` is 8".
+- **In a generic function it's checked per instance**, so it fails for
+  the types that break it and says which ("in `small` with T = [4]i64").
+- **In a branch not taken** (a plain or top-level `#if`), it isn't
+  checked, as nothing there is: `#if (OS == .Windows) { #assert(...); }`
+  holds only on Windows.
 
 **At the top level**, `#if` picks declarations: those in the branch taken
 are part of the module, as if written there, and the others aren't. This

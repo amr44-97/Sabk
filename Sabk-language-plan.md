@@ -13,7 +13,7 @@ switch to them at the bootstrap.
 
 - [x] **Formatting:** letter directives (`%s %q %w %x %X %b %o %e %f %c`), `%{}` before a letter, errors that teach (section 1)
 - [x] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2); `pub` and `import` are ordinary names now
-- [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3)
+- [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3). Built: `#assert` (section 8's step 7)
 - [ ] **Metaprogramming, layer 2:** `#code` values and syntax trees in std/compiler (section 3)
 - [ ] **Metaprogramming, layer 3:** a build script that sees every declaration as it's checked (section 3)
 - [ ] **Types as values:** `#insert` in struct and enum bodies, value parameters on structs (section 3)
@@ -1311,6 +1311,18 @@ Decided with the user before building: `T == Map` (any instance) is an error tha
 7. **Bindings are per instance** the way `$T` is: each generic instance's copy of the pattern holds its own types, so `recursive(P)` works through any depth of pointers, and in `#run`.
 8. **`T == Map` moved in two rounds**, since std/mem used it (`#if (T == map.Map)` in `delete`): round 1 added `is` with `==` still matching any instance, and the seed learned `is`; round 2 moved std and the test to `is` and made `==` the error.
 9. **An unknown binding outside its branch** is "unknown type `E`", without saying it's a branch's name; a hint could come later if it bites.
+
+### Built, step 7 (Oct 21, 2026): `#assert`
+
+Decided with the user: the message is optional; without one, the error quotes the condition.
+
+#### Edge cases met building it (to review)
+
+1. **The message is a string literal**, not any constant string: `#assert(cond, NAME)` is a parse error that shows the form. A constant message can come if a binding needs one.
+2. **A failed comparison notes the computed side**: `#assert(sizeof(Header) == 16, ...)` adds "`sizeof(Header)` is 8", for each side of a comparison that isn't a literal and is an integer constant.
+3. **A condition known only at run time** points to std/os's `assert`, the run-time one, since that's the likely intent.
+4. **Top-level `#assert`s are checked in the declarations' pass**, in order with them; a top-level one in a branch of `#if` that's taken is collected like the branch's declarations, and one in a branch not taken is never checked.
+5. **Struct bodies can't hold one** (no syntax): a check on a generic struct's types goes in a function that uses it, or waits for `#where`.
 
 ## 9. How it lands
 

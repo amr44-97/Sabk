@@ -218,6 +218,8 @@ fn top_decl(p: *Parser) -> *Node {
     }
     if (at_directive(p, "if"))
         return top_static_if(p);
+    if (at_directive(p, "assert"))
+        return static_assert(p);
     if (at_directive(p, "run")) {
         // `#run build();`: runs once the program is checked (a build script)
         let t = directive(p);
@@ -271,6 +273,22 @@ fn top_decl(p: *Parser) -> *Node {
         return fail(p, t, tformat("expected a declaration (fn, struct, union, enum, const, let or #import), found %", describe(t)));
     }
     return decl;
+}
+
+// `#assert(sizeof(Header) == 16, "the file format's");`, the message
+// optional: checked while compiling
+fn static_assert(p: *Parser) -> *Node {
+    let t = directive(p);
+    expect(p, .LParen, "`(` and a condition after `#assert`, like `#assert(sizeof(T) <= 8)`");
+    let cond = expr(p);
+    let message: *Node = null;
+    if (eat(p, .Comma)) {
+        let text = expect(p, .String, "the message after the condition, a string: `#assert(cond, \"why\")`");
+        message = new_node(text, .String(text.text));
+    }
+    expect(p, .RParen, "`)` after `#assert`'s condition and message");
+    expect(p, .Semicolon, "`;` after `#assert(...)`");
+    return new_node(t, .StaticAssert(cond, message));
 }
 
 // `#import "std/io";`, `#import "std/io" as io;`
@@ -897,6 +915,8 @@ fn stmt(p: *Parser) -> *Node {
         return new_node(t, .Defer(stmt(p)));
 
     case .Hash:
+        if (at_directive(p, "assert"))
+            return static_assert(p);
         // #if (condition known at compile time) stmt [else stmt]
         if (at_directive(p, "if")) {
             next(p);

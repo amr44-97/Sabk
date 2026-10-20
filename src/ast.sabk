@@ -99,6 +99,9 @@ enum NodeKind {
     LetValues(names: []*Node, values: *Node), // let a, b = ...; names are Lets
     Const(declared: *Node, value: *Node),
     Run(value: *Node),                       // #run value; tok: `#run`
+    // #assert(condition, "message"): checked while compiling, at the top
+    // level and per instance in functions; message: a String, or null
+    StaticAssert(cond: *Node, message: *Node), // tok: `#assert`
     InsertString(value: *Node),              // #insert value; tok: `#insert`
 
     // ---- statements; tok is their keyword unless said otherwise
@@ -318,6 +321,7 @@ fn old_shape(n: *Node) -> OldShape {
         s.library = tformat("%{}library%", if (l.system) "#system_" else "#",
                             if (l.link_always) ",link_always" else "");
     case .Run{value}: s.tag = "RUN"; s.lhs = value;
+    case .StaticAssert{cond, message}: s.tag = "STATIC_ASSERT"; s.lhs = cond; s.rhs = message;
     case .InsertString{value}: s.tag = "INSERT_STRING"; s.lhs = value;
 
     case .Block{stmts, gives_value}:

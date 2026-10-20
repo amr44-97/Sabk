@@ -1,0 +1,17 @@
+// #assert: false conditions, and conditions not known while compiling
+struct Header { magic: u32; size: u32; }
+#assert(sizeof(Header) == 16, "Header is 16 bytes in the file format");
+#assert(sizeof(Header) == 12);                      // no message: the condition's text
+#assert(5);                                          // not a bool
+
+fn small($T: type) -> isize {
+    #assert(sizeof(T) <= 8, "small takes values of at most 8 bytes");
+    return sizeof(T);
+}
+
+fn main() {
+    let n = 3;
+    #assert(n > 0);                                  // known only at run time
+    let a = small(i64);                              // fine
+    let b = small([4]i64);                           // fails for this instance only
+}
