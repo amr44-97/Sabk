@@ -1,5 +1,5 @@
 // memory that's gone when a function returns can't leave it
-import "std/mem";
+#import "std/mem";
 
 struct Point { x: i32; y: i32; }
 struct Record { name: string; tags: []string; at: *Point; }

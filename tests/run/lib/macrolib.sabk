@@ -1,8 +1,10 @@
+// uses a private function of its own module; callers can't see log_line
+fn trace(label: Code) #expand {
+    log_line(#text(label));
+}
+
+#scope_file
+
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn log_line(text: string) { printf("[lib] %s\n", text.ptr); }
-
-// uses a private function of its own module; callers can't see log_line
-pub fn trace(label: Code) #expand {
-    log_line(#text(label));
-}

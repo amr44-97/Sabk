@@ -39,12 +39,12 @@ IDENT  NUMBER  FLOAT  STRING  CHAR
 ## Example
 
 ```
-import "std/fmt";
-import "std/io";
-import "std/mem";
-import "std/str" as strings;
+#import "std/fmt";
+#import "std/io";
+#import "std/mem";
+#import "std/str" as strings;
 
-pub struct Vec2 {
+struct Vec2 {
     x: f32;
     y: f32;
 }
@@ -57,7 +57,7 @@ const MAX: i32 = 64;
 
 extern fn printf(fmt: *u8, ...) -> i32;
 
-pub fn main() -> i32 {
+fn main() -> i32 {
     let arena = arena_init(4096);         // from std/mem, no prefix needed
     defer arena_destroy(&arena);
     context.allocator = arena_allocator(&arena);
@@ -99,7 +99,7 @@ matter day to day, each with its section:
 | `int x = 5;` | `let x: i32 = 5;` or `let x = 5;` (an `isize`) | [Declarations](#declarations) |
 | `int f(int a)` | `fn f(a: i32) -> i32` | [Declarations](#declarations) |
 | `*p`, `p->x` | `p.*`, `p.x` (`.` follows pointers) | [Types](#types) |
-| `#include`, headers | `import "std/io";`, one file is one module | [Files and modules](#files-and-modules) |
+| `#include`, headers | `#import "std/io";`, one file is a module (or `#load` makes one of several) | [Files and modules](#files-and-modules) |
 | `char *` text, NUL at the end | `string`: a pointer and a length | [Strings](#strings-bytes-and-builders) |
 | `T *p, size_t n` | `[]T`: a slice, a pointer and a length | [Types](#types) |
 | `malloc`, `free` | `new(T)`, `alloc`, `free`, through an allocator | [Context](#context) |
@@ -132,7 +132,7 @@ file        = { top_decl } EOF ;
 top_decl    = import_decl
             | "#load" STRING ";"          // this file's module takes in that file
             | scope_dir                   // who sees what follows
-            | [ "pub" ] decl
+            | decl
             | "#insert" expr ";"          // declarations made by code
             | "#run" expr ";" ;           // a build step
 import_decl = "#import" STRING [ "as" IDENT ] ";" ;
@@ -143,11 +143,8 @@ scope_dir   = "#scope_export" | "#scope_module" | "#scope_file" ;
 
   | Import | What you get |
   |---|---|
-  | `#import "std/io";` | the module's `pub` names directly, `println("hi")`, and also the qualified form, `io.println("hi")` |
+  | `#import "std/io";` | the module's exported names directly, `println("hi")`, and also the qualified form, `io.println("hi")` |
   | `#import "std/io" as out;` | only the qualified form, `out.println("hi")` |
-
-  `import "std/io";`, without the `#`, is the spelling from before, still
-  accepted while code moves over.
 
   - The qualified name is the last path segment. If that isn't a valid
     identifier (`my-lib`), a plain import gives only the bare names.
@@ -214,8 +211,7 @@ scope_dir   = "#scope_export" | "#scope_module" | "#scope_file" ;
     has for all its files.
   - Naming a private one says where it's made private: "`hidden` is
     private to file `lib/regions.sabk`", with a note at the `#scope_file`.
-  - **While code moves over**, a file that writes `pub` keeps the rule
-    from before: what isn't `pub` is private. A file can't use both.
+  - There's no `pub`: `pub` and `import` are ordinary names.
 - Top-level order doesn't matter: a declaration can be used before it appears
   in the file.
 
@@ -950,12 +946,12 @@ back into), `context` starts as the default context.
 own:
 
 ```
-pub enum AllocatorMode { Alloc, Free, Resize, FreeAll }
+enum AllocatorMode { Alloc, Free, Resize, FreeAll }
 
 // (data, mode, size, alignment, old_memory, old_size) -> memory
-pub type AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
+type AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
 
-pub struct Allocator { procedure: AllocatorProc; data: *void; }
+struct Allocator { procedure: AllocatorProc; data: *void; }
 ```
 
 | Mode      | Returns                                                         |
@@ -983,9 +979,9 @@ checked at that point, and every violation is reported, not just the first.
 2. The function's parameters. The body shares this scope, so
    `fn f(a: i32) { let a = 1; }` is a redeclaration.
 3. The module: its top-level declarations and import names.
-4. The `pub` names of the module's plain imports. A name more than one of
-   them provides is ambiguous.
-5. The prelude's `pub` names.
+4. The exported names of the module's plain imports. A name more than one
+   of them provides is ambiguous.
+5. The prelude's exported names.
 6. The built-in types (`i32`, `u8`, ..., `string`).
 
 **Declarations:**
@@ -1005,8 +1001,9 @@ checked at that point, and every violation is reported, not just the first.
 
 **Modules:**
 
-- `mod.name` only reaches `pub` declarations. Import names are never
-  exported, so importing `a` doesn't give your importers access to `a`.
+- `mod.name` only reaches exported declarations (not under a
+  `#scope_module` or `#scope_file`). Import names are never exported, so
+  importing `a` doesn't give your importers access to `a`.
 
 **Types, values and modules are separate kinds of names:**
 
@@ -1055,8 +1052,8 @@ checked at that point, and every violation is reported, not just the first.
 
 **Prelude.** `Allocator`, `AllocatorMode`, `AllocatorProc` and `Context` are
 declared in a built-in prelude module (`src/prelude.sabk`) that every file can see.
-Only its `pub` declarations are visible; the rest is the runtime's
-implementation. A module's own declarations shadow it.
+Only its exported declarations are visible; the rest, after its
+`#scope_file`, is the runtime's implementation. A module's own declarations shadow it.
 
 **Untyped constants.** Literals and constants without a type have no fixed
 type until they're used, as in Go and Odin:
@@ -1502,7 +1499,7 @@ where the type is known (a variable's type, a parameter, a `return`).
 **`?T`, an optional value.** The prelude declares
 
 ```
-pub enum Option($T) { None, Some(T) }
+enum Option($T) { None, Some(T) }
 ```
 
 and `?T` is short for it: `?i64` is `Option(i64)`, and messages write it
@@ -2413,7 +2410,7 @@ program runs, and reports them with Sabk's files and lines. Turn it on
 with a build step:
 
 ```
-import "std/build";
+#import "std/build";
 #run add_c_flags("-fsanitize=address");
 ```
 
@@ -2885,7 +2882,7 @@ inside it `xs` is a `[]i32`. To pass a slice you already have, write `..xs`:
 type information.
 
 ```
-pub struct Any { value: *void; info: *TypeInfo; }
+struct Any { value: *void; info: *TypeInfo; }
 ```
 
 Any value converts to `Any` where an `Any` is expected, so `args: ..Any`
@@ -2899,10 +2896,10 @@ carries. There's one per type, so two can be compared with `==`
 (`info == type_info(u8)`).
 
 ```
-pub enum TypeKind { Void, Bool, Int, Float, Rawptr, Pointer, Array, Slice,
+enum TypeKind { Void, Bool, Int, Float, Rawptr, Pointer, Array, Slice,
                     String, Function, Struct, Union, Enum, TaggedEnum }
 
-pub struct TypeInfo {
+struct TypeInfo {
     kind: TypeKind;
     name: string;             // like []u8 or List(i32)
     size: isize;
@@ -2915,8 +2912,8 @@ pub struct TypeInfo {
     variants: []TypeVariant;  // Enum, TaggedEnum
 }
 
-pub struct TypeField { name: string; info: *TypeInfo; offset: isize; }
-pub struct TypeVariant { name: string; value: i64; payload: *TypeInfo; }
+struct TypeField { name: string; info: *TypeInfo; offset: isize; }
+struct TypeVariant { name: string; value: i64; payload: *TypeInfo; }
 ```
 
 So code can walk any type's fields:
@@ -3363,7 +3360,7 @@ the type parameters known, so it can differ for each `T`. See
 A `#run` at the top level, as a declaration of its own, is a build step:
 
 ```
-import "std/build";
+#import "std/build";
 
 #run configure();
 
@@ -3574,7 +3571,7 @@ path through it must `return` a value.
 
 ## Standard library
 
-The standard library lives in `std/` and is imported with `import "std/name";`.
+The standard library lives in `std/` and is imported with `#import "std/name";`.
 Its names are chosen to be distinct across the whole library, so a plain
 import of every module never clashes. Each file starts with a summary of what
 it offers.
@@ -3653,7 +3650,7 @@ A few things to know:
 - Char literals `'a'` and string literals `"..."`, with the escapes `\n`
   `\t` `\r` `\0` `\\` `\'` `\"` and `\xNN` (two hex digits). A string
   can span lines; its newlines are part of it.
-- Keywords: `fn return let const type struct enum union import pub extern as
+- Keywords: `fn return let const type struct enum union extern as
   if else for in while do switch case default break continue defer sizeof
   type_info is new context or_else or_return true false null`.
   A keyword can still be a field's name, where a field's name goes: in a

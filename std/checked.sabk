@@ -13,13 +13,13 @@
 // fit, or for division by zero. Ordinary arithmetic wraps instead (i64 max
 // + 1 is i64 min).
 
-pub const I64_MIN: i64 = -9223372036854775807 - 1;
-pub const I64_MAX: i64 = 9223372036854775807;
-pub const U64_MAX: u64 = 18446744073709551615;
+const I64_MIN: i64 = -9223372036854775807 - 1;
+const I64_MAX: i64 = 9223372036854775807;
+const U64_MAX: u64 = 18446744073709551615;
 
 // ---- signed
 
-pub fn add_i64(a: i64, b: i64) -> (i64, bool) {
+fn add_i64(a: i64, b: i64) -> (i64, bool) {
     let r = a + b; // wraps
     // overflow when both operands have the same sign and the result doesn't
     if (((a ^ r) & (b ^ r)) < 0)
@@ -27,7 +27,7 @@ pub fn add_i64(a: i64, b: i64) -> (i64, bool) {
     return r, true;
 }
 
-pub fn sub_i64(a: i64, b: i64) -> (i64, bool) {
+fn sub_i64(a: i64, b: i64) -> (i64, bool) {
     let r = a - b;
     // overflow when the operands' signs differ and the result's isn't a's
     if (((a ^ b) & (a ^ r)) < 0)
@@ -35,7 +35,7 @@ pub fn sub_i64(a: i64, b: i64) -> (i64, bool) {
     return r, true;
 }
 
-pub fn mul_i64(a: i64, b: i64) -> (i64, bool) {
+fn mul_i64(a: i64, b: i64) -> (i64, bool) {
     if (a == 0 || b == 0)
         return 0, true;
     // -1 times the minimum is the one product a division can't check
@@ -47,13 +47,13 @@ pub fn mul_i64(a: i64, b: i64) -> (i64, bool) {
     return r, true;
 }
 
-pub fn div_i64(a: i64, b: i64) -> (i64, bool) {
+fn div_i64(a: i64, b: i64) -> (i64, bool) {
     if (b == 0 || (a == I64_MIN && b == -1))
         return 0, false;
     return a / b, true;
 }
 
-pub fn rem_i64(a: i64, b: i64) -> (i64, bool) {
+fn rem_i64(a: i64, b: i64) -> (i64, bool) {
     if (b == 0)
         return 0, false;
     if (b == -1) // the minimum % -1 traps in C; it's 0
@@ -61,14 +61,14 @@ pub fn rem_i64(a: i64, b: i64) -> (i64, bool) {
     return a % b, true;
 }
 
-pub fn neg_i64(a: i64) -> (i64, bool) {
+fn neg_i64(a: i64) -> (i64, bool) {
     if (a == I64_MIN)
         return 0, false;
     return -a, true;
 }
 
 // a << n: false when bits (or the sign) would be lost
-pub fn shl_i64(a: i64, n: u64) -> (i64, bool) {
+fn shl_i64(a: i64, n: u64) -> (i64, bool) {
     if (n >= 64) {
         if (a != 0)
             return 0, false;
@@ -82,20 +82,20 @@ pub fn shl_i64(a: i64, n: u64) -> (i64, bool) {
 
 // ---- unsigned
 
-pub fn add_u64(a: u64, b: u64) -> (u64, bool) {
+fn add_u64(a: u64, b: u64) -> (u64, bool) {
     let r = a + b;
     if (r < a)
         return 0, false;
     return r, true;
 }
 
-pub fn sub_u64(a: u64, b: u64) -> (u64, bool) {
+fn sub_u64(a: u64, b: u64) -> (u64, bool) {
     if (b > a)
         return 0, false;
     return a - b, true;
 }
 
-pub fn mul_u64(a: u64, b: u64) -> (u64, bool) {
+fn mul_u64(a: u64, b: u64) -> (u64, bool) {
     if (a == 0)
         return 0, true;
     let r = a * b;
@@ -104,19 +104,19 @@ pub fn mul_u64(a: u64, b: u64) -> (u64, bool) {
     return r, true;
 }
 
-pub fn div_u64(a: u64, b: u64) -> (u64, bool) {
+fn div_u64(a: u64, b: u64) -> (u64, bool) {
     if (b == 0)
         return 0, false;
     return a / b, true;
 }
 
-pub fn rem_u64(a: u64, b: u64) -> (u64, bool) {
+fn rem_u64(a: u64, b: u64) -> (u64, bool) {
     if (b == 0)
         return 0, false;
     return a % b, true;
 }
 
-pub fn shl_u64(a: u64, n: u64) -> (u64, bool) {
+fn shl_u64(a: u64, n: u64) -> (u64, bool) {
     if (n >= 64) {
         if (a != 0)
             return 0, false;
@@ -131,7 +131,7 @@ pub fn shl_u64(a: u64, n: u64) -> (u64, bool) {
 // ---- ranges
 
 // does `v` fit in a signed integer of `bits` bits (8, 16, 32 or 64)?
-pub fn fits_signed(v: i64, bits: u32) -> bool {
+fn fits_signed(v: i64, bits: u32) -> bool {
     if (bits >= 64)
         return true;
     let limit = (1 as i64) << (bits - 1);
@@ -139,7 +139,7 @@ pub fn fits_signed(v: i64, bits: u32) -> bool {
 }
 
 // does `v` fit in an unsigned integer of `bits` bits?
-pub fn fits_unsigned(v: u64, bits: u32) -> bool {
+fn fits_unsigned(v: u64, bits: u32) -> bool {
     if (bits >= 64)
         return true;
     return v < ((1 as u64) << bits);

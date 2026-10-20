@@ -1,40 +1,40 @@
 MODULE tests/resolve/cycle.sabk
-ROOT
+ROOT `#`
   IMPORT `"lib/a"` -> module tests/resolve/lib/a.sabk
   FUN_DECL `main`
     rhs: BLOCK
       EXPR_STMT `a`
         lhs: CALL `(`
-          lhs: MEMBER `ping` -> FUN_DECL `ping` tests/resolve/lib/a.sabk:2:8
-            lhs: IDENTIFIER `a` -> IMPORT `"lib/a"` 1:8
+          lhs: MEMBER `ping` -> FUN_DECL `ping` tests/resolve/lib/a.sabk:3:4
+            lhs: IDENTIFIER `a` -> IMPORT `"lib/a"` 1:9
           NUMBER_LITERAL `3`
 MODULE tests/resolve/lib/a.sabk
-ROOT
+ROOT `#`
   IMPORT `"b"` -> module tests/resolve/lib/b.sabk
-  FUN_DECL `ping` [pub]
+  FUN_DECL `ping`
     rhs: BLOCK
       IF
         lhs: GT `>`
-          lhs: IDENTIFIER `n` -> FUN_PARAM `n` 2:13
+          lhs: IDENTIFIER `n` -> FUN_PARAM `n` 3:9
           rhs: NUMBER_LITERAL `0`
         rhs: EXPR_STMT `b`
           lhs: CALL `(`
-            lhs: MEMBER `pong` -> FUN_DECL `pong` tests/resolve/lib/b.sabk:2:8
-              lhs: IDENTIFIER `b` -> IMPORT `"b"` 1:8
+            lhs: MEMBER `pong` -> FUN_DECL `pong` tests/resolve/lib/b.sabk:3:4
+              lhs: IDENTIFIER `b` -> IMPORT `"b"` 1:9
             SUB `-`
-              lhs: IDENTIFIER `n` -> FUN_PARAM `n` 2:13
+              lhs: IDENTIFIER `n` -> FUN_PARAM `n` 3:9
               rhs: NUMBER_LITERAL `1`
     FUN_PARAM `n`
       type: TYPE_NAME `i32` -> builtin
 MODULE tests/resolve/lib/b.sabk
-ROOT
+ROOT `#`
   IMPORT `"a"` -> module tests/resolve/lib/a.sabk
-  FUN_DECL `pong` [pub]
+  FUN_DECL `pong`
     rhs: BLOCK
       EXPR_STMT `a`
         lhs: CALL `(`
-          lhs: MEMBER `ping` -> FUN_DECL `ping` tests/resolve/lib/a.sabk:2:8
-            lhs: IDENTIFIER `a` -> IMPORT `"a"` 1:8
-          IDENTIFIER `n` -> FUN_PARAM `n` 2:13
+          lhs: MEMBER `ping` -> FUN_DECL `ping` tests/resolve/lib/a.sabk:3:4
+            lhs: IDENTIFIER `a` -> IMPORT `"a"` 1:9
+          IDENTIFIER `n` -> FUN_PARAM `n` 3:9
     FUN_PARAM `n`
       type: TYPE_NAME `i32` -> builtin

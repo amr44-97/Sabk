@@ -1,5 +1,5 @@
 // integer division by zero panics, saying where; the minimum / -1 wraps
-import "std/io";
+#import "std/io";
 
 fn divide(a: i64, b: i64) -> i64 { return a / b; }
 

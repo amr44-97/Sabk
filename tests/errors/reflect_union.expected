@@ -1,21 +1,21 @@
-std/reflect.sabk:59:15: panic: values_equal can't work with the union `Bits`: which of its fields holds the value isn't known
+std/reflect.sabk:61:15: panic: values_equal can't work with the union `Bits`: which of its fields holds the value isn't known
 [error]: `#run` failed: it called abort() (a panic?) at [std/reflect.sabk:25:13]
     25 |     #insert #run equal_code(type_info(T));
        |             ^
 [note]: in `values_equal` with T = Holder, used here at [tests/errors/reflect_union.sabk:10:16]
     10 |     let same = values_equal(h, h);
        |                ^
-[note]: here at [<prelude>:131:5]
-   131 |     abort();
+[note]: here at [<prelude>:174:5]
+   174 |     abort();
        |     ^
-[note]: called from here at [std/os.sabk:36:52]
-    36 |     handler.procedure(handler.data, what, message, location);
+[note]: called from here at [std/os.sabk:57:52]
+    57 |     handler.procedure(handler.data, what, message, location);
        |                                                    ^
-[note]: called from here at [std/reflect.sabk:59:112]
-    59 |         panic(format("% can't work with the union `%`: which of its fields holds the value isn't known", what, t.name));
+[note]: called from here at [std/reflect.sabk:61:112]
+    61 |         panic(format("% can't work with the union `%`: which of its fields holds the value isn't known", what, t.name));
        |                                                                                                                ^
-[note]: called from here at [std/reflect.sabk:73:31]
-    73 |             no_unions(f.info, "values_equal");
+[note]: called from here at [std/reflect.sabk:75:31]
+    75 |             no_unions(f.info, "values_equal");
        |                               ^
 [note]: called from here at [std/reflect.sabk:25:29]
     25 |     #insert #run equal_code(type_info(T));

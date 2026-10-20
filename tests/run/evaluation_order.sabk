@@ -1,8 +1,8 @@
 // Sabk evaluates left to right, the same in the program and while
 // compiling, even where C would leave the order open
-import "std/io";
-import "std/fmt";
-import "std/str";
+#import "std/io";
+#import "std/fmt";
+#import "std/str";
 
 let trace: [16]u8;
 let traced = 0;

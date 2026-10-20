@@ -1,8 +1,8 @@
 // patterns: ranges in cases, `is`, naming a variant's fields, switch
 // expressions, and labeled loops and switches
-import "std/io";
-import "std/fmt";
-import "std/str";
+#import "std/io";
+#import "std/fmt";
+#import "std/str";
 
 enum Op { Add, Sub, Mul }
 enum Expr {

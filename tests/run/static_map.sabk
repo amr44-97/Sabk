@@ -1,6 +1,6 @@
 // maps made by #run and baked into the program
-import "std/io";
-import "std/map";
+#import "std/io";
+#import "std/map";
 
 enum Token { Name, If, Else, While }
 struct Point { x: i32; y: i32; }

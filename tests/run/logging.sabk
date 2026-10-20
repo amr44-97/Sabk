@@ -1,8 +1,8 @@
 // context.logger: where log() goes (stderr by default), and
 // context.panic_handler: what panic and assert call
-import "std/io";
-import "std/logging";
-import "std/os";
+#import "std/io";
+#import "std/logging";
+#import "std/os";
 
 fn parse_port(text: string) -> i32 {
     log(.Warning, "`%` isn't a number", text);   // the caller decides where

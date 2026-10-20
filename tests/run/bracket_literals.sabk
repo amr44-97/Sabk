@@ -1,10 +1,10 @@
 // .[a, b, c]: the context's array or slice, or an array of what the
 // elements agree on; T.[a, b] names the element type; and arrays going
 // where slices are expected
-import "std/io";
-import "std/array";
-import "std/mem";
-import "std/str";
+#import "std/io";
+#import "std/array";
+#import "std/mem";
+#import "std/str";
 
 struct Point { x: i64; y: i64; }
 struct Rows { cells: [3]i64; }

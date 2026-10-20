@@ -1,6 +1,6 @@
 // functions with several results; or_return and or_else; the same
 // code run by #run
-import "std/io";
+#import "std/io";
 
 fn divide(a: i64, b: i64) -> (i64, i64) {
     return a / b, a % b;

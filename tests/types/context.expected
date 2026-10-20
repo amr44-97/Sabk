@@ -14,7 +14,7 @@ ROOT
           type: TYPE_NAME `Vec2` -> STRUCT `Vec2` tests/types/context.sabk:1:8 : Vec2
           lhs: IDENTIFIER `a` -> FUN_PARAM `a` 3:9 : Allocator
     FUN_PARAM `a` : Allocator
-      type: TYPE_NAME `Allocator` -> STRUCT `Allocator` <prelude>:13:12 : Allocator
+      type: TYPE_NAME `Allocator` -> STRUCT `Allocator` <prelude>:12:8 : Allocator
       lhs: MEMBER `allocator` : Allocator
         lhs: CONTEXT : Context
   FUN_DECL `f` : fn()
@@ -40,5 +40,5 @@ ROOT
             rhs: NUMBER_LITERAL `16` : untyped int = 16
           lhs: IDENTIFIER `saved` -> VAR_DECL `saved` 8:9 : Allocator
       VAR_DECL `m` : AllocatorMode
-        lhs: MEMBER `Free` -> ENUM_VARIANT `Free` <prelude>:2:33 : AllocatorMode = 1
-          lhs: IDENTIFIER `AllocatorMode` -> ENUM `AllocatorMode` <prelude>:2:10 : AllocatorMode
+        lhs: MEMBER `Free` -> ENUM_VARIANT `Free` <prelude>:1:29 : AllocatorMode = 1
+          lhs: IDENTIFIER `AllocatorMode` -> ENUM `AllocatorMode` <prelude>:1:6 : AllocatorMode

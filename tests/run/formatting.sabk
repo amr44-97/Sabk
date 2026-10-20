@@ -1,7 +1,7 @@
 // formatted printing: `%` takes the next value, of any type
-import "std/io";
-import "std/fmt";
-import "std/str";
+#import "std/io";
+#import "std/fmt";
+#import "std/str";
 
 enum Color { Red, Green }
 struct Point { x: f64; y: f64; }

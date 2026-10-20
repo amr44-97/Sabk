@@ -17,43 +17,25 @@
 // no branch of a top-level `#if` is taken, and an `#insert` of a string is
 // an error.
 
-import "std/array";
-import "std/fmt";
-import "std/fs";
-import "std/io";
-import "std/map";
-import "std/mem";
-import "std/os";
-import "std/path";
-import "std/str";
-import "ast";
-import "check";
-import "comptime";
-import "lexer";
-import "module";
-import "parser";
-import "source";
-import "token";
+#import "std/array";
+#import "std/fmt";
+#import "std/fs";
+#import "std/io";
+#import "std/map";
+#import "std/mem";
+#import "std/os";
+#import "std/path";
+#import "std/str";
+#import "ast";
+#import "check";
+#import "comptime";
+#import "lexer";
+#import "module";
+#import "parser";
+#import "source";
+#import "token";
 
-const MAX_EXPANSION_DEPTH = 64;
-
-struct Expansion {
-    module: *Module;   // where the macro is defined
-    node: *Node;       // the MacroExpansion
-    parent: i32;       // the color of the code that called the macro
-    scope: isize;      // the expansion's scope, an index into scopes
-    loop_depth: isize; // at its start
-    switch_depth: isize;
-    defer_depth: isize;
-    code_args: Map(string, *Node); // Code parameter -> argument
-}
-
-struct Ambiguous {
-    decl: *Node;
-    via: *Node;     // the import it comes through
-}
-
-pub struct Resolver {
+struct Resolver {
     std_dir: string;
     prelude: *Module;            // not in `modules`
     modules: [..]*Module;        // load order; modules[0] is the root
@@ -97,10 +79,7 @@ pub struct Resolver {
     checker: *Checker;           // or null
 }
 
-const BUILTIN_TYPES = .["i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32",
-                        "u64", "usize", "f32", "f64", "bool", "void", "string"];
-
-pub fn make_resolver(std_dir: string) -> Resolver {
+fn make_resolver(std_dir: string) -> Resolver {
     let r = Resolver.{ .std_dir = std_dir };
     for (name in BUILTIN_TYPES)
         map_put(&r.builtins, name, new_node(Token.{ .text = name, .kind = .Identifier }, .BuiltinType));
@@ -110,7 +89,7 @@ pub fn make_resolver(std_dir: string) -> Resolver {
 }
 
 // false if any errors were reported
-pub fn resolve_program(r: *Resolver, root_path: string) -> bool {
+fn resolve_program(r: *Resolver, root_path: string) -> bool {
     r.prelude = parse_module(r, "<prelude>", prelude_source());
     collect_decls(r, r.prelude);
     load(r, root_path);
@@ -152,6 +131,178 @@ pub fn resolve_program(r: *Resolver, root_path: string) -> bool {
     }
     return r.error_count == 0 && (r.checker == null || r.checker.error_count == 0);
 }
+
+/* --------------------------------------------------------------- position */
+
+// Resolves a top-level declaration now if it hasn't been: running code
+// with #run can need any function while the resolver is somewhere else.
+// False if it's being resolved (up the stack) or had errors.
+fn ensure_resolved(r: *Resolver, d: *Node) -> bool {
+    if (d.owner == null || d.generic != null)
+        return true; // locals; instances are resolved copies
+    switch (d.kind.tag) {
+    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
+    default: return true;
+    }
+    let state = map_get(&r.resolve_state, d) or_else 0;
+    if (state == 0) {
+        map_put(&r.resolve_state, d, 1);
+        let errors = r.error_count;
+        let position = leave_position(r);
+        r.mod = d.owner;
+        resolve_decl(r, d);
+        return_to(r, &position);
+        state = if (r.error_count == errors) 2 else 3;
+        map_put(&r.resolve_state, d, state);
+    }
+    return state == 2;
+}
+
+/* -------------------------------------------------------------- reporting */
+
+// the module whose text `p` points into
+fn module_of(r: *Resolver, p: *u8) -> *Module {
+    if (r.prelude != null && inside(r.prelude, p))
+        return r.prelude;
+    for (m in r.modules) {
+        if (inside(m, p))
+            return m;
+        for (f in m.files) // the files it #loads: a location is in one of them
+            if (inside(f, p))
+                return f;
+    }
+    for (m in r.generated)
+        if (inside(m, p))
+            return m;
+    return null;
+}
+
+fn say(r: *Resolver, severity: Severity, t: Token, message: string) {
+    let m = module_of(r, t.text.ptr);
+    if (m != null) {
+        report(&m.src, severity, t.text, message);
+        return;
+    }
+    // a builtin's name: no file to show
+    let kind = if (severity == .Error) "error" else "note";
+    eprint(tformat("[%]: % at [<builtin>:%:1]\n%{6} | %\n       | ^\n", kind, message, t.line, t.line, t.text));
+}
+
+// an error in generated code also says which #insert made it
+fn note_inserted(r: *Resolver, t: Token) {
+    let m = module_of(r, t.text.ptr);
+    while (m != null && m.inserted_by != null) {
+        note(r, m.inserted_by.tok, "in the code `#insert` made here");
+        m = module_of(r, m.inserted_by.tok.text.ptr);
+    }
+}
+
+// errors inside macros also say which calls they came from: the innermost
+// ones, and the outermost when there are many (a runaway recursive macro)
+fn note_expansions(r: *Resolver, calls: []*Node) {
+    let shown = 0;
+    let i = calls.len;
+    while (i > 0) {
+        i--;
+        if (shown == 3 && i > 0) {
+            note(r, calls[0].tok, tformat("in the expansion of `%` here (after % more nested expansions)",
+                                          calls[0].decl.tok.text, i));
+            return;
+        }
+        note(r, calls[i].tok, tformat("in the expansion of `%` here", calls[i].decl.tok.text));
+        shown++;
+    }
+}
+
+/* ---------------------------------------------------------------- helpers */
+
+fn is_type_decl(d: *Node) -> bool {
+    switch (d.kind.tag) {
+    case .Struct, .Enum, .TypeAlias, .BuiltinType, .TypeParam: return true;
+    default: return false;
+    }
+}
+
+// a generic declaration, not one of its instances
+fn is_template(d: *Node) -> bool {
+    if (d.generic != null)
+        return false;
+    switch (d.kind) {
+    case .Fn{type_params}: return type_params.len > 0;
+    case .Struct{type_params}: return type_params.len > 0;
+    case .Enum{type_params}: return type_params.len > 0;
+    default: return false;
+    }
+}
+
+fn type_params_of(d: *Node) -> []*Node {
+    switch (d.kind) {
+    case .Fn{type_params}: return type_params;
+    case .Struct{type_params}: return type_params;
+    case .Enum{type_params}: return type_params;
+    default: return .[];
+    }
+}
+
+/* ----------------------------------------------------------- declarations */
+
+// The body of an instance of a deferred template, a copy of the template's
+// unresolved body: its type parameters are bound now, so `#insert #run
+// f(type_info(T))` makes this instance's code
+fn resolve_instance_body(r: *Resolver, instance: *Node) {
+    let position = leave_position(r);
+    let f = fn_parts(instance);
+    r.mod = instance.owner;
+    r.context_ok = true;
+    push_scope(r);
+    for (param in f.type_params)
+        declare(r, top_scope(r), param.tok.text, param);
+    for (param in f.params)
+        if (!(param.kind is .Param{is_type: true}))
+            declare(r, top_scope(r), param.tok.text, param);
+    resolve_stmts(r, body_stmts(f.body));
+    return_to(r, &position);
+}
+
+/* ------------------------------------------------------------- statements */
+
+// `_` among the targets of `a, b = ...`: the value is dropped
+fn is_discard(n: *Node) -> bool {
+    return n.kind.tag == .Identifier && !n.caller && n.tok.text == "_";
+}
+
+// a top-level declaration of `m` by its name, its files' `#scope_file`
+// ones too: for the compiler's own lookups (`main`, the prelude's helpers)
+fn module_decl(m: *Module, name: string) -> *Node {
+    let found = scope_get(&m.scope, name, 0);
+    for (f in files_of(m))
+        if (found == null)
+            found = scope_get(&f.file_scope, name, 0);
+    return found;
+}
+
+#scope_file
+
+const MAX_EXPANSION_DEPTH = 64;
+
+struct Expansion {
+    module: *Module;   // where the macro is defined
+    node: *Node;       // the MacroExpansion
+    parent: i32;       // the color of the code that called the macro
+    scope: isize;      // the expansion's scope, an index into scopes
+    loop_depth: isize; // at its start
+    switch_depth: isize;
+    defer_depth: isize;
+    code_args: Map(string, *Node); // Code parameter -> argument
+}
+
+struct Ambiguous {
+    decl: *Node;
+    via: *Node;     // the import it comes through
+}
+
+const BUILTIN_TYPES = .["i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32",
+                        "u64", "usize", "f32", "f64", "bool", "void", "string"];
 
 fn root_decls(m: *Module) -> *[]*Node {
     switch (m.root.kind) {
@@ -238,62 +389,10 @@ fn return_to(r: *Resolver, p: *Position) {
     r.macro_callee = p.macro_callee;
 }
 
-// Resolves a top-level declaration now if it hasn't been: running code
-// with #run can need any function while the resolver is somewhere else.
-// False if it's being resolved (up the stack) or had errors.
-pub fn ensure_resolved(r: *Resolver, d: *Node) -> bool {
-    if (d.owner == null || d.generic != null)
-        return true; // locals; instances are resolved copies
-    switch (d.kind.tag) {
-    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
-    default: return true;
-    }
-    let state = map_get(&r.resolve_state, d) or_else 0;
-    if (state == 0) {
-        map_put(&r.resolve_state, d, 1);
-        let errors = r.error_count;
-        let position = leave_position(r);
-        r.mod = d.owner;
-        resolve_decl(r, d);
-        return_to(r, &position);
-        state = if (r.error_count == errors) 2 else 3;
-        map_put(&r.resolve_state, d, state);
-    }
-    return state == 2;
-}
-
 /* -------------------------------------------------------------- reporting */
-
-// the module whose text `p` points into
-pub fn module_of(r: *Resolver, p: *u8) -> *Module {
-    if (r.prelude != null && inside(r.prelude, p))
-        return r.prelude;
-    for (m in r.modules) {
-        if (inside(m, p))
-            return m;
-        for (f in m.files) // the files it #loads: a location is in one of them
-            if (inside(f, p))
-                return f;
-    }
-    for (m in r.generated)
-        if (inside(m, p))
-            return m;
-    return null;
-}
 
 fn inside(m: *Module, p: *u8) -> bool {
     return p >= m.src.text.ptr && p <= m.src.text.ptr + m.src.text.len;
-}
-
-pub fn say(r: *Resolver, severity: Severity, t: Token, message: string) {
-    let m = module_of(r, t.text.ptr);
-    if (m != null) {
-        report(&m.src, severity, t.text, message);
-        return;
-    }
-    // a builtin's name: no file to show
-    let kind = if (severity == .Error) "error" else "note";
-    eprint(tformat("[%]: % at [<builtin>:%:1]\n%{6} | %\n       | ^\n", kind, message, t.line, t.line, t.text));
 }
 
 fn error(r: *Resolver, t: Token, message: string) {
@@ -309,32 +408,6 @@ fn error(r: *Resolver, t: Token, message: string) {
 }
 
 fn note(r: *Resolver, t: Token, message: string) { say(r, .Note, t, message); }
-
-// an error in generated code also says which #insert made it
-pub fn note_inserted(r: *Resolver, t: Token) {
-    let m = module_of(r, t.text.ptr);
-    while (m != null && m.inserted_by != null) {
-        note(r, m.inserted_by.tok, "in the code `#insert` made here");
-        m = module_of(r, m.inserted_by.tok.text.ptr);
-    }
-}
-
-// errors inside macros also say which calls they came from: the innermost
-// ones, and the outermost when there are many (a runaway recursive macro)
-pub fn note_expansions(r: *Resolver, calls: []*Node) {
-    let shown = 0;
-    let i = calls.len;
-    while (i > 0) {
-        i--;
-        if (shown == 3 && i > 0) {
-            note(r, calls[0].tok, tformat("in the expansion of `%` here (after % more nested expansions)",
-                                          calls[0].decl.tok.text, i));
-            return;
-        }
-        note(r, calls[i].tok, tformat("in the expansion of `%` here", calls[i].decl.tok.text));
-        shown++;
-    }
-}
 
 /* ---------------------------------------------------------------- loading */
 
@@ -483,11 +556,6 @@ fn collect_decls(r: *Resolver, m: *Module) {
         r.region = map_get(&regions, file) or_else null;
         switch (n.kind) {
         case .ScopeRegion{visibility}:
-            if (m.first_region == null) {
-                m.first_region = n;
-                if (m.uses_pub)
-                    mixed_visibility(r, m, m.first_pub);
-            }
             map_put(&regions, file, if (visibility == .Export) null else n);
         case .InsertString, .StaticIf:
             // run or decided once every module is loaded, under the region
@@ -548,12 +616,6 @@ fn collect_decl(r: *Resolver, m: *Module, n: *Node) {
         }
         declare(r, &m.scope, n.tok.text, n, "this module");
     }
-    if (is_pub(n) && !m.uses_pub) {
-        m.uses_pub = true;
-        m.first_pub = n;
-        if (m.first_region != null)
-            mixed_visibility(r, m, n);
-    }
 }
 
 // the file a `#scope_file` belongs to; null for other regions
@@ -572,25 +634,15 @@ fn files_of(m: *Module) -> [..]*Module {
     return all;
 }
 
-// `pub` (the rule from before) and `#scope_...` in one module
-fn mixed_visibility(r: *Resolver, m: *Module, written_pub: *Node) {
-    error(r, m.first_region.tok, tformat("this module writes `pub` too: with `%` and the other `#scope_` directives, a declaration is exported unless a directive says otherwise, so `pub` goes",
-                                         m.first_region.tok.text));
-    note(r, written_pub.tok, tformat("`%` is `pub` here", written_pub.tok.text));
-}
-
-// can the modules that import `d`'s module name it? A module that writes
-// `pub` keeps the rule from before (what isn't `pub` is private); others
-// export what no `#scope_module` or `#scope_file` covers
+// can the modules that import `d`'s module name it? Yes, unless a
+// `#scope_module` or `#scope_file` covers it
 fn exported(d: *Node) -> bool {
     switch (d.kind.tag) {
     case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
     default: return false; // import bindings are never exported
     }
     let m = d.owner;
-    if (m == null || m.uses_pub)
-        return is_pub(d);
-    return !map_has(&m.regions, d);
+    return m == null || !map_has(&m.regions, d);
 }
 
 // every `$T` inside a type, in source order: a function type's parameters
@@ -655,7 +707,7 @@ fn taken_decls(r: *Resolver, n: *Node) -> []*Node {
     }
     if (taken.kind is .Block{stmts}) {
         for (d in stmts) {
-            if (d.kind.tag == .Import) {
+            if (d.kind.tag == .Import || d.kind.tag == .Load) {
                 import_in_if(r, d);
                 continue;
             }
@@ -682,7 +734,7 @@ fn set_aside(r: *Resolver, branch: *Node, in_if: *Node) {
     let stmts = block_stmts(branch);
     for (d in stmts) {
         switch (d.kind.tag) {
-        case .Import:
+        case .Import, .Load:
             import_in_if(r, d);
         case .StaticIf:
             set_aside(r, d, in_if);
@@ -706,8 +758,13 @@ fn block_stmts(n: *Node) -> []*Node {
     return .[];
 }
 
+// an #import or #load in a top-level #if: what a module is made of
+// doesn't depend on a condition
 fn import_in_if(r: *Resolver, imp: *Node) {
-    error(r, imp.tok, "an `import` can't be inside a top-level `#if`; import the module outside it, and use it in the branch");
+    if (imp.kind.tag == .Load)
+        error(r, imp.tok, "a `#load` can't be inside a top-level `#if`; load the file outside it, and put the `#if` in that file");
+    else
+        error(r, imp.tok, "an `#import` can't be inside a top-level `#if`; import the module outside it, and use it in the branch");
 }
 
 // the name a plain import binds: its file name, if that's a valid name
@@ -720,35 +777,7 @@ fn import_name(imp: *Node) -> string {
 
 /* ---------------------------------------------------------------- helpers */
 
-pub fn is_type_decl(d: *Node) -> bool {
-    switch (d.kind.tag) {
-    case .Struct, .Enum, .TypeAlias, .BuiltinType, .TypeParam: return true;
-    default: return false;
-    }
-}
-
 fn is_macro(d: *Node) -> bool { return d.kind is .Fn{is_macro: true}; }
-
-// a generic declaration, not one of its instances
-pub fn is_template(d: *Node) -> bool {
-    if (d.generic != null)
-        return false;
-    switch (d.kind) {
-    case .Fn{type_params}: return type_params.len > 0;
-    case .Struct{type_params}: return type_params.len > 0;
-    case .Enum{type_params}: return type_params.len > 0;
-    default: return false;
-    }
-}
-
-pub fn type_params_of(d: *Node) -> []*Node {
-    switch (d.kind) {
-    case .Fn{type_params}: return type_params;
-    case .Struct{type_params}: return type_params;
-    case .Enum{type_params}: return type_params;
-    default: return .[];
-    }
-}
 
 fn declare(r: *Resolver, scope: *Map(ScopeKey, *Node), name: string, n: *Node, where: string = "this scope") {
     let key = ScopeKey.{ .name = name, .color = color_of(r, n) };
@@ -849,17 +878,6 @@ fn imported_module(imp: *Node) -> *Module {
     return null;
 }
 
-fn is_pub(d: *Node) -> bool {
-    switch (d.kind) {
-    case .Fn{is_pub}: return is_pub;
-    case .Struct{is_pub}: return is_pub;
-    case .Enum{is_pub}: return is_pub;
-    case .TypeAlias{is_pub}: return is_pub;
-    case .Let{is_pub}: return is_pub;
-    case .Const{is_pub}: return is_pub;
-    default: return false;
-    }
-}
 
 // reports a lookup that failed because two imports provide the name
 fn report_ambiguous(r: *Resolver, t: Token) -> bool {
@@ -917,8 +935,9 @@ fn qualified_hint(r: *Resolver, name: string, color: i32) -> string {
         if (found == null || found.kind.tag == .Import || exported(found))
             continue;
         let region = map_get(&other.regions, found) or_else null;
-        let why = if (region != null) tformat("`%` at line %", region.tok.text, region.tok.line) else "not `pub`";
-        return tformat("; `%` has one, but it's private to it (%)", other.path, why);
+        if (region != null)
+            return tformat("; `%` has one, but it's private to it (`%` at line %)", other.path,
+                           region.tok.text, region.tok.line);
     }
     return "";
 }
@@ -943,9 +962,7 @@ fn module_member(r: *Resolver, m: *Module, name: Token) -> *Node {
         let region = map_get(&m.regions, found) or_else null;
         let whose = if (region != null && region.tok.text == "#scope_file") "file" else "module";
         error(r, name, tformat("`%` is private to % `%`", s, whose, m.path));
-        if (m.uses_pub || region == null)
-            note(r, found.tok, "declared here, add `pub` to export it");
-        else
+        if (region != null)
             note(r, region.tok, tformat("`%` keeps what follows it inside %; to export `%`, put it before, or after a `#scope_export`",
                                         region.tok.text,
                                         if (region.tok.text == "#scope_file") "its file" else "its module", s));
@@ -1158,24 +1175,6 @@ fn body_stmts(b: *Node) -> *[]*Node {
     case .Block{stmts: &s}: return s;
     default: return null;
     }
-}
-
-// The body of an instance of a deferred template, a copy of the template's
-// unresolved body: its type parameters are bound now, so `#insert #run
-// f(type_info(T))` makes this instance's code
-pub fn resolve_instance_body(r: *Resolver, instance: *Node) {
-    let position = leave_position(r);
-    let f = fn_parts(instance);
-    r.mod = instance.owner;
-    r.context_ok = true;
-    push_scope(r);
-    for (param in f.type_params)
-        declare(r, top_scope(r), param.tok.text, param);
-    for (param in f.params)
-        if (!(param.kind is .Param{is_type: true}))
-            declare(r, top_scope(r), param.tok.text, param);
-    resolve_stmts(r, body_stmts(f.body));
-    return_to(r, &position);
 }
 
 /* ------------------------------------------------------------- statements */
@@ -1640,11 +1639,6 @@ fn resolve_leave(r: *Resolver, n: *Node, label: *Node, value: *Node, is_break: b
         error(r, n.tok, tformat("% can't leave the `#expand` function it's in", what));
     else
         error(r, n.tok, tformat(if (is_break) "% outside of a loop or switch" else "% outside of a loop", what));
-}
-
-// `_` among the targets of `a, b = ...`: the value is dropped
-pub fn is_discard(n: *Node) -> bool {
-    return n.kind.tag == .Identifier && !n.caller && n.tok.text == "_";
 }
 
 /* ------------------------------------------------------------ expressions */
@@ -2376,7 +2370,7 @@ fn expand(r: *Resolver, n: *Node) {
             continue;
         }
         let value = if (arg != null) arg else clone_node(default_value, color);
-        let let_node = new_node(p.tok, .Let(clone_node(declared, color), value, false, false, false));
+        let let_node = new_node(p.tok, .Let(clone_node(declared, color), value, false, false));
         let_node.color = color;
         array_add(&stmts, let_node);
     }
@@ -2547,8 +2541,8 @@ fn inserted_decls(r: *Resolver, n: *Node) -> []*Node {
     generated_parsed(r, errors);
     let decls: [..]*Node;
     for (d in root_list(root)) {
-        if (d.kind.tag == .Import) {
-            error(r, d.tok, "code made by `#insert` can't import; import in the file instead");
+        if (d.kind.tag == .Import || d.kind.tag == .Load) {
+            error(r, d.tok, "code made by `#insert` can't `#import` or `#load`; do it in the file instead");
             continue;
         }
         if (d.kind.tag != .InsertString)

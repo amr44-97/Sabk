@@ -5,16 +5,16 @@
 // without a pointer, and only when that variable is never assigned or has
 // its address taken in the function, so nothing in between can change it.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "ast";
-import "types";
-import "check";
-import "patterns";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "ast";
+#import "types";
+#import "check";
+#import "patterns";
 
 // the variables `n` assigns or takes the address of, anywhere in it
-pub fn find_unstable(c: *Checker, n: *Node) {
+fn find_unstable(c: *Checker, n: *Node) {
     if (n == null)
         return;
     switch (n.kind) {
@@ -33,6 +33,68 @@ pub fn find_unstable(c: *Checker, n: *Node) {
     for (child in code_children(n))
         find_unstable(c, child);
 }
+
+// is the variant of `place` known to be `variant`?
+fn is_narrowed(c: *Checker, place: *Node, variant: *Node) -> bool {
+    let path = path_of(c, place);
+    if (path.len == 0)
+        return false;
+    for (f in c.facts)
+        if (f.variant == variant && f.path == path)
+            return true;
+    return false;
+}
+
+// what `cond` says about variants when it's `truth`
+fn add_facts(c: *Checker, cond: *Node, truth: bool) {
+    switch (cond.kind) {
+    case .Grouped{inner}:
+        add_facts(c, inner, truth);
+    case .Unary{op: .Not, operand}:
+        add_facts(c, operand, !truth);
+    case .Binary{op: .And, lhs, rhs}:
+        if (truth) { // both hold
+            add_facts(c, lhs, true);
+            add_facts(c, rhs, true);
+        }
+    case .Binary{op: .Or, lhs, rhs}:
+        if (!truth) { // neither holds
+            add_facts(c, lhs, false);
+            add_facts(c, rhs, false);
+        }
+    case .Is{value, pattern}:
+        if (!truth)
+            return;
+        let head = pattern_head(pattern);
+        if (head.decl == null || head.decl.kind.tag != .Variant)
+            return;
+        let path = path_of(c, value);
+        if (path.len > 0)
+            array_add(&c.facts, Fact.{ .path = path, .variant = head.decl });
+    default:
+    }
+}
+
+// does every way through `n` leave the block it's in: return, break,
+// continue?
+fn always_leaves(n: *Node) -> bool {
+    if (n == null)
+        return false;
+    switch (n.kind) {
+    case .Return, .Break, .Continue: return true;
+    case .Block{stmts, gives_value: false}:
+        for (s in stmts)
+            if (always_leaves(s))
+                return true;
+        return false;
+    case .If{then, else_, gives_value: false}:
+        return else_ != null && always_leaves(then) && always_leaves(else_);
+    case .StaticIf: return always_leaves(static_if_branch(n));
+    default: return false;
+    }
+}
+
+#scope_file
 
 fn mark_unstable(c: *Checker, target: *Node) {
     let e = target;
@@ -76,65 +138,5 @@ fn path_of(c: *Checker, n: *Node) -> string {
         return if (base.len == 0) "" else tformat("%.%", base, n.tok.text);
     default:
         return "";
-    }
-}
-
-// is the variant of `place` known to be `variant`?
-pub fn is_narrowed(c: *Checker, place: *Node, variant: *Node) -> bool {
-    let path = path_of(c, place);
-    if (path.len == 0)
-        return false;
-    for (f in c.facts)
-        if (f.variant == variant && f.path == path)
-            return true;
-    return false;
-}
-
-// what `cond` says about variants when it's `truth`
-pub fn add_facts(c: *Checker, cond: *Node, truth: bool) {
-    switch (cond.kind) {
-    case .Grouped{inner}:
-        add_facts(c, inner, truth);
-    case .Unary{op: .Not, operand}:
-        add_facts(c, operand, !truth);
-    case .Binary{op: .And, lhs, rhs}:
-        if (truth) { // both hold
-            add_facts(c, lhs, true);
-            add_facts(c, rhs, true);
-        }
-    case .Binary{op: .Or, lhs, rhs}:
-        if (!truth) { // neither holds
-            add_facts(c, lhs, false);
-            add_facts(c, rhs, false);
-        }
-    case .Is{value, pattern}:
-        if (!truth)
-            return;
-        let head = pattern_head(pattern);
-        if (head.decl == null || head.decl.kind.tag != .Variant)
-            return;
-        let path = path_of(c, value);
-        if (path.len > 0)
-            array_add(&c.facts, Fact.{ .path = path, .variant = head.decl });
-    default:
-    }
-}
-
-// does every way through `n` leave the block it's in: return, break,
-// continue?
-pub fn always_leaves(n: *Node) -> bool {
-    if (n == null)
-        return false;
-    switch (n.kind) {
-    case .Return, .Break, .Continue: return true;
-    case .Block{stmts, gives_value: false}:
-        for (s in stmts)
-            if (always_leaves(s))
-                return true;
-        return false;
-    case .If{then, else_, gives_value: false}:
-        return else_ != null && always_leaves(then) && always_leaves(else_);
-    case .StaticIf: return always_leaves(static_if_branch(n));
-    default: return false;
     }
 }

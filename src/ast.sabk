@@ -5,17 +5,17 @@
 // dump() prints a tree as the C++ compiler's --ast did, so the two parsers
 // can be compared on the same files.
 
-import "std/array";
-import "std/fmt";
-import "std/io";
-import "std/map";
-import "std/str";
-import "token";
-import "module";
-import "types";
-import "const";
+#import "std/array";
+#import "std/fmt";
+#import "std/io";
+#import "std/map";
+#import "std/str";
+#import "token";
+#import "module";
+#import "types";
+#import "const";
 
-pub struct Node {
+struct Node {
     tok: Token;
     span: string;      // its source text, where a message quotes it (call
                        // arguments, operands of operators); else empty
@@ -40,14 +40,14 @@ pub struct Node {
     is_baked: bool;    // a literal made from a #run result: already checked
 }
 
-pub enum BinaryOp {
+enum BinaryOp {
     Add, Sub, Mul, Div, Mod,
     Lt, Gt, LtEq, GtEq, EqEq, NotEq,
     And, Or,
     BitOr, BitAnd, BitXor, Shl, Shr,
 }
 
-pub enum UnaryOp {
+enum UnaryOp {
     Not, Neg, BitNot,
     AddressOf,          // &x
     PointerType,        // *T written where an expression goes: make(*Node)
@@ -55,9 +55,9 @@ pub enum UnaryOp {
 
 // who can name a top-level declaration: whoever imports its module, its
 // module's files, or its own file
-pub enum Visibility { Export, Module, File }
+enum Visibility { Export, Module, File }
 
-pub enum NodeKind {
+enum NodeKind {
     Root(decls: []*Node),
 
     // ---- declarations; tok is the name unless said otherwise
@@ -66,22 +66,22 @@ pub enum NodeKind {
     // after it, up to the next one; tok: the directive
     ScopeRegion(visibility: Visibility),
     Load,                                    // #load "file"; tok: the path, a string token
-    Fn(params: []*Node, result: *Node, body: *Node, is_pub: bool,
+    Fn(params: []*Node, result: *Node, body: *Node,
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
        nodiscard: bool, no_bounds_check: bool,
        type_params: []*Node = .[],           // the $Ts in params' types
        result_defaults: []*Node = .[]),      // -> (i64, ParseError = .None): one per
                                              // written result, null where there's none
     Param(declared: *Node, value: *Node, is_type: bool, variadic: bool),
-    Struct(fields: []*Node, type_params: []*Node, is_union: bool, is_pub: bool),
+    Struct(fields: []*Node, type_params: []*Node, is_union: bool),
     Field(declared: *Node, value: *Node),
-    Enum(backing: *Node, variants: []*Node, type_params: []*Node, is_pub: bool),
+    Enum(backing: *Node, variants: []*Node, type_params: []*Node),
     // Number(i64) has a payload type; Binary(op: Op, ...) fields, a Struct
     Variant(payload: *Node, fields: *Node, value: *Node),
-    TypeAlias(aliased: *Node, is_pub: bool),
-    Let(declared: *Node, value: *Node, is_pub: bool, is_extern: bool, uninit: bool),
+    TypeAlias(aliased: *Node),
+    Let(declared: *Node, value: *Node, is_extern: bool, uninit: bool),
     LetValues(names: []*Node, values: *Node), // let a, b = ...; names are Lets
-    Const(declared: *Node, value: *Node, is_pub: bool),
+    Const(declared: *Node, value: *Node),
     Run(value: *Node),                       // #run value; tok: `#run`
     InsertString(value: *Node),              // #insert value; tok: `#insert`
 
@@ -174,7 +174,7 @@ pub enum NodeKind {
     BuiltinType,                             // i32, bool, ...: the resolver's
 }
 
-pub fn new_node(tok: Token, kind: NodeKind) -> *Node {
+fn new_node(tok: Token, kind: NodeKind) -> *Node {
     return new(Node.{ .tok = tok, .kind = kind });
 }
 
@@ -182,7 +182,7 @@ pub fn new_node(tok: Token, kind: NodeKind) -> *Node {
 
 // a node as the C++ Node held it: its tag, and its parts in lhs, rhs,
 // extra and list
-pub struct OldShape {
+struct OldShape {
     tag: string;
     declared: *Node;    // `type:`
     lhs: *Node;
@@ -190,7 +190,6 @@ pub struct OldShape {
     extra: *Node;
     list: []*Node;
     type_params: []*Node;
-    is_pub: bool;
     is_extern: bool;
     uninit: bool;
     no_bounds_check: bool;
@@ -201,29 +200,7 @@ pub struct OldShape {
     generic: bool;
 }
 
-fn binary_tag(op: BinaryOp) -> string {
-    return switch (op) {
-    case .Add: "ADD";       case .Sub: "SUB";       case .Mul: "MUL";
-    case .Div: "DIV";       case .Mod: "MOD";
-    case .Lt: "LT";         case .Gt: "GT";         case .LtEq: "LT_EQ";
-    case .GtEq: "GT_EQ";    case .EqEq: "EQ_EQ";    case .NotEq: "NOT_EQ";
-    case .And: "BOOL_AND";  case .Or: "BOOL_OR";
-    case .BitOr: "BIT_OR";  case .BitAnd: "BIT_AND"; case .BitXor: "BIT_XOR";
-    case .Shl: "SHL";       case .Shr: "SHR";
-    };
-}
-
-fn unary_tag(op: UnaryOp) -> string {
-    return switch (op) {
-    case .Not: "BOOL_NOT";
-    case .Neg: "NEG";
-    case .BitNot: "BIT_NOT";
-    case .AddressOf: "ADDRESS_OF";
-    case .PointerType: "STAR";
-    };
-}
-
-pub fn old_shape(n: *Node) -> OldShape {
+fn old_shape(n: *Node) -> OldShape {
     let s: OldShape;
     switch (n.kind) {
     case .Root{decls}: s.tag = "ROOT"; s.list = decls;
@@ -236,7 +213,6 @@ pub fn old_shape(n: *Node) -> OldShape {
         s.declared = f.result;
         s.rhs = f.body;
         s.list = f.params;
-        s.is_pub = f.is_pub;
         s.is_extern = f.is_extern;
         s.variadic = f.variadic;
         s.nodiscard = f.nodiscard;
@@ -252,7 +228,6 @@ pub fn old_shape(n: *Node) -> OldShape {
         s.list = st.fields;
         s.type_params = st.type_params;
         s.generic = st.type_params.len > 0 && n.generic == null;
-        s.is_pub = st.is_pub;
     case .Field{declared, value}:
         s.tag = "STRUCT_FIELD"; s.declared = declared; s.lhs = value;
     case .Enum(e):
@@ -260,22 +235,19 @@ pub fn old_shape(n: *Node) -> OldShape {
         s.declared = e.backing;
         s.list = e.variants;
         s.generic = e.type_params.len > 0 && n.generic == null;
-        s.is_pub = e.is_pub;
     case .Variant{payload, fields, value}:
         s.tag = "ENUM_VARIANT"; s.declared = payload; s.lhs = value; s.rhs = fields;
-    case .TypeAlias{aliased, is_pub}:
-        s.tag = "TYPE_ALIAS"; s.declared = aliased; s.is_pub = is_pub;
+    case .TypeAlias{aliased}:
+        s.tag = "TYPE_ALIAS"; s.declared = aliased;
     case .Let(l):
         s.tag = "VAR_DECL";
         s.declared = l.declared;
         s.lhs = l.value;
-        s.is_pub = l.is_pub;
         s.is_extern = l.is_extern;
         s.uninit = l.uninit;
     case .LetValues{names, values}: s.tag = "LET_VALUES"; s.lhs = values; s.list = names;
     case .Const(c):
         s.tag = "CONST_DECL"; s.declared = c.declared; s.lhs = c.value;
-        s.is_pub = c.is_pub;
     case .Run{value}: s.tag = "RUN"; s.lhs = value;
     case .InsertString{value}: s.tag = "INSERT_STRING"; s.lhs = value;
 
@@ -383,11 +355,144 @@ pub fn old_shape(n: *Node) -> OldShape {
 }
 
 // prints the tree to stdout
-pub fn dump(n: *Node) {
+fn dump(n: *Node) {
     let out: [..]u8;
     dump_into(&out, n, 0, "");
     print(out as string);
     array_free(&out);
+}
+
+// ---- walking and copying trees
+//
+// A node's children are the *Node and []*Node parts of its kind, found
+// through NodeKind's type information, so a new kind needs nothing here.
+
+// a copy of `n` and everything under it, all given `color` (unless it's
+// negative)
+fn clone_node(n: *Node, color: i32) -> *Node {
+    if (n == null)
+        return null;
+    let copy = new(n.*);
+    if (color >= 0)
+        copy.color = color;
+    let info, at = parts(copy);
+    if (info == null)
+        return copy;
+    let node_ptr, node_list = type_info(*Node), type_info([]*Node);
+    for (f in info.fields) {
+        if (f.info == node_ptr) {
+            let slot = (at + f.offset) as **Node;
+            slot.* = clone_node(slot.*, color);
+        } else if (f.info == node_list) {
+            let slot = (at + f.offset) as *[]*Node;
+            let items = new([]*Node, slot.len);
+            for (i in 0..items.len)
+                items[i] = clone_node(slot.*[i], color);
+            slot.* = items;
+        }
+    }
+    return copy;
+}
+
+// `n`'s children in the order the C++ compiler kept them (type, lhs, rhs,
+// extra, then the list): what walks over a tree go through
+fn children(n: *Node) -> [..]*Node {
+    let s = old_shape(n);
+    let out: [..]*Node;
+    out.allocator = context.temp_allocator;
+    for (c in .[s.declared, s.lhs, s.rhs, s.extra])
+        if (c != null)
+            array_add(&out, c);
+    for (c in s.list)
+        if (c != null)
+            array_add(&out, c);
+    return out;
+}
+
+// `n`'s children without a declaration's written type (lhs, rhs, extra,
+// then the list): what walks over code look at
+fn code_children(n: *Node) -> [..]*Node {
+    let s = old_shape(n);
+    let out: [..]*Node;
+    out.allocator = context.temp_allocator;
+    for (c in .[s.lhs, s.rhs, s.extra])
+        if (c != null)
+            array_add(&out, c);
+    for (c in s.list)
+        if (c != null)
+            array_add(&out, c);
+    return out;
+}
+
+// a string's text as a literal, escaped: what #text and #location make
+fn quote_string(bytes: string) -> string {
+    let out: [..]u8;
+    array_add(&out, '"');
+    for (c in bytes) {
+        if (c == '"' || c == '\\') {
+            array_add(&out, '\\');
+            array_add(&out, c);
+        } else if (c == '\n') {
+            append_string(&out, "\\n");
+        } else if (c == '\t') {
+            append_string(&out, "\\t");
+        } else if (c < 32 || c >= 127) {
+            print_to(&out, "\\x%{02x}", c);
+        } else {
+            array_add(&out, c);
+        }
+    }
+    array_add(&out, '"');
+    return out as string;
+}
+
+// C's %g: what the C++ compiler's dumps printed floats with
+fn format_g(f: f64) -> string {
+    let buffer: [64]u8 = ---;
+    snprintf(buffer.ptr, buffer.len as usize, "%g", f);
+    return copy_string(from_cstring(buffer.ptr));
+}
+
+// A copy of a resolved declaration for a generic instance: names that
+// referred to nodes inside it now refer to the copies (each instance gets
+// its own locals and its own type parameters). A node met twice is copied
+// once: a function's type parameters are in its parameters' types and in
+// its list of them.
+fn clone_instance(n: *Node) -> *Node {
+    let copies: Map(*Node, *Node);
+    let copy = clone_tree(n, &copies);
+    // a template naming itself (recursion, `next: *Node(T)`) still means
+    // the template, which instantiates for whatever types that use has
+    map_remove(&copies, n);
+    remap(copy, &copies);
+    map_free(&copies);
+    return copy;
+}
+
+#scope_file
+
+// ---- the C++ compiler's dump
+
+fn binary_tag(op: BinaryOp) -> string {
+    return switch (op) {
+    case .Add: "ADD";       case .Sub: "SUB";       case .Mul: "MUL";
+    case .Div: "DIV";       case .Mod: "MOD";
+    case .Lt: "LT";         case .Gt: "GT";         case .LtEq: "LT_EQ";
+    case .GtEq: "GT_EQ";    case .EqEq: "EQ_EQ";    case .NotEq: "NOT_EQ";
+    case .And: "BOOL_AND";  case .Or: "BOOL_OR";
+    case .BitOr: "BIT_OR";  case .BitAnd: "BIT_AND"; case .BitXor: "BIT_XOR";
+    case .Shl: "SHL";       case .Shr: "SHR";
+    };
+}
+
+fn unary_tag(op: UnaryOp) -> string {
+    return switch (op) {
+    case .Not: "BOOL_NOT";
+    case .Neg: "NEG";
+    case .BitNot: "BIT_NOT";
+    case .AddressOf: "ADDRESS_OF";
+    case .PointerType: "STAR";
+    };
 }
 
 fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
@@ -414,7 +519,6 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
     if (n.caller) append_string(out, " [caller]");
     if (n.color != 0) print_to(out, " [macro %]", n.color);
     if (n.kind is .MacroExpansion{expansion}) print_to(out, " [expansion %]", expansion);
-    if (s.is_pub) append_string(out, " [pub]");
     if (s.is_extern) append_string(out, " [extern]");
     if (s.uninit) append_string(out, " [uninit]");
     if (s.no_bounds_check) append_string(out, " [no_bounds_check]");
@@ -487,109 +591,7 @@ fn holds(f: *Module, t: Token) -> bool {
     return t.text.ptr >= text.ptr && t.text.ptr <= text.ptr + text.len;
 }
 
-// a copy of `n` and everything under it, all given `color` (unless it's
-// negative)
-pub fn clone_node(n: *Node, color: i32) -> *Node {
-    if (n == null)
-        return null;
-    let copy = new(n.*);
-    if (color >= 0)
-        copy.color = color;
-    let info, at = parts(copy);
-    if (info == null)
-        return copy;
-    let node_ptr, node_list = type_info(*Node), type_info([]*Node);
-    for (f in info.fields) {
-        if (f.info == node_ptr) {
-            let slot = (at + f.offset) as **Node;
-            slot.* = clone_node(slot.*, color);
-        } else if (f.info == node_list) {
-            let slot = (at + f.offset) as *[]*Node;
-            let items = new([]*Node, slot.len);
-            for (i in 0..items.len)
-                items[i] = clone_node(slot.*[i], color);
-            slot.* = items;
-        }
-    }
-    return copy;
-}
-
-// `n`'s children in the order the C++ compiler kept them (type, lhs, rhs,
-// extra, then the list): what walks over a tree go through
-pub fn children(n: *Node) -> [..]*Node {
-    let s = old_shape(n);
-    let out: [..]*Node;
-    out.allocator = context.temp_allocator;
-    for (c in .[s.declared, s.lhs, s.rhs, s.extra])
-        if (c != null)
-            array_add(&out, c);
-    for (c in s.list)
-        if (c != null)
-            array_add(&out, c);
-    return out;
-}
-
-// `n`'s children without a declaration's written type (lhs, rhs, extra,
-// then the list): what walks over code look at
-pub fn code_children(n: *Node) -> [..]*Node {
-    let s = old_shape(n);
-    let out: [..]*Node;
-    out.allocator = context.temp_allocator;
-    for (c in .[s.lhs, s.rhs, s.extra])
-        if (c != null)
-            array_add(&out, c);
-    for (c in s.list)
-        if (c != null)
-            array_add(&out, c);
-    return out;
-}
-
-// a string's text as a literal, escaped: what #text and #location make
-pub fn quote_string(bytes: string) -> string {
-    let out: [..]u8;
-    array_add(&out, '"');
-    for (c in bytes) {
-        if (c == '"' || c == '\\') {
-            array_add(&out, '\\');
-            array_add(&out, c);
-        } else if (c == '\n') {
-            append_string(&out, "\\n");
-        } else if (c == '\t') {
-            append_string(&out, "\\t");
-        } else if (c < 32 || c >= 127) {
-            print_to(&out, "\\x%{02x}", c);
-        } else {
-            array_add(&out, c);
-        }
-    }
-    array_add(&out, '"');
-    return out as string;
-}
-
 extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
-
-// C's %g: what the C++ compiler's dumps printed floats with
-pub fn format_g(f: f64) -> string {
-    let buffer: [64]u8 = ---;
-    snprintf(buffer.ptr, buffer.len as usize, "%g", f);
-    return copy_string(from_cstring(buffer.ptr));
-}
-
-// A copy of a resolved declaration for a generic instance: names that
-// referred to nodes inside it now refer to the copies (each instance gets
-// its own locals and its own type parameters). A node met twice is copied
-// once: a function's type parameters are in its parameters' types and in
-// its list of them.
-pub fn clone_instance(n: *Node) -> *Node {
-    let copies: Map(*Node, *Node);
-    let copy = clone_tree(n, &copies);
-    // a template naming itself (recursion, `next: *Node(T)`) still means
-    // the template, which instantiates for whatever types that use has
-    map_remove(&copies, n);
-    remap(copy, &copies);
-    map_free(&copies);
-    return copy;
-}
 
 fn clone_tree(n: *Node, copies: *Map(*Node, *Node)) -> *Node {
     if (n == null)

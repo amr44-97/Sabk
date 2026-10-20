@@ -1,5 +1,5 @@
 // a #nodiscard function's result can't be dropped without `_ =`
-import "std/io";
+#import "std/io";
 enum SaveError: Error { Full }
 fn save() -> SaveError #nodiscard { return .None; }
 fn counts() -> (i64, bool) #nodiscard { return 1, true; }

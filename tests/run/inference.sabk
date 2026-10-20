@@ -1,6 +1,6 @@
-import "std/io";
-import "std/array";
-import "std/map";
+#import "std/io";
+#import "std/array";
+#import "std/map";
 
 fn max(a: $T, b: T) -> T { if (a > b) return a; return b; }
 fn zero_of($T: Type) -> T { let z: T; return z; }

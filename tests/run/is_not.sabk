@@ -1,5 +1,5 @@
 // e !is P: true where e doesn't match P, as !(e is P)
-import "std/io";
+#import "std/io";
 
 enum Shape { Circle(r: f64), Square(side: f64), Dot }
 

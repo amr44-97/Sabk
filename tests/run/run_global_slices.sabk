@@ -1,6 +1,6 @@
 // #run code reading globals and constants that hold slices: the elements
 // must outlive the initializer that made them
-import "std/io";
+#import "std/io";
 
 struct Table { keys: []u32; names: []string; }
 struct Defaults { xs: []u16 = .[4, 5, 6]; }

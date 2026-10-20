@@ -1,7 +1,7 @@
-import "std/io";
-import "std/mem";
-import "std/os";
-import "lib/generic_lib";
+#import "std/io";
+#import "std/mem";
+#import "std/os";
+#import "lib/generic_lib";
 
 // ---- inference
 fn max(a: $T, b: T) -> T {

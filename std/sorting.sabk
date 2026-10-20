@@ -12,11 +12,9 @@
 // badly, so it's O(n log n) on any input; short runs use insertion sort.
 // It isn't stable: equal elements can change order.
 
-fn less_than(a: $T, b: T) -> bool { return a < b; }
+fn sort(items: []$T) { sort_by(items, less_than); }
 
-pub fn sort(items: []$T) { sort_by(items, less_than); }
-
-pub fn sort_by(items: []$T, less: fn(T, T) -> bool) {
+fn sort_by(items: []$T, less: fn(T, T) -> bool) {
     // quicksort gets 2 * log2(n) levels before heapsort takes over
     let limit = 0;
     for (let n = items.len; n > 1; n /= 2)
@@ -24,16 +22,16 @@ pub fn sort_by(items: []$T, less: fn(T, T) -> bool) {
     quicksort(items, less, limit);
 }
 
-pub fn is_sorted(items: []$T) -> bool { return is_sorted_by(items, less_than); }
+fn is_sorted(items: []$T) -> bool { return is_sorted_by(items, less_than); }
 
-pub fn is_sorted_by(items: []$T, less: fn(T, T) -> bool) -> bool {
+fn is_sorted_by(items: []$T, less: fn(T, T) -> bool) -> bool {
     for (i in 1..items.len)
         if (less(items[i], items[i - 1]))
             return false;
     return true;
 }
 
-pub fn binary_search(items: []$T, value: T) -> isize {
+fn binary_search(items: []$T, value: T) -> isize {
     let lo = 0;
     let hi = items.len;
     while (lo < hi) {
@@ -48,7 +46,7 @@ pub fn binary_search(items: []$T, value: T) -> isize {
     return -1;
 }
 
-pub fn reverse(items: []$T) {
+fn reverse(items: []$T) {
     if (items.len < 2)
         return;
     let i = 0;
@@ -59,6 +57,10 @@ pub fn reverse(items: []$T) {
         j--;
     }
 }
+
+#scope_file
+
+fn less_than(a: $T, b: T) -> bool { return a < b; }
 
 // ---- the algorithm
 

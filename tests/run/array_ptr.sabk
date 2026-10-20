@@ -1,5 +1,5 @@
 // a.ptr on a fixed array is &a[0], a *T; p.ptr on a *[N]T is the same
-import "std/io";
+#import "std/io";
 extern fn memset(memory: *void, value: i32, size: usize) -> *void;
 
 struct Grid { cells: [4]u8; }

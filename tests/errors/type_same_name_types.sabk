@@ -1,2 +1,2 @@
-import "lib/shadow" as shadow;
+#import "lib/shadow" as shadow;
 fn f(a: shadow.Allocator) { let b: Allocator = a; }

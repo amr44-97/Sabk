@@ -1,8 +1,8 @@
 // enum E: Error { ... }: an error enum, None (no failure) at 0 without
 // writing it; it converts to Error (a tagged one by its tag), and an Error
 // gives it back through a checked match, is E(e) or case E(e):
-import "std/io";
-import "std/fmt";
+#import "std/io";
+#import "std/fmt";
 
 enum DiskError: Error { Full, ReadOnly }
 enum ConfigError: Error { BadLine(line: isize), Missing(string) }

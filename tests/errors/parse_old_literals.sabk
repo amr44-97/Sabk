@@ -1,5 +1,5 @@
 // C's literal forms: each error shows how it's written, and parsing goes on
-import "std/mem";
+#import "std/mem";
 struct Point { x: i64; }
 struct Pair($T) { a: T; b: T; }
 fn f(x: i64) {

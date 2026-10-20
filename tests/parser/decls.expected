@@ -1,13 +1,18 @@
-ROOT
+ROOT `#`
   IMPORT `"std/io"`
   IMPORT `"vendor/my-lib"`
     rhs: IDENTIFIER `lib`
-  STRUCT `Vec2` [pub]
+  STRUCT `Vec2`
     STRUCT_FIELD `x`
       type: TYPE_NAME `f32`
     STRUCT_FIELD `y`
       type: TYPE_NAME `f32`
       lhs: FLOAT_LITERAL `1.0`
+  CONST_DECL `NAME`
+    lhs: STRING_LITERAL `"x"`
+  FUN_DECL `noop`
+    rhs: BLOCK
+  SCOPE_REGION `#scope_file`
   UNION `Bits`
     STRUCT_FIELD `i`
       type: TYPE_NAME `u32`
@@ -45,8 +50,6 @@ ROOT
   CONST_DECL `MAX`
     type: TYPE_NAME `i32`
     lhs: NUMBER_LITERAL `64`
-  CONST_DECL `NAME` [pub]
-    lhs: STRING_LITERAL `"x"`
   VAR_DECL `counter`
     type: TYPE_NAME `u64`
   VAR_DECL `ready`
@@ -79,5 +82,3 @@ ROOT
         lhs: TYPE_NAME `mem`
       lhs: MEMBER `allocator`
         lhs: CONTEXT
-  FUN_DECL `noop` [pub]
-    rhs: BLOCK

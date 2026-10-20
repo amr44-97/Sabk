@@ -1,6 +1,6 @@
 // what #run makes is carried into the program; a growable array's
 // elements were allocated while compiling, so it can't be
-import "std/array";
+#import "std/array";
 
 fn build() -> [..]i64 { let xs: [..]i64; array_add(&xs, 1); return xs; }
 struct Holder { items: [..]i64; }

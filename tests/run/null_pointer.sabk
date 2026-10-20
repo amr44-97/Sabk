@@ -1,6 +1,6 @@
 // following a null pointer panics at the Sabk line, where bounds are
 // checked
-import "std/io";
+#import "std/io";
 struct Node { value: i32; next: *Node; }
 fn main() {
     let n = Node.{ .value = 1 };

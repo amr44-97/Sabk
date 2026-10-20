@@ -3,14 +3,105 @@
 // written the right way: C's `%d` and `%5.2f` are translated, and a letter
 // meant as text (`%px`) gets `%{}px`.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "std/str";
-import "ast";
-import "token";
-import "types";
-import "check";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/str";
+#import "ast";
+#import "token";
+#import "types";
+#import "check";
+
+// A call of a `#format` function whose format is known at compile time
+// and whose values are written out: the `%`s and the values must match,
+// each directive must be one, and suit its value.
+fn check_format_call(c: *Checker, n: *Node, fun: *Node) {
+    let at = fn_params(fun).len - 1; // the ..Any parameter
+    let args = items_of(n);
+    if (at == 0 || args.len <= at || !map_has(&c.packs, args[at]))
+        return; // no values (printed as it is), or `..args` passed on
+    let values = items_of(args[at]);
+    let arg = args[at - 1];
+    let literal = ungroup(arg);
+    if ((literal.kind.tag == .Identifier || literal.kind.tag == .Member) && literal.decl != null &&
+        literal.decl.kind is .Const{value} && value != null)
+        literal = value;
+    let quoted = "";
+    switch (literal.kind) {
+    case .String{quoted: text}: quoted = text;
+    default: return; // only known when the program runs
+    }
+    // written right here: errors can point inside it
+    let in_source = literal == arg && quoted.len == 0;
+    let raw = if (quoted.len > 0) quoted else literal.tok.text;
+    let holes = holes_of(raw);
+
+    if (values.len == 0)
+        return; // printed as it is
+    // the directives that aren't one; then the call written right, with
+    // every one fixed, and the directives if one was unknown
+    let bad: [..]Hole;
+    for (hole in holes)
+        if (hole.kind == .CHabit || hole.kind == .Text)
+            array_add(&bad, hole);
+    let table = false;
+    for (hole in bad) {
+        let written = raw[hole.pos..hole.pos + hole.len];
+        let message = if (hole.kind == .CHabit) tformat("`%` isn't a directive: %", written, hole.why)
+                      else tformat("`%{}%` isn't a directive; for a value followed by `%`, write `%%{}%`",
+                                   written, hole.why[..1], hole.why, hole.why);
+        error(c, inside(arg, in_source, hole.pos, hole.len), message);
+        table = table || hole.table;
+    }
+    if (bad.len > 0) {
+        let last = bad[bad.len - 1];
+        let where = inside(arg, in_source, last.pos, last.len);
+        if (in_source)
+            note(c, where, tformat("write: %", rewritten(n, at, raw, bad)));
+        if (table)
+            note(c, where, DIRECTIVES);
+        return;
+    }
+
+    if (values.len < holes.len) {
+        let missing = holes[values.len];
+        error(c, inside(arg, in_source, missing.pos, missing.len),
+              tformat("this `%%` has no value: the format has %, but % given",
+                      plural(holes.len, "`%`", "`%`s"), plural(values.len, "value is", "values are")));
+    } else if (values.len > holes.len) {
+        error(c, values[holes.len].tok, tformat("this value has no `%%` in the format: it has %, for %",
+                                                plural(holes.len, "`%`", "`%`s"), plural(values.len, "value", "values")));
+        note(c, arg.tok, "the format");
+    }
+
+    for (k in 0..holes.len) {
+        let hole = holes[k];
+        let kind: u8 = 0;
+        let written = raw[hole.pos..hole.pos + hole.len];
+        if (hole.kind == .Braces) {
+            let parsed, why = parse_spec(hole.spec);
+            if (why.len > 0) {
+                error(c, inside(arg, in_source, hole.pos, hole.len), tformat("`%%{%}` isn't a format: %", hole.spec, why));
+                continue;
+            }
+            kind = parsed;
+        } else if (hole.kind == .Letter) {
+            kind = hole.spec[0];
+        }
+        if (kind == 0 || k >= values.len)
+            continue;
+        // the kind must suit the value; inside a struct or array it applies
+        // to what it holds, so those aren't checked
+        let t = values[k].ty;
+        if (t == null || t.kind == .Error)
+            continue;
+        let why = unsuited(c, kind, t, written, values[k]);
+        if (why.len > 0)
+            error(c, inside(arg, in_source, hole.pos, hole.len), why);
+    }
+}
+
+#scope_file
 
 // what the format shows next to a mistake in it
 const DIRECTIVES = "the directives: `%` any value, `%s` text, `%q` quoted text, `%w` an error or enum value with its enum, `%x %X` hex, `%b %o` binary, octal, `%e %f` scientific, fixed, `%c` a character, `%{...}` options (`%{8}`, `%{<8}`, `%{.2}`, `%{08x}`), `%{}` a value before a letter, `%%` a percent sign";
@@ -265,95 +356,6 @@ fn unsuited(c: *Checker, kind: u8, t: *Type, written: string, value: *Node) -> s
         if (t.kind == .Int || t.kind == .Float || is_aggregate(t))
             return "";
         return tformat("`%` prints a number, but % is %", written, value_name(value), a_type(t));
-    }
-}
-
-// A call of a `#format` function whose format is known at compile time
-// and whose values are written out: the `%`s and the values must match,
-// each directive must be one, and suit its value.
-pub fn check_format_call(c: *Checker, n: *Node, fun: *Node) {
-    let at = fn_params(fun).len - 1; // the ..Any parameter
-    let args = items_of(n);
-    if (at == 0 || args.len <= at || !map_has(&c.packs, args[at]))
-        return; // no values (printed as it is), or `..args` passed on
-    let values = items_of(args[at]);
-    let arg = args[at - 1];
-    let literal = ungroup(arg);
-    if ((literal.kind.tag == .Identifier || literal.kind.tag == .Member) && literal.decl != null &&
-        literal.decl.kind is .Const{value} && value != null)
-        literal = value;
-    let quoted = "";
-    switch (literal.kind) {
-    case .String{quoted: text}: quoted = text;
-    default: return; // only known when the program runs
-    }
-    // written right here: errors can point inside it
-    let in_source = literal == arg && quoted.len == 0;
-    let raw = if (quoted.len > 0) quoted else literal.tok.text;
-    let holes = holes_of(raw);
-
-    if (values.len == 0)
-        return; // printed as it is
-    // the directives that aren't one; then the call written right, with
-    // every one fixed, and the directives if one was unknown
-    let bad: [..]Hole;
-    for (hole in holes)
-        if (hole.kind == .CHabit || hole.kind == .Text)
-            array_add(&bad, hole);
-    let table = false;
-    for (hole in bad) {
-        let written = raw[hole.pos..hole.pos + hole.len];
-        let message = if (hole.kind == .CHabit) tformat("`%` isn't a directive: %", written, hole.why)
-                      else tformat("`%{}%` isn't a directive; for a value followed by `%`, write `%%{}%`",
-                                   written, hole.why[..1], hole.why, hole.why);
-        error(c, inside(arg, in_source, hole.pos, hole.len), message);
-        table = table || hole.table;
-    }
-    if (bad.len > 0) {
-        let last = bad[bad.len - 1];
-        let where = inside(arg, in_source, last.pos, last.len);
-        if (in_source)
-            note(c, where, tformat("write: %", rewritten(n, at, raw, bad)));
-        if (table)
-            note(c, where, DIRECTIVES);
-        return;
-    }
-
-    if (values.len < holes.len) {
-        let missing = holes[values.len];
-        error(c, inside(arg, in_source, missing.pos, missing.len),
-              tformat("this `%%` has no value: the format has %, but % given",
-                      plural(holes.len, "`%`", "`%`s"), plural(values.len, "value is", "values are")));
-    } else if (values.len > holes.len) {
-        error(c, values[holes.len].tok, tformat("this value has no `%%` in the format: it has %, for %",
-                                                plural(holes.len, "`%`", "`%`s"), plural(values.len, "value", "values")));
-        note(c, arg.tok, "the format");
-    }
-
-    for (k in 0..holes.len) {
-        let hole = holes[k];
-        let kind: u8 = 0;
-        let written = raw[hole.pos..hole.pos + hole.len];
-        if (hole.kind == .Braces) {
-            let parsed, why = parse_spec(hole.spec);
-            if (why.len > 0) {
-                error(c, inside(arg, in_source, hole.pos, hole.len), tformat("`%%{%}` isn't a format: %", hole.spec, why));
-                continue;
-            }
-            kind = parsed;
-        } else if (hole.kind == .Letter) {
-            kind = hole.spec[0];
-        }
-        if (kind == 0 || k >= values.len)
-            continue;
-        // the kind must suit the value; inside a struct or array it applies
-        // to what it holds, so those aren't checked
-        let t = values[k].ty;
-        if (t == null || t.kind == .Error)
-            continue;
-        let why = unsuited(c, kind, t, written, values[k]);
-        if (why.len > 0)
-            error(c, inside(arg, in_source, hole.pos, hole.len), why);
     }
 }
 

@@ -1,6 +1,6 @@
 // type_info(value), like sizeof(value): the TypeInfo of the value's type;
 // the value isn't evaluated
-import "std/io";
+#import "std/io";
 
 struct Point { x: i32; y: i32; }
 

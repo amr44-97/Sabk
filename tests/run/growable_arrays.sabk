@@ -1,8 +1,8 @@
 // [..]T: {ptr, len, cap, allocator}; indexes, slices and loops like a
 // slice, and goes where a []T is expected as a view of its elements
-import "std/io";
-import "std/array";
-import "std/reflect";
+#import "std/io";
+#import "std/array";
+#import "std/reflect";
 
 struct Shelf { name: string; books: [..]string; }
 

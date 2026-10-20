@@ -1,10 +1,10 @@
 // the memory traps the compiler can see (docs/reference.md, Memory traps):
 // each `// warns` line gets a warning, and the rest are fine
-import "std/io";
-import "std/array";
-import "std/mem";
-import "std/str";
-import "std/fmt";
+#import "std/io";
+#import "std/array";
+#import "std/mem";
+#import "std/str";
+#import "std/fmt";
 
 // 1: a slice literal stored from a loop
 fn stored_from_loop() {

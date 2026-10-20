@@ -7,31 +7,17 @@
 // the C++ one did. Code that parses but is wrong anyway (mixed operators,
 // C's spellings of literals) is reported and counted, and parsing goes on.
 
-import "std/array";
-import "std/fmt";
-import "std/mem";
-import "std/os";
-import "std/str";
-import "ast";
-import "source";
-import "token";
-
-// binary operator precedences that other code refers to
-const BIT_OR_PREC = 4; // `|`, the loosest bit operator
-const CMP_PREC = 7;    // comparisons, and `is`
-
-struct Parser {
-    src: *Source;
-    tokens: []Token;      // the last one is Eof
-    idx: isize;
-    error_count: isize;
-    statement_head: bool; // parsing the first expression of a statement
-    in_pattern: bool;     // a case's `X:` isn't a label there
-    bare_condition: bool; // in `if x {`: a `{` after a name is the body
-}
+#import "std/array";
+#import "std/fmt";
+#import "std/mem";
+#import "std/os";
+#import "std/str";
+#import "ast";
+#import "source";
+#import "token";
 
 // the file's declarations, and how many errors were reported and gone past
-pub fn parse_file(src: *Source, tokens: []Token) -> (*Node, isize) {
+fn parse_file(src: *Source, tokens: []Token) -> (*Node, isize) {
     let p = Parser.{ .src = src, .tokens = tokens };
     let start = peek(&p);
     let decls: [..]*Node;
@@ -57,7 +43,7 @@ pub fn parse_file(src: *Source, tokens: []Token) -> (*Node, isize) {
 }
 
 // code made by `#insert` where statements go: statements up to the end
-pub fn parse_stmts(src: *Source, tokens: []Token) -> ([]*Node, isize) {
+fn parse_stmts(src: *Source, tokens: []Token) -> ([]*Node, isize) {
     let p = Parser.{ .src = src, .tokens = tokens };
     let stmts: [..]*Node;
     while (!at(&p, .Eof))
@@ -66,12 +52,28 @@ pub fn parse_stmts(src: *Source, tokens: []Token) -> ([]*Node, isize) {
 }
 
 // code made by `#insert` where an expression goes: one expression, all of it
-pub fn parse_whole_expr(src: *Source, tokens: []Token) -> (*Node, isize) {
+fn parse_whole_expr(src: *Source, tokens: []Token) -> (*Node, isize) {
     let p = Parser.{ .src = src, .tokens = tokens };
     let e = expr(&p);
     if (!at(&p, .Eof))
         fail(&p, peek(&p), tformat("expected the end of the expression, found %", describe(peek(&p))));
     return e, p.error_count;
+}
+
+#scope_file
+
+// binary operator precedences that other code refers to
+const BIT_OR_PREC = 4; // `|`, the loosest bit operator
+const CMP_PREC = 7;    // comparisons, and `is`
+
+struct Parser {
+    src: *Source;
+    tokens: []Token;      // the last one is Eof
+    idx: isize;
+    error_count: isize;
+    statement_head: bool; // parsing the first expression of a statement
+    in_pattern: bool;     // a case's `X:` isn't a label there
+    bare_condition: bool; // in `if x {`: a `{` after a name is the body
 }
 
 /* ---------------------------------------------------------------- tokens */
@@ -205,7 +207,7 @@ fn top_block(p: *Parser) -> *Node {
 }
 
 fn top_decl(p: *Parser) -> *Node {
-    if (at(p, .Import) || at_directive(p, "import"))
+    if (at_directive(p, "import"))
         return import_decl(p);
     if (at_directive(p, "load")) {
         // `#load "file.sabk";`: the file's declarations join this module
@@ -231,7 +233,6 @@ fn top_decl(p: *Parser) -> *Node {
         return new_node(t, .InsertString(value));
     }
 
-    let is_pub = eat(p, .Pub);
     let decl: *Node;
     switch (peek(p).kind) {
     case .Extern:
@@ -249,7 +250,7 @@ fn top_decl(p: *Parser) -> *Node {
             if (value != null)
                 fail(p, value.tok, "an `extern let` can't have a value: C defines the variable");
             expect(p, .Semicolon, "`;` after the declaration");
-            decl = new_node(name, .Let(declared, null, false, true, false));
+            decl = new_node(name, .Let(declared, null, true, false));
         } else {
             decl = fn_decl(p);
         }
@@ -265,30 +266,21 @@ fn top_decl(p: *Parser) -> *Node {
             fail(p, names[1].tok, tformat("a global variable is declared one at a time: `let % = ...;`", decl.tok.text));
         expect(p, .Semicolon, "`;` after the declaration");
     default:
-        return fail(p, peek(p), tformat("expected a declaration (fn, struct, union, enum, type, const, let or import), found %", describe(peek(p))));
-    }
-    if (is_pub) {
-        switch (decl.kind) {
-        case .Fn(&f): f.is_pub = true;
-        case .Struct(&s): s.is_pub = true;
-        case .Enum(&e): e.is_pub = true;
-        case .TypeAlias(&t): t.is_pub = true;
-        case .Let(&l): l.is_pub = true;
-        case .Const(&c): c.is_pub = true;
-        default:
-        }
+        let t = peek(p);
+        if (t.kind == .Identifier && t.text == "pub")
+            return fail(p, t, "Sabk has no `pub`: a declaration is exported unless a `#scope_module` or `#scope_file` above it says otherwise");
+        if (t.kind == .Identifier && t.text == "import")
+            return fail(p, t, tformat("an import is written `#import %;`",
+                                      if (at(p, .String, 1)) peek(p, 1).text else "\"path\""));
+        return fail(p, t, tformat("expected a declaration (fn, struct, union, enum, type, const, let or #import), found %", describe(t)));
     }
     return decl;
 }
 
-// `#import "std/io";`, `#import "std/io" as io;` (and `import`, the
-// spelling from before, while code moves over)
+// `#import "std/io";`, `#import "std/io" as io;`
 fn import_decl(p: *Parser) -> *Node {
-    let what = if (at(p, .Hash)) "#import" else "import";
-    if (at(p, .Hash))
-        next(p); // #
-    next(p); // import
-    let path = expect(p, .String, tformat("a module path after `%`", what));
+    directive(p); // #import
+    let path = expect(p, .String, "a module path after `#import`");
     let alias: *Node = null;
     if (eat(p, .As))
         alias = new_node(expect(p, .Identifier, "a module name after `as`"), .Identifier);
@@ -408,7 +400,7 @@ fn fn_decl(p: *Parser) -> *Node {
     } else {
         fail(p, peek(p), tformat("expected a function body `{`, found % (only `extern` functions can omit the body)", describe(peek(p))));
     }
-    let fun = new_node(name, .Fn(params, result, body, false, is_extern, is_macro,
+    let fun = new_node(name, .Fn(params, result, body, is_extern, is_macro,
                                  variadic, format, nodiscard, no_bounds_check));
     for (d in defaults) {
         if (d == null)
@@ -476,7 +468,7 @@ fn aggregate(p: *Parser, is_union: bool) -> *Node {
         array_add(&fields, new_node(field, .Field(declared, value)));
     }
     next(p); // }
-    return new_node(name, .Struct(fields, params, is_union, false));
+    return new_node(name, .Struct(fields, params, is_union));
 }
 
 fn enum_decl(p: *Parser) -> *Node {
@@ -519,7 +511,7 @@ fn enum_decl(p: *Parser) -> *Node {
                     if (!eat(p, .Comma))
                         break;
                 }
-                fields = new_node(variant, .Struct(list, .[], false, false));
+                fields = new_node(variant, .Struct(list, .[], false));
             } else {
                 payload = type_(p);
             }
@@ -532,7 +524,7 @@ fn enum_decl(p: *Parser) -> *Node {
             break;
     }
     expect(p, .RBrace, "`,` or `}` after the variant");
-    return new_node(name, .Enum(backing, variants, params, false));
+    return new_node(name, .Enum(backing, variants, params));
 }
 
 fn type_args_count(n: *Node) -> isize {
@@ -547,7 +539,7 @@ fn type_alias(p: *Parser) -> *Node {
     expect(p, .Equal, "`=` after the type name");
     let aliased = type_(p);
     expect(p, .Semicolon, "`;` after the type alias");
-    return new_node(name, .TypeAlias(aliased, false));
+    return new_node(name, .TypeAlias(aliased));
 }
 
 fn const_decl(p: *Parser) -> *Node {
@@ -559,7 +551,7 @@ fn const_decl(p: *Parser) -> *Node {
     expect(p, .Equal, "`=` and a value (a constant needs a value)");
     let value = expr(p);
     expect(p, .Semicolon, "`;` after the constant");
-    return new_node(name, .Const(declared, value, false));
+    return new_node(name, .Const(declared, value));
 }
 
 // `let ...` without its `;`
@@ -569,10 +561,10 @@ fn let_decl(p: *Parser) -> *Node {
     if (at(p, .Comma)) {
         // let q, r = divide(a, b); several names, from several values
         let names: [..]*Node;
-        array_add(&names, new_node(name, .Let(null, null, false, false, false)));
+        array_add(&names, new_node(name, .Let(null, null, false, false)));
         while (eat(p, .Comma))
             array_add(&names, new_node(expect(p, .Identifier, "a variable name"),
-                                       .Let(null, null, false, false, false)));
+                                       .Let(null, null, false, false)));
         if (eat(p, .Colon)) {
             // let a, b: T; several names of one type, each starting as
             // its zero (or defaults)
@@ -581,7 +573,7 @@ fn let_decl(p: *Parser) -> *Node {
                 let d = names[i];
                 if (d.tok.text == "_")
                     fail(p, d.tok, "`_` declares nothing, so it has no place in a list of names with a type");
-                d.kind = .Let(if (i == 0) declared else clone_node(declared, -1), null, false, false, false);
+                d.kind = .Let(if (i == 0) declared else clone_node(declared, -1), null, false, false);
             }
             if (at(p, .Equal))
                 fail(p, peek(p), "names declared with a type start as its zero; to give them values, leave out the type (`let a, b = x, y;`) or declare them one at a time");
@@ -608,7 +600,7 @@ fn let_decl(p: *Parser) -> *Node {
     }
     if (declared == null && value == null && !uninit)
         fail(p, name, "`let` needs a type, an initializer, or both");
-    return new_node(name, .Let(declared, value, false, false, uninit));
+    return new_node(name, .Let(declared, value, false, uninit));
 }
 
 // one expression, or several separated by commas: `a, b`

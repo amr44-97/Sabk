@@ -25,35 +25,37 @@
 // These functions are the compiler's: they only exist while compiling, so
 // using one from the program itself is a compile error.
 
-pub fn set_output(path: string) { sabk_build_set_output(path.ptr, path.len); }
+fn set_output(path: string) { sabk_build_set_output(path.ptr, path.len); }
 
-pub fn set_release(on: bool) { sabk_build_set_release(on); }
+fn set_release(on: bool) { sabk_build_set_release(on); }
 
-pub fn is_release() -> bool { return sabk_build_is_release(); }
+fn is_release() -> bool { return sabk_build_is_release(); }
 
 // Index and slice checks in the program (#run code keeps its own): as
 // written, where a `#no_bounds_check` function has none; none anywhere;
 // or everywhere, `#no_bounds_check` too, to find a bug it hides. Division
 // by zero is checked either way.
-pub enum BoundsChecks { On, Off, Always }
+enum BoundsChecks { On, Off, Always }
 
-pub fn set_bounds_checks(mode: BoundsChecks) {
+fn set_bounds_checks(mode: BoundsChecks) {
     sabk_build_set_bounds_checks(mode as i32);
 }
 
 // the strict warnings (--strict): a failure dropped (`parse_int(s);`,
 // `let n = parse_int(s);`), and a value used before the failure that came
 // with it is looked at. Only the program's own code is warned about.
-pub fn set_strict(on: bool) { sabk_build_set_strict(on); }
+fn set_strict(on: bool) { sabk_build_set_strict(on); }
 
 // warnings fail the build (--werror)
-pub fn set_werror(on: bool) { sabk_build_set_werror(on); }
+fn set_werror(on: bool) { sabk_build_set_werror(on); }
 
-pub fn add_c_flags(flags: string) { sabk_build_add_c_flags(flags.ptr, flags.len); }
+fn add_c_flags(flags: string) { sabk_build_add_c_flags(flags.ptr, flags.len); }
 
-pub fn link_library(name: string) { sabk_build_link_library(name.ptr, name.len); }
+fn link_library(name: string) { sabk_build_link_library(name.ptr, name.len); }
 
-pub fn add_c_file(path: string) { sabk_build_add_c_file(path.ptr, path.len); }
+fn add_c_file(path: string) { sabk_build_add_c_file(path.ptr, path.len); }
+
+#scope_file
 
 // ---- inside: the compiler provides these
 

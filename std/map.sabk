@@ -27,32 +27,32 @@
 // changes position. As with a growable array, adding can move the entries,
 // so a pointer from map_find is only valid until the next map_put.
 
-import "std/array";
-import "std/mem";
-import "std/os";
-import "std/reflect";
-import "std/str";
+#import "std/array";
+#import "std/mem";
+#import "std/os";
+#import "std/reflect";
+#import "std/str";
 
 // ---- hashing
 
 // FNV-1a: simple, and good enough for hash tables
-pub fn hash_bytes(memory: *void, size: isize) -> u64 { return hash_memory(memory, size); }
+fn hash_bytes(memory: *void, size: isize) -> u64 { return hash_memory(memory, size); }
 
-pub fn hash_string(s: string) -> u64 { return hash_bytes(s.ptr, s.len); }
+fn hash_string(s: string) -> u64 { return hash_bytes(s.ptr, s.len); }
 
-pub fn hash_key(key: $T) -> u64 { return hash_value(key); }
+fn hash_key(key: $T) -> u64 { return hash_value(key); }
 
-pub fn keys_equal(a: $T, b: T) -> bool { return values_equal(a, b); }
+fn keys_equal(a: $T, b: T) -> bool { return values_equal(a, b); }
 
 // ---- maps
 
-pub struct MapEntry($K, $V) {
+struct MapEntry($K, $V) {
     key: K;
     value: V;
     hash: u64;
 }
 
-pub struct Map($K, $V) {
+struct Map($K, $V) {
     entries: [..]MapEntry(K, V); // in insertion order; entries.len is the count
     slots: []u32;                // the index: entry index + 1, or 0 when empty
     hash: fn(K) -> u64;
@@ -60,7 +60,7 @@ pub struct Map($K, $V) {
     allocator: Allocator;
 }
 
-pub fn make_map($K: Type, $V: Type, a: Allocator = context.allocator,
+fn make_map($K: Type, $V: Type, a: Allocator = context.allocator,
                 hash: fn(K) -> u64 = hash_key,
                 equal: fn(K, K) -> bool = keys_equal) -> Map(K, V) {
     let m = Map(K, V).{ .hash = hash, .equal = equal, .allocator = a };
@@ -68,7 +68,7 @@ pub fn make_map($K: Type, $V: Type, a: Allocator = context.allocator,
     return m;
 }
 
-pub fn map_put(m: *Map($K, $V), key: K, value: V) {
+fn map_put(m: *Map($K, $V), key: K, value: V) {
     if (m.hash == null) { // a zero Map: std/reflect's hash and equality
         m.hash = hash_key;
         m.equal = keys_equal;
@@ -91,7 +91,7 @@ pub fn map_put(m: *Map($K, $V), key: K, value: V) {
     m.slots[slot] = m.entries.len as u32;
 }
 
-pub fn map_find(m: *Map($K, $V), key: K) -> *V {
+fn map_find(m: *Map($K, $V), key: K) -> *V {
     if (m.entries.len == 0)
         return null;
     let found = false;
@@ -101,11 +101,11 @@ pub fn map_find(m: *Map($K, $V), key: K) -> *V {
     return &m.entries[m.slots[slot] - 1].value;
 }
 
-pub fn map_has(m: *Map($K, $V), key: K) -> bool { return map_find(m, key) != null; }
+fn map_has(m: *Map($K, $V), key: K) -> bool { return map_find(m, key) != null; }
 
 // a copy of the value, and true; or, when the key is missing, a V as
 // `let v: V;` starts and false
-pub fn map_get(m: *Map($K, $V), key: K) -> (V, bool) {
+fn map_get(m: *Map($K, $V), key: K) -> (V, bool) {
     let value = map_find(m, key);
     if (value == null) {
         let missing: V;
@@ -115,7 +115,7 @@ pub fn map_get(m: *Map($K, $V), key: K) -> (V, bool) {
 }
 
 // false if the key wasn't there
-pub fn map_remove(m: *Map($K, $V), key: K) -> bool {
+fn map_remove(m: *Map($K, $V), key: K) -> bool {
     if (m.entries.len == 0)
         return false;
     let found = false;
@@ -155,13 +155,13 @@ pub fn map_remove(m: *Map($K, $V), key: K) -> bool {
 }
 
 // removes every entry, keeping the memory for reuse
-pub fn map_clear(m: *Map($K, $V)) {
+fn map_clear(m: *Map($K, $V)) {
     m.entries.len = 0;
     if (m.slots.len > 0)
         zero_memory(m.slots.ptr, m.slots.len * sizeof(u32));
 }
 
-pub fn map_free(m: *Map($K, $V)) {
+fn map_free(m: *Map($K, $V)) {
     array_free(&m.entries);
     free(m.slots.ptr, m.allocator);
     m.slots = null;
@@ -181,16 +181,16 @@ pub fn map_free(m: *Map($K, $V)) {
 //
 // Keys use hash_key and keys_equal. When a key appears twice, the later
 // value wins.
-pub struct StaticMap($K, $V) {
+struct StaticMap($K, $V) {
     entries: []MapEntry(K, V); // in the order of the pairs, less repeats
     slots: []u32;              // as in Map
 }
 
-pub struct Pair($K, $V) { key: K; value: V; }
+struct Pair($K, $V) { key: K; value: V; }
 
 // the map of `pairs`, in context.allocator (the compiler's memory, under
 // #run)
-pub fn static_map(pairs: []Pair($K, $V)) -> StaticMap(K, V) {
+fn static_map(pairs: []Pair($K, $V)) -> StaticMap(K, V) {
     let m: Map(K, V);
     for (p in pairs)
         map_put(&m, p.key, p.value);
@@ -198,7 +198,7 @@ pub fn static_map(pairs: []Pair($K, $V)) -> StaticMap(K, V) {
 }
 
 // a copy of the value, and true; or a zero V and false
-pub fn static_map_get(m: StaticMap($K, $V), key: K) -> (V, bool) {
+fn static_map_get(m: StaticMap($K, $V), key: K) -> (V, bool) {
     if (m.entries.len > 0) {
         let found = false;
         let slot = find_in(m.entries, m.slots, key, hash_key(key), keys_equal, &found);
@@ -209,10 +209,12 @@ pub fn static_map_get(m: StaticMap($K, $V), key: K) -> (V, bool) {
     return missing, false;
 }
 
-pub fn static_map_has(m: StaticMap($K, $V), key: K) -> bool {
+fn static_map_has(m: StaticMap($K, $V), key: K) -> bool {
     let _, found = static_map_get(m, key);
     return found;
 }
+
+#scope_file
 
 // ---- inside
 

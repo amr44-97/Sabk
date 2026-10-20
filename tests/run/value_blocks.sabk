@@ -1,7 +1,7 @@
 // if expressions, labeled blocks (statements and expressions), and labeled
 // switch expressions whose cases run statements, at run time and in #run
-import "std/io";
-import "std/str";
+#import "std/io";
+#import "std/str";
 
 enum Shape { Circle(f64), Rect(w: f64, h: f64), Dot }
 

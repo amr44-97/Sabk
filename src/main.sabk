@@ -1,30 +1,30 @@
 // sabk: the Sabk compiler, written in Sabk. See print_usage() for what
 // it does; docs/reference.md describes the language.
 
-import "std/array";
-import "std/build";
-import "std/fmt";
-import "std/fs";
-import "std/io";
-import "std/logging";
-import "std/os";
-import "std/path";
-import "std/process";
-import "std/str";
-import "std/time";
-import "ast";
-import "check";
-import "codegen";
-import "generics";
-import "lexer";
-import "module";
-import "parser";
-import "resolve";
-import "source";
-import "strict";
-import "token";
-import "types";
-import "vm";
+#import "std/array";
+#import "std/build";
+#import "std/fmt";
+#import "std/fs";
+#import "std/io";
+#import "std/logging";
+#import "std/os";
+#import "std/path";
+#import "std/process";
+#import "std/str";
+#import "std/time";
+#import "ast";
+#import "check";
+#import "codegen";
+#import "generics";
+#import "lexer";
+#import "module";
+#import "parser";
+#import "resolve";
+#import "source";
+#import "strict";
+#import "token";
+#import "types";
+#import "vm";
 
 // the VM's way to C, and libffi
 #run configure();

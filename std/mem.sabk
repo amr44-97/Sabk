@@ -25,23 +25,17 @@
 //   defer arena_destroy(&arena);   blocks and are freed all at once
 //   with_allocator(arena_allocator(&arena)) { ... }
 
-import "std/map";
-import "std/os";
-import "std/str";
-
-extern fn memmove(dst: *void, src: *void, size: usize) -> *void;
-extern fn memset(memory: *void, value: i32, size: usize) -> *void;
-// --sanitize: memory an arena takes back is poisoned (the C runtime's)
-extern fn sabk_poison(memory: *void, size: isize);
-extern fn sabk_unpoison(memory: *void, size: isize);
+#import "std/map";
+#import "std/os";
+#import "std/str";
 
 // ---- allocating
 
-pub fn alloc(size: isize, align: isize = 16, a: Allocator = context.allocator) -> *void {
+fn alloc(size: isize, align: isize = 16, a: Allocator = context.allocator) -> *void {
     return a.procedure(a.data, AllocatorMode.Alloc, size, align, null, 0);
 }
 
-pub fn free(memory: *void, a: Allocator = context.allocator) {
+fn free(memory: *void, a: Allocator = context.allocator) {
     if (memory != null)
         a.procedure(a.data, AllocatorMode.Free, 0, 0, memory, 0);
 }
@@ -52,7 +46,7 @@ pub fn free(memory: *void, a: Allocator = context.allocator) {
 // copy, so the variable it came from still points at the freed memory.
 // Anything else is a compile error; a pointer from alloc or new is freed
 // with free(p).
-pub fn delete(x: $T, a: Allocator = context.allocator) {
+fn delete(x: $T, a: Allocator = context.allocator) {
     #if (T == map.Map)
         map.map_free(&x);
     else #if (T == str.Builder)
@@ -61,31 +55,20 @@ pub fn delete(x: $T, a: Allocator = context.allocator) {
         #insert #run delete_code(type_info(T));
 }
 
-fn delete_code(t: *TypeInfo) -> string {
-    switch (t.kind) {
-    case .String, .Slice: return "free(x.ptr, a);";
-    case .Growable: return "free(x.ptr, x.allocator);";
-    default:
-        panic(str.join(.["delete can't free a `", t.name, "`: it frees strings, slices, ",
-                         "growable arrays, Maps and Builders; a pointer is freed with free(p)"], ""));
-    }
-    return "";
-}
-
-pub fn resize(memory: *void, old_size: isize, size: isize, align: isize = 16, a: Allocator = context.allocator) -> *void {
+fn resize(memory: *void, old_size: isize, size: isize, align: isize = 16, a: Allocator = context.allocator) -> *void {
     return a.procedure(a.data, AllocatorMode.Resize, size, align, memory, old_size);
 }
 
-pub fn free_all(a: Allocator = context.allocator) {
+fn free_all(a: Allocator = context.allocator) {
     a.procedure(a.data, AllocatorMode.FreeAll, 0, 0, null, 0);
 }
 
-pub fn with_allocator(a: Allocator, body: Code) #expand {
+fn with_allocator(a: Allocator, body: Code) #expand {
     context.allocator = a;
     #insert body;
 }
 
-pub fn with_temp_allocator(body: Code) #expand {
+fn with_temp_allocator(body: Code) #expand {
     context.allocator = context.temp_allocator;
     #insert body;
 }
@@ -93,7 +76,7 @@ pub fn with_temp_allocator(body: Code) #expand {
 // ---- bytes
 
 // copies min(dst.len, src.len) bytes and returns how many
-pub fn copy_bytes(dst: []u8, src: []u8) -> isize {
+fn copy_bytes(dst: []u8, src: []u8) -> isize {
     let count = dst.len;
     if (src.len < count)
         count = src.len;
@@ -105,13 +88,13 @@ pub fn copy_bytes(dst: []u8, src: []u8) -> isize {
 // copies min(dst.len, src.len) elements and returns how many
 // a copy of `items` in memory from `a`: for keeping a slice whose memory
 // won't last, like a slice literal returned from a function
-pub fn clone_slice(items: []$T, a: Allocator = context.allocator) -> []T {
+fn clone_slice(items: []$T, a: Allocator = context.allocator) -> []T {
     let copy = new([]T, items.len, a);
     copy_slice(copy, items);
     return copy;
 }
 
-pub fn copy_slice(dst: []$T, src: []T) -> isize {
+fn copy_slice(dst: []$T, src: []T) -> isize {
     let count = dst.len;
     if (src.len < count)
         count = src.len;
@@ -120,37 +103,31 @@ pub fn copy_slice(dst: []$T, src: []T) -> isize {
     return count;
 }
 
-pub fn set_bytes(dst: []u8, value: u8) {
+fn set_bytes(dst: []u8, value: u8) {
     if (dst.len > 0)
         memset(dst.ptr, value, dst.len as usize);
 }
 
-pub fn copy_memory(dst: *void, src: *void, size: isize) { memmove(dst, src, size as usize); }
-pub fn zero_memory(dst: *void, size: isize) { memset(dst, 0, size as usize); }
+fn copy_memory(dst: *void, src: *void, size: isize) { memmove(dst, src, size as usize); }
+fn zero_memory(dst: *void, size: isize) { memset(dst, 0, size as usize); }
 
 // ---- arenas
 
-pub struct Arena {
+struct Arena {
     blocks: *ArenaBlock;   // the newest block, linked to the older ones
     block_size: isize;
     backing: Allocator;    // where blocks come from
 }
 
-struct ArenaBlock {
-    previous: *ArenaBlock;
-    memory: []u8;
-    used: isize;
-}
-
-pub fn arena_init(block_size: isize = 64 * 1024, backing: Allocator = context.allocator) -> Arena {
+fn arena_init(block_size: isize = 64 * 1024, backing: Allocator = context.allocator) -> Arena {
     return Arena.{ .block_size = block_size, .backing = backing };
 }
 
-pub fn arena_allocator(arena: *Arena) -> Allocator {
+fn arena_allocator(arena: *Arena) -> Allocator {
     return Allocator.{ .procedure = arena_proc, .data = arena };
 }
 
-pub fn arena_alloc(arena: *Arena, size: isize, align: isize = 16) -> *void {
+fn arena_alloc(arena: *Arena, size: isize, align: isize = 16) -> *void {
     if (align == 0)
         align = 1;
     if (arena.blocks != null) {
@@ -169,7 +146,7 @@ pub fn arena_alloc(arena: *Arena, size: isize, align: isize = 16) -> *void {
 }
 
 // frees everything allocated so far, keeping the newest block to reuse
-pub fn arena_reset(arena: *Arena) {
+fn arena_reset(arena: *Arena) {
     if (arena.blocks == null)
         return;
     free_blocks(arena, arena.blocks.previous);
@@ -179,9 +156,38 @@ pub fn arena_reset(arena: *Arena) {
 }
 
 // frees everything, blocks included
-pub fn arena_destroy(arena: *Arena) {
+fn arena_destroy(arena: *Arena) {
     free_blocks(arena, arena.blocks);
     arena.blocks = null;
+}
+
+#scope_file
+
+extern fn memmove(dst: *void, src: *void, size: usize) -> *void;
+extern fn memset(memory: *void, value: i32, size: usize) -> *void;
+// --sanitize: memory an arena takes back is poisoned (the C runtime's)
+extern fn sabk_poison(memory: *void, size: isize);
+extern fn sabk_unpoison(memory: *void, size: isize);
+
+// ---- allocating
+
+fn delete_code(t: *TypeInfo) -> string {
+    switch (t.kind) {
+    case .String, .Slice: return "free(x.ptr, a);";
+    case .Growable: return "free(x.ptr, x.allocator);";
+    default:
+        panic(str.join(.["delete can't free a `", t.name, "`: it frees strings, slices, ",
+                         "growable arrays, Maps and Builders; a pointer is freed with free(p)"], ""));
+    }
+    return "";
+}
+
+// ---- arenas
+
+struct ArenaBlock {
+    previous: *ArenaBlock;
+    memory: []u8;
+    used: isize;
 }
 
 fn free_blocks(arena: *Arena, block: *ArenaBlock) {

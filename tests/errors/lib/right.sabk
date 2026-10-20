@@ -1,3 +1,4 @@
-import "left";           // not passed on to whoever imports right
-pub fn shared() {}
-pub struct Shape {}
+#import "left";           // not passed on to whoever imports right
+
+fn shared() {}
+struct Shape {}

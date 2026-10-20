@@ -1,8 +1,8 @@
 // [..]T and std/array: growing, inserting, removing, and other allocators
-import "std/io";
-import "std/array";
-import "std/mem";
-import "std/os";
+#import "std/io";
+#import "std/array";
+#import "std/mem";
+#import "std/os";
 
 struct Point { x: isize; y: isize; }
 

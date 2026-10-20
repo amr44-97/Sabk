@@ -1,6 +1,6 @@
 // a value where a ?T is expected becomes .Some(value): lets, arguments,
 // returns, and literals that take their type from there
-import "std/io";
+#import "std/io";
 
 struct Point { x: i32; y: i32; }
 enum Color { Red, Green }

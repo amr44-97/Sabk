@@ -12,7 +12,7 @@ ROOT `#`
         lhs: IDENTIFIER `OS`
         rhs: ENUM_SHORTHAND `.Linux`
       rhs: BLOCK
-        STRUCT `Stat` [pub]
+        STRUCT `Stat`
           STRUCT_FIELD `size`
             type: TYPE_NAME `i64`
       extra: BLOCK

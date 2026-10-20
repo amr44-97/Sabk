@@ -1,7 +1,7 @@
 // C's printf habits, letters meant as text, and directives that don't
 // suit their values: each is shown where it is, with the call fixed
-import "std/io";
-import "std/fmt";
+#import "std/io";
+#import "std/fmt";
 
 fn main() {
     let count: i64 = 3;

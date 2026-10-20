@@ -1,7 +1,7 @@
 // a #format function's format is checked against its values when the
 // compiler can see it
-import "std/io";
-import "std/fmt";
+#import "std/io";
+#import "std/fmt";
 
 const ROW = "% | %";
 

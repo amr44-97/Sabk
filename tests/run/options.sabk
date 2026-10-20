@@ -1,8 +1,8 @@
 // ?T is the prelude's Option(T): a new one is None; `or_else` takes a ?T's
 // value or a fallback, and a pointer or a fallback for null
-import "std/io";
-import "std/map";
-import "std/reflect";
+#import "std/io";
+#import "std/map";
+#import "std/reflect";
 
 struct Config { port: ?isize; name: ?string; }
 

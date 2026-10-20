@@ -5,22 +5,189 @@
 // The first error stops it: it's kept in the VM (vm_fail), and from then
 // on expressions and statements emit nothing; what was made is thrown away.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "std/mem";
-import "std/str";
-import "ast";
-import "const";
-import "resolve";
-import "token";
-import "types";
-import "check";
-import "comptime";
-import "expressions";
-import "generics";
-import "patterns";
-import "vm";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/mem";
+#import "std/str";
+#import "ast";
+#import "const";
+#import "resolve";
+#import "token";
+#import "types";
+#import "check";
+#import "comptime";
+#import "expressions";
+#import "generics";
+#import "patterns";
+#import "vm";
+
+struct Lower {
+    vm: *Vm;
+    c: *Checker;
+    f: *VmFunction;
+    locals: Map(*Node, u32); // variables, parameters, loop variables
+    scopes: [..]Scope;
+    loops: [..]LoopTarget;
+    macro_ends: Map(i32, [..]isize); // expansion -> jumps to its end
+    // a global's initializer or a #run, which runs once in a frame that's
+    // gone afterwards: slice literals' elements go in memory kept forever,
+    // as the C's static data
+    lasting: bool;
+}
+
+fn make_lower(vm: *Vm, f: *VmFunction) -> Lower {
+    return .{ .vm = vm, .c = vm.c, .f = f };
+}
+
+/* -------------------------------------------------------------- functions */
+
+fn lower_function(l: *Lower) {
+    let fun = l.f.decl;
+    let none: Token;
+    if ((map_get(&l.c.body_state, fun) or_else 0) == 1 || (map_get(&l.c.res.resolve_state, fun) or_else 0) == 1) {
+        vm_fail(l.vm, none, tformat("`%` is still being checked: the `#run` is inside it", fun.tok.text), false);
+        return;
+    }
+    if (!ensure_body_checked(l.c, fun)) {
+        vm_fail(l.vm, fun.tok, "", false);
+        l.vm.error.silent = true; // its errors were reported
+        return;
+    }
+    let is_extern = fun.kind is .Fn{is_extern: true};
+    let t = fun.ty;
+    let top = Scope.{ .kind = .Fn };
+    if (!is_extern) {
+        let slot = alloc_slot(l, 8, 8);
+        array_add(&l.f.param_offsets, slot);
+        top.ctx_slot = slot;
+    }
+    for (p in fn_params(fun)) {
+        if (is_type_param(p))
+            continue;
+        let slot = alloc(l, p.ty);
+        array_add(&l.f.param_offsets, slot);
+        map_put(&l.locals, p, slot);
+    }
+    if (t.ret.kind != .Void) {
+        l.f.ret_offset = alloc(l, t.ret);
+        l.f.ret_size = vm_size_of(l.vm, t.ret);
+    }
+    array_add(&l.scopes, top);
+    if (is_extern) { // called from C: the default context
+        let ctx = vm_context(l.vm);
+        if (failed(l))
+            return;
+        last_scope(l).ctx_slot = addr(l, ctx) as i64;
+    }
+    at(l, fun.tok);
+    emit_scope(l, block_list(fn_body(fun)), .{ .kind = .Block });
+    emit(l, .{ .op = .Ret });
+}
+
+// a #run expression as a function of no parameters
+fn lower_thunk(l: *Lower, n: *Node) {
+    let ctx = vm_context(l.vm);
+    if (failed(l))
+        return;
+    let top = Scope.{ .kind = .Fn };
+    top.ctx_slot = addr(l, ctx) as i64;
+    array_add(&l.scopes, top);
+    at(l, n.tok);
+    let t = type_of(l, n);
+    if (t.kind == .Void) {
+        if (n.kind.tag == .MacroExpansion)
+            expansion(l, n);
+        else
+            expr_void(l, n);
+    } else {
+        l.f.ret_offset = alloc(l, t);
+        l.f.ret_size = vm_size_of(l.vm, t);
+        move(l, l.f.ret_offset, expr(l, n), l.f.ret_size);
+    }
+    emit(l, .{ .op = .Ret });
+}
+
+// a global without a value: its type's defaults, as a function to run
+fn lower_default_thunk(l: *Lower, t: *Type) {
+    let ctx = vm_context(l.vm);
+    if (failed(l))
+        return;
+    let top = Scope.{ .kind = .Fn };
+    top.ctx_slot = addr(l, ctx) as i64;
+    array_add(&l.scopes, top);
+    l.f.ret_offset = alloc(l, t);
+    l.f.ret_size = vm_size_of(l.vm, t);
+    move(l, l.f.ret_offset, default_value(l, t), l.f.ret_size);
+    emit(l, .{ .op = .Ret });
+}
+
+/* --------------------------------------------------------------- switches */
+
+// does a pattern bind a pointer into what it matches (`&x`)?
+fn binds_by_ref(p: *Node) -> bool {
+    switch (p.kind) {
+    case .Binding{by_ref}: return by_ref;
+    case .FieldPattern{pattern}: return binds_by_ref(pattern);
+    case .VariantPattern{bindings}:
+        for (item in bindings)
+            if (binds_by_ref(item))
+                return true;
+        return false;
+    default: return false;
+    }
+}
+
+fn pattern_parts(p: *Node) -> (*Node, []*Node, bool) {
+    if (p.kind is .VariantPattern{variant, bindings, by_fields})
+        return variant, bindings, by_fields;
+    return null, .[], false;
+}
+
+fn item_field_name(item: *Node) -> string {
+    switch (item.kind) {
+    case .Binding{field}: return if (field != null) field.tok.text else "";
+    case .FieldPattern{field}: return if (field != null) field.tok.text else "";
+    default: return "";
+    }
+}
+
+fn pattern_of(item: *Node) -> *Node {
+    if (item.kind is .FieldPattern{pattern})
+        return pattern;
+    return null;
+}
+
+/* ------------------------------------------------------------ expressions */
+
+// is `n` the same whenever it's evaluated: a constant or a literal?
+fn is_fixed(n: *Node) -> bool {
+    if (n.cval.kind != .None)
+        return true;
+    switch (n.kind.tag) {
+    case .String, .Null, .TypeInfo, .SizeOf: return true;
+    default: return false;
+    }
+}
+
+// can evaluating `n` change memory that another part reads (a call, a
+// macro, new)?
+fn has_call(n: *Node) -> bool {
+    if (n == null)
+        return false;
+    switch (n.kind.tag) {
+    case .Call, .MacroExpansion, .New: return true;
+    default:
+    }
+    if (n.cval.kind != .None)
+        return false;
+    for (child in code_children(n))
+        if (has_call(child))
+            return true;
+    return false;
+}
+
+#scope_file
 
 enum ScopeKind { Fn, Block, Loop, Switch, Macro }
 
@@ -42,24 +209,6 @@ struct LoopTarget {
     top: isize;            // dispatched (`continue name = v` goes there)
     result: i64 = -1;      // a block or switch expression: its value's slot
     is_block: bool;        // a labeled block: only `break name` leaves it
-}
-
-pub struct Lower {
-    vm: *Vm;
-    c: *Checker;
-    f: *VmFunction;
-    locals: Map(*Node, u32); // variables, parameters, loop variables
-    scopes: [..]Scope;
-    loops: [..]LoopTarget;
-    macro_ends: Map(i32, [..]isize); // expansion -> jumps to its end
-    // a global's initializer or a #run, which runs once in a frame that's
-    // gone afterwards: slice literals' elements go in memory kept forever,
-    // as the C's static data
-    lasting: bool;
-}
-
-pub fn make_lower(vm: *Vm, f: *VmFunction) -> Lower {
-    return .{ .vm = vm, .c = vm.c, .f = f };
 }
 
 fn fail(l: *Lower, t: Token, message: string) {
@@ -235,88 +384,6 @@ fn push_loop(l: *Lower, node: *Node, is_switch: bool) -> *LoopTarget {
     target.node = node;
     target.result = -1;
     return target;
-}
-
-/* -------------------------------------------------------------- functions */
-
-pub fn lower_function(l: *Lower) {
-    let fun = l.f.decl;
-    let none: Token;
-    if ((map_get(&l.c.body_state, fun) or_else 0) == 1 || (map_get(&l.c.res.resolve_state, fun) or_else 0) == 1) {
-        vm_fail(l.vm, none, tformat("`%` is still being checked: the `#run` is inside it", fun.tok.text), false);
-        return;
-    }
-    if (!ensure_body_checked(l.c, fun)) {
-        vm_fail(l.vm, fun.tok, "", false);
-        l.vm.error.silent = true; // its errors were reported
-        return;
-    }
-    let is_extern = fun.kind is .Fn{is_extern: true};
-    let t = fun.ty;
-    let top = Scope.{ .kind = .Fn };
-    if (!is_extern) {
-        let slot = alloc_slot(l, 8, 8);
-        array_add(&l.f.param_offsets, slot);
-        top.ctx_slot = slot;
-    }
-    for (p in fn_params(fun)) {
-        if (is_type_param(p))
-            continue;
-        let slot = alloc(l, p.ty);
-        array_add(&l.f.param_offsets, slot);
-        map_put(&l.locals, p, slot);
-    }
-    if (t.ret.kind != .Void) {
-        l.f.ret_offset = alloc(l, t.ret);
-        l.f.ret_size = vm_size_of(l.vm, t.ret);
-    }
-    array_add(&l.scopes, top);
-    if (is_extern) { // called from C: the default context
-        let ctx = vm_context(l.vm);
-        if (failed(l))
-            return;
-        last_scope(l).ctx_slot = addr(l, ctx) as i64;
-    }
-    at(l, fun.tok);
-    emit_scope(l, block_list(fn_body(fun)), .{ .kind = .Block });
-    emit(l, .{ .op = .Ret });
-}
-
-// a #run expression as a function of no parameters
-pub fn lower_thunk(l: *Lower, n: *Node) {
-    let ctx = vm_context(l.vm);
-    if (failed(l))
-        return;
-    let top = Scope.{ .kind = .Fn };
-    top.ctx_slot = addr(l, ctx) as i64;
-    array_add(&l.scopes, top);
-    at(l, n.tok);
-    let t = type_of(l, n);
-    if (t.kind == .Void) {
-        if (n.kind.tag == .MacroExpansion)
-            expansion(l, n);
-        else
-            expr_void(l, n);
-    } else {
-        l.f.ret_offset = alloc(l, t);
-        l.f.ret_size = vm_size_of(l.vm, t);
-        move(l, l.f.ret_offset, expr(l, n), l.f.ret_size);
-    }
-    emit(l, .{ .op = .Ret });
-}
-
-// a global without a value: its type's defaults, as a function to run
-pub fn lower_default_thunk(l: *Lower, t: *Type) {
-    let ctx = vm_context(l.vm);
-    if (failed(l))
-        return;
-    let top = Scope.{ .kind = .Fn };
-    top.ctx_slot = addr(l, ctx) as i64;
-    array_add(&l.scopes, top);
-    l.f.ret_offset = alloc(l, t);
-    l.f.ret_size = vm_size_of(l.vm, t);
-    move(l, l.f.ret_offset, default_value(l, t), l.f.ret_size);
-    emit(l, .{ .op = .Ret });
 }
 
 /* ----------------------------------------------------------------- scopes */
@@ -832,20 +899,6 @@ fn for_in(l: *Lower, n: *Node) {
 
 /* --------------------------------------------------------------- switches */
 
-// does a pattern bind a pointer into what it matches (`&x`)?
-pub fn binds_by_ref(p: *Node) -> bool {
-    switch (p.kind) {
-    case .Binding{by_ref}: return by_ref;
-    case .FieldPattern{pattern}: return binds_by_ref(pattern);
-    case .VariantPattern{bindings}:
-        for (item in bindings)
-            if (binds_by_ref(item))
-                return true;
-        return false;
-    default: return false;
-    }
-}
-
 fn clause_parts(clause: *Node) -> ([]*Node, *Node, *Node) {
     switch (clause.kind) {
     case .Case{patterns, guard, body: b}: return patterns, guard, b;
@@ -975,20 +1028,6 @@ fn switch_in_order(l: *Lower, n: *Node, clauses: []*Node, complete: bool, result
     end_loop(l, here(l));
 }
 
-pub fn pattern_parts(p: *Node) -> (*Node, []*Node, bool) {
-    if (p.kind is .VariantPattern{variant, bindings, by_fields})
-        return variant, bindings, by_fields;
-    return null, .[], false;
-}
-
-pub fn item_field_name(item: *Node) -> string {
-    switch (item.kind) {
-    case .Binding{field}: return if (field != null) field.tok.text else "";
-    case .FieldPattern{field}: return if (field != null) field.tok.text else "";
-    default: return "";
-    }
-}
-
 // where a variant pattern's item is, from the address of the tagged value
 // in `at_slot`
 fn item_at(l: *Lower, p: *Node, item: *Node, tagged: *Type, at_slot: u32) -> u32 {
@@ -1052,12 +1091,6 @@ fn match_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32, fails: *[..]isize) {
         array_add(fails, jump(l, .Jz, set));
         match_at(l, inner_pattern, it.elem, ptr, fails);
     }
-}
-
-pub fn pattern_of(item: *Node) -> *Node {
-    if (item.kind is .FieldPattern{pattern})
-        return pattern;
-    return null;
 }
 
 // the names `p` binds, from the value at the address in `at_slot`
@@ -1853,33 +1886,6 @@ fn array_literal(l: *Lower, n: *Node, t: *Type) -> u32 {
     move(l, s, addr_frame(l, backing), 8);
     emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = items.len as u64 });
     return s;
-}
-
-// is `n` the same whenever it's evaluated: a constant or a literal?
-pub fn is_fixed(n: *Node) -> bool {
-    if (n.cval.kind != .None)
-        return true;
-    switch (n.kind.tag) {
-    case .String, .Null, .TypeInfo, .SizeOf: return true;
-    default: return false;
-    }
-}
-
-// can evaluating `n` change memory that another part reads (a call, a
-// macro, new)?
-pub fn has_call(n: *Node) -> bool {
-    if (n == null)
-        return false;
-    switch (n.kind.tag) {
-    case .Call, .MacroExpansion, .New: return true;
-    default:
-    }
-    if (n.cval.kind != .None)
-        return false;
-    for (child in code_children(n))
-        if (has_call(child))
-            return true;
-    return false;
 }
 
 // each part's value, in order; copied as it's made when a later part could

@@ -1,3 +1,3 @@
-[error]: can't find module `lib/nope` (looked for `tests/errors/lib/nope.sabk`) at [tests/errors/resolve_missing_module.sabk:1:8]
-     1 | import "lib/nope";
-       |        ^
+[error]: can't find module `lib/nope` (looked for `tests/errors/lib/nope.sabk`) at [tests/errors/resolve_missing_module.sabk:1:9]
+     1 | #import "lib/nope";
+       |         ^

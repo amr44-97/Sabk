@@ -12,7 +12,7 @@ switch to them at the bootstrap.
 ## Checklist
 
 - [x] **Formatting:** letter directives (`%s %q %w %x %X %b %o %e %f %c`), `%{}` before a letter, errors that teach (section 1)
-- [ ] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2): built Oct 20, 2026, alongside `import` and `pub`; moving std and the compiler over, then dropping `pub` and `import`, is left
+- [x] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2); `pub` and `import` are ordinary names now
 - [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3)
 - [ ] **Metaprogramming, layer 2:** `#code` values and syntax trees in std/compiler (section 3)
 - [ ] **Metaprogramming, layer 3:** a build script that sees every declaration as it's checked (section 3)
@@ -113,11 +113,12 @@ where it comes from: "`is_space` is private to std/str.sabk
 
 ### Edge cases met building them (built Oct 20, 2026; to review)
 
-1. **While code moves over, a file that writes `pub` keeps the rule from
-   before** (what isn't `pub` is private), and a file without `pub` gets
-   the new one (exported unless a directive says otherwise). A file
-   using both is an error, whichever comes first. Test files without
-   `pub` became all-exported; no test depended on the old privacy.
+1. **While code moved over, a file that wrote `pub` kept the rule from
+   before** (what isn't `pub` is private), and a file without `pub` got
+   the new one. Once std, the compiler and the tests had moved, the old
+   rule went, and `pub` and `import` became ordinary names; written the
+   old way, they get errors that show the new way ("Sabk has no `pub`:
+   ...", "an import is written `#import "std/io";`").
 2. **A `#load`-ed file is parsed as a file of its own** (for messages and
    `#line`, which name it), and its declarations, imports and `#load`s
    are spliced into the module's list in place of the `#load`, as
@@ -139,6 +140,33 @@ where it comes from: "`is_space` is private to std/str.sabk
    loaded file), and the second report ("can't find module") is left out.
 7. **`--resolve` dumps** name the loaded file a declaration is in, not
    the module's main file.
+
+#### Moving the code over (Oct 20, 2026; to review)
+
+8. **Every file with `pub` was reorganized the Jai way** (the user's
+   choice, for std, the compiler and the tests alike): its leading
+   comment and `#import`s, then what was `pub`, then one `#scope_file`
+   and the rest. Each part keeps the original order; a section comment
+   (`// ---- numbers`) is repeated in each part that has declarations
+   from that section; a declaration keeps the comment right above it. A
+   script did it, checking that no line was lost. Files without `pub`
+   (programs, most tests) only got `#import`, so their lines didn't move.
+9. **The compiler's own lookups by name** (`main`, the prelude's
+   helpers like `default_context`) missed `#scope_file` names, which live
+   in the file's scope: they go through `module_decl` now, so a program
+   can put `fn main()` under `#scope_file` too.
+10. **The script only saw declarations at column 0**: `pub` and `import`
+    inside a top-level `#if` and inside an `#insert` string were fixed by
+    hand. An `#import` or `#load` inside a top-level `#if`, or in code
+    made by `#insert`, is an error: what a module is made of doesn't
+    depend on a condition.
+11. **The tests' goldens** changed in their line numbers (the
+    reorganized libraries, std and the prelude), which a script checked
+    by comparing them with the locations taken out; the rest were the
+    messages that name `pub` or `import`.
+12. **`make compare` was retired**: the archived C++ compiler can't parse
+    `#import` or files without `pub`, so it can't follow the language
+    any more.
 
 ## 3. Metaprogramming
 
@@ -173,7 +201,7 @@ struct Config {
     cache: Map(string, string) @json_skip;
 }
 
-pub fn to_json(out: *[..]u8, value: $T) {
+fn to_json(out: *[..]u8, value: $T) {
     #insert #run json_code(type_info(T));   // reads the fields and their notes
 }
 

@@ -1,8 +1,8 @@
 // args(): the program's path, then its arguments
 // args: input.txt --verbose "two words"
-import "std/io";
-import "std/os";
-import "std/str";
+#import "std/io";
+#import "std/os";
+#import "std/str";
 
 // while compiling: the program's name, then what follows `--`
 const ARGS_WHILE_COMPILING = #run args().len;

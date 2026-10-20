@@ -1,8 +1,8 @@
 // the letter directives: %s %q %w %x %X %b %o %e %f %c, in braces too
-import "std/io";
-import "std/fmt";
-import "std/str";
-import "std/array";
+#import "std/io";
+#import "std/fmt";
+#import "std/str";
+#import "std/array";
 
 enum Color { Red, Green }
 enum E { Nil, Number(i64) }

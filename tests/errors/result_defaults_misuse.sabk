@@ -1,5 +1,5 @@
 // mistakes with result defaults
-import "std/str";
+#import "std/str";
 
 fn wrong_type() -> (i64, ParseError = 5) {        // 5 isn't a ParseError
     return 1;

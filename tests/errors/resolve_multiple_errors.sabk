@@ -1,4 +1,4 @@
-import "lib/missing";
+#import "lib/missing";
 fn f() -> Nope {
     let a = undefined_thing;
     continue;

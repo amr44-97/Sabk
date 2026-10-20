@@ -1,8 +1,8 @@
-import "std/fmt";
-import "std/io";
-import "std/mem";
-import "std/os";
-import "std/str";
+#import "std/fmt";
+#import "std/io";
+#import "std/mem";
+#import "std/os";
+#import "std/str";
 
 fn show_int(n: i64) {
     let buffer: [24]u8;

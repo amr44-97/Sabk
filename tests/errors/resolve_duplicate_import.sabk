@@ -1,2 +1,2 @@
-import "lib/priv";
-import "lib/priv";
+#import "lib/priv";
+#import "lib/priv";

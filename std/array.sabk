@@ -26,12 +26,12 @@
 // valid until the next add, insert, append or reserve. Copying the array
 // copies only its fields: both copies then point at the same elements.
 
-import "std/mem";
-import "std/os";
-import "std/reflect";
+#import "std/mem";
+#import "std/os";
+#import "std/reflect";
 
 // a new growable array holding copies of `items`
-pub fn array_of(items: []$T, a: Allocator = context.allocator) -> [..]T {
+fn array_of(items: []$T, a: Allocator = context.allocator) -> [..]T {
     let xs: [..]T;
     xs.allocator = a;
     array_append(&xs, items);
@@ -39,7 +39,7 @@ pub fn array_of(items: []$T, a: Allocator = context.allocator) -> [..]T {
 }
 
 // makes room for at least `capacity` elements
-pub fn array_reserve(xs: *[..]$T, capacity: isize) {
+fn array_reserve(xs: *[..]$T, capacity: isize) {
     if (capacity <= xs.cap)
         return;
     if (xs.allocator.procedure == null)
@@ -51,16 +51,7 @@ pub fn array_reserve(xs: *[..]$T, capacity: isize) {
     xs.cap = capacity;
 }
 
-fn grow(xs: *[..]$T, needed: isize) {
-    let capacity = xs.cap * 2;
-    if (capacity < 8)
-        capacity = 8;
-    if (capacity < needed)
-        capacity = needed;
-    array_reserve(xs, capacity);
-}
-
-pub fn array_add(xs: *[..]$T, item: T) {
+fn array_add(xs: *[..]$T, item: T) {
     if (xs.len == xs.cap)
         grow(xs, xs.len + 1);
     xs.ptr[xs.len] = item;     // past len, within cap: the pointer's own index
@@ -69,14 +60,14 @@ pub fn array_add(xs: *[..]$T, item: T) {
 
 // a new last element, made as `let item: T;` makes one (its fields'
 // defaults), to fill in place; the pointer is valid until the array grows
-pub fn array_add_new(xs: *[..]$T) -> *T {
+fn array_add_new(xs: *[..]$T) -> *T {
     let item: T;
     array_add(xs, item);
     return &xs.ptr[xs.len - 1];
 }
 
 // adds copies of `items`, which must not point into the array itself
-pub fn array_append(xs: *[..]$T, items: []T) {
+fn array_append(xs: *[..]$T, items: []T) {
     let count = xs.len;
     if (count + items.len > xs.cap)
         grow(xs, count + items.len);
@@ -84,7 +75,7 @@ pub fn array_append(xs: *[..]$T, items: []T) {
     copy_slice(xs.*[count..], items);
 }
 
-pub fn array_pop(xs: *[..]$T) -> T {
+fn array_pop(xs: *[..]$T) -> T {
     if (xs.len == 0)
         panic("array_pop on an empty array");
     xs.len -= 1;
@@ -92,7 +83,7 @@ pub fn array_pop(xs: *[..]$T) -> T {
 }
 
 // puts `item` at `index`, moving the ones after it up
-pub fn array_insert(xs: *[..]$T, index: isize, item: T) {
+fn array_insert(xs: *[..]$T, index: isize, item: T) {
     let count = xs.len;
     if (index < 0 || index > count)
         panic("array_insert outside the array");
@@ -102,7 +93,7 @@ pub fn array_insert(xs: *[..]$T, index: isize, item: T) {
 }
 
 // takes out the element at `index`, moving the ones after it down
-pub fn array_remove(xs: *[..]$T, index: isize) -> T {
+fn array_remove(xs: *[..]$T, index: isize) -> T {
     let item = xs.*[index];
     copy_slice(xs.*[index..], xs.*[index + 1..]);
     xs.len -= 1;
@@ -110,7 +101,7 @@ pub fn array_remove(xs: *[..]$T, index: isize) -> T {
 }
 
 // takes out the element at `index` by moving the last one into its place
-pub fn array_remove_unordered(xs: *[..]$T, index: isize) -> T {
+fn array_remove_unordered(xs: *[..]$T, index: isize) -> T {
     let item = xs.*[index];
     xs.*[index] = xs.*[xs.len - 1];
     xs.len -= 1;
@@ -119,7 +110,7 @@ pub fn array_remove_unordered(xs: *[..]$T, index: isize) -> T {
 
 // where `item` first is in `xs`, or -1. Elements compare as std/reflect's
 // values_equal does: strings by their text, structs field by field
-pub fn array_find(xs: []$T, item: T) -> isize {
+fn array_find(xs: []$T, item: T) -> isize {
     for (i in 0..xs.len)
         if (values_equal(xs[i], item))
             return i;
@@ -128,7 +119,7 @@ pub fn array_find(xs: []$T, item: T) -> isize {
 
 // takes out the first element equal to `item`, keeping the order of the
 // rest; false when there's none
-pub fn array_remove_value(xs: *[..]$T, item: T) -> bool {
+fn array_remove_value(xs: *[..]$T, item: T) -> bool {
     let index = array_find(xs.*, item);
     if (index < 0)
         return false;
@@ -137,13 +128,24 @@ pub fn array_remove_value(xs: *[..]$T, item: T) -> bool {
 }
 
 // removes every element, keeping the memory for reuse
-pub fn array_clear(xs: *[..]$T) {
+fn array_clear(xs: *[..]$T) {
     xs.len = 0;
 }
 
-pub fn array_free(xs: *[..]$T) {
+fn array_free(xs: *[..]$T) {
     free(xs.ptr, xs.allocator);
     xs.ptr = null;
     xs.len = 0;
     xs.cap = 0;
+}
+
+#scope_file
+
+fn grow(xs: *[..]$T, needed: isize) {
+    let capacity = xs.cap * 2;
+    if (capacity < 8)
+        capacity = 8;
+    if (capacity < needed)
+        capacity = needed;
+    array_reserve(xs, capacity);
 }

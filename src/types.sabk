@@ -1,14 +1,14 @@
 // Types. They're interned: two types are the same exactly when their
 // pointers are equal.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "std/mem";
-import "std/str";
-import "ast";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/mem";
+#import "std/str";
+#import "ast";
 
-pub enum TypeKind {
+enum TypeKind {
     Error,          // an expression that already failed to check; never reported twice
     Void,
     Bool,
@@ -33,14 +33,14 @@ pub enum TypeKind {
     GenericFn,
 }
 
-pub struct Field {
+struct Field {
     name: string;
     ty: *Type;
     decl: *Node;
     offset: u64;
 }
 
-pub struct Type {
+struct Type {
     kind: TypeKind;
     name: string;           // builtins, structs, unions and enums
     bits: i32;              // Int, Float
@@ -74,9 +74,7 @@ pub struct Type {
     align: u64 = 1;
 }
 
-struct ArrayKey { elem: *Type; len: u64; }
-
-pub struct Types {
+struct Types {
     error: *Type;
     void_: *Type;
     bool_: *Type;
@@ -100,14 +98,7 @@ pub struct Types {
     tuples: Map([]*Type, *Type);
 }
 
-fn make(kind: TypeKind, name: string = "") -> *Type {
-    let t = new(Type);
-    t.kind = kind;
-    t.name = name;
-    return t;
-}
-
-pub fn make_types() -> Types {
+fn make_types() -> Types {
     let ts: Types;
     ts.error = make(.Error, "<error>");
     ts.void_ = fn_named(&ts, .Void, "void");
@@ -138,20 +129,7 @@ pub fn make_types() -> Types {
     return ts;
 }
 
-fn fn_named(ts: *Types, kind: TypeKind, name: string) -> *Type {
-    let t = make(kind, name);
-    map_put(&ts.by_name, name, t);
-    return t;
-}
-
-fn int_type(ts: *Types, name: string, bits: i32, signed: bool) -> *Type {
-    let t = fn_named(ts, .Int, name);
-    t.bits = bits;
-    t.is_signed = signed;
-    return t;
-}
-
-pub fn ptr_to(ts: *Types, elem: *Type) -> *Type {
+fn ptr_to(ts: *Types, elem: *Type) -> *Type {
     if (elem.kind == .Void) // *void, also as *T with T = void
         return ts.rawptr;
     let found = map_get(&ts.ptrs, elem) or_else null;
@@ -163,7 +141,7 @@ pub fn ptr_to(ts: *Types, elem: *Type) -> *Type {
     return t;
 }
 
-pub fn slice_of(ts: *Types, elem: *Type) -> *Type {
+fn slice_of(ts: *Types, elem: *Type) -> *Type {
     let found = map_get(&ts.slices, elem) or_else null;
     if (found != null)
         return found;
@@ -173,7 +151,7 @@ pub fn slice_of(ts: *Types, elem: *Type) -> *Type {
     return t;
 }
 
-pub fn growable_of(ts: *Types, elem: *Type) -> *Type {
+fn growable_of(ts: *Types, elem: *Type) -> *Type {
     let found = map_get(&ts.growables, elem) or_else null;
     if (found != null)
         return found;
@@ -183,7 +161,7 @@ pub fn growable_of(ts: *Types, elem: *Type) -> *Type {
     return t;
 }
 
-pub fn array_type_of(ts: *Types, elem: *Type, len: u64) -> *Type {
+fn array_type_of(ts: *Types, elem: *Type, len: u64) -> *Type {
     let key = ArrayKey.{ .elem = elem, .len = len };
     let found = map_get(&ts.arrays, key) or_else null;
     if (found != null)
@@ -195,7 +173,7 @@ pub fn array_type_of(ts: *Types, elem: *Type, len: u64) -> *Type {
     return t;
 }
 
-pub fn fn_type(ts: *Types, params: []*Type, ret: *Type, is_variadic: bool) -> *Type {
+fn fn_type(ts: *Types, params: []*Type, ret: *Type, is_variadic: bool) -> *Type {
     for (t in ts.fns)
         if (same_types(t.params, params) && t.ret == ret && t.is_variadic == is_variadic)
             return t;
@@ -207,16 +185,7 @@ pub fn fn_type(ts: *Types, params: []*Type, ret: *Type, is_variadic: bool) -> *T
     return t;
 }
 
-fn same_types(a: []*Type, b: []*Type) -> bool {
-    if (a.len != b.len)
-        return false;
-    for (i in 0..a.len)
-        if (a[i] != b[i])
-            return false;
-    return true;
-}
-
-pub fn tuple_of(ts: *Types, elems: []*Type) -> *Type {
+fn tuple_of(ts: *Types, elems: []*Type) -> *Type {
     let found = map_get(&ts.tuples, elems) or_else null;
     if (found != null)
         return found;
@@ -236,7 +205,7 @@ pub fn tuple_of(ts: *Types, elems: []*Type) -> *Type {
     return t;
 }
 
-pub fn type_name(t: *Type) -> string {
+fn type_name(t: *Type) -> string {
     switch (t.kind) {
     case .Ptr: return tformat("*%", type_name(t.elem));
     case .Slice: return if (t.is_string) "string" else tformat("[]%", type_name(t.elem));
@@ -261,11 +230,44 @@ pub fn type_name(t: *Type) -> string {
     }
 }
 
-pub fn is_untyped(t: *Type) -> bool {
+fn is_untyped(t: *Type) -> bool {
     return t.kind == .UntypedInt || t.kind == .UntypedFloat ||
            t.kind == .UntypedString || t.kind == .Null;
 }
-pub fn is_int_like(t: *Type) -> bool { return t.kind == .Int || t.kind == .UntypedInt; }
-pub fn is_numeric(t: *Type) -> bool {
+fn is_int_like(t: *Type) -> bool { return t.kind == .Int || t.kind == .UntypedInt; }
+fn is_numeric(t: *Type) -> bool {
     return t.kind == .Int || t.kind == .Float || t.kind == .UntypedInt || t.kind == .UntypedFloat;
+}
+
+#scope_file
+
+struct ArrayKey { elem: *Type; len: u64; }
+
+fn make(kind: TypeKind, name: string = "") -> *Type {
+    let t = new(Type);
+    t.kind = kind;
+    t.name = name;
+    return t;
+}
+
+fn fn_named(ts: *Types, kind: TypeKind, name: string) -> *Type {
+    let t = make(kind, name);
+    map_put(&ts.by_name, name, t);
+    return t;
+}
+
+fn int_type(ts: *Types, name: string, bits: i32, signed: bool) -> *Type {
+    let t = fn_named(ts, .Int, name);
+    t.bits = bits;
+    t.is_signed = signed;
+    return t;
+}
+
+fn same_types(a: []*Type, b: []*Type) -> bool {
+    if (a.len != b.len)
+        return false;
+    for (i in 0..a.len)
+        if (a[i] != b[i])
+            return false;
+    return true;
 }

@@ -1,8 +1,8 @@
-import "std/io";
-import "std/map";
-import "std/mem";
-import "std/os";
-import "std/str";
+#import "std/io";
+#import "std/map";
+#import "std/mem";
+#import "std/os";
+#import "std/str";
 
 struct Point { x: i32; y: i32; }
 fn hash_point(p: Point) -> u64 { return hash_key(p.x) ^ (hash_key(p.y) * 31); }

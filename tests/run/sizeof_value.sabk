@@ -1,6 +1,6 @@
 // sizeof(value): the size of the value's type, as in C; the value isn't
 // evaluated
-import "std/io";
+#import "std/io";
 
 struct Vec3 { x: f32; y: f32; z: f32; }
 struct Pair { a: u8; b: i64; }

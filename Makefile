@@ -19,11 +19,6 @@ test: sabk
 unit: sabk
 	@./sabk --run tests/unit/i128_test.sabk | python3 tests/unit/i128_check.py
 
-# the tokens and syntax trees, against the C++ compiler this one was
-# ported from (../the-compiler, archived), on every .sabk file here
-compare: sabk
-	@tests/compare.sh
-
 # the compiler builds itself, and that one builds itself again: both must
 # write the same C for the compiler (a fixed point), which is the seed's
 bootstrap: sabk
@@ -42,4 +37,4 @@ seed: sabk
 clean:
 	rm -rf build sabk
 
-.PHONY: test unit compare bootstrap seed clean
+.PHONY: test unit bootstrap seed clean

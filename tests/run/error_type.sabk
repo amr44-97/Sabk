@@ -1,10 +1,10 @@
 // Error: every failure enum converts to it, so or_return passes failures
 // of different enums on, and they print as the enum and the variant. The
 // #run line checks the VM gives the same text as the compiled program.
-import "std/fmt";
-import "std/io";
-import "std/mem";
-import "std/str";
+#import "std/fmt";
+#import "std/io";
+#import "std/mem";
+#import "std/str";
 
 enum ConfigError: Error { BadLine, UnknownKey }
 enum Own: Error { Bad = 7 }

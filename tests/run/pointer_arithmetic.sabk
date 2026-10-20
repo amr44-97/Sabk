@@ -1,6 +1,6 @@
 // pointer arithmetic counts in what the pointer points at, as p[i] does:
 // p + n is &p[n], q - p how many lie between; the VM agrees with the C
-import "std/io";
+#import "std/io";
 
 struct Pair { a: i32; b: i64; }
 

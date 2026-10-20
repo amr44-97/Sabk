@@ -1,10 +1,15 @@
-import "std/io";
-import "vendor/my-lib" as lib;
+#import "std/io";
+#import "vendor/my-lib" as lib;
 
-pub struct Vec2 {
+struct Vec2 {
     x: f32;
     y: f32 = 1.0;
 }
+const NAME = "x";
+fn noop() {}
+
+#scope_file
+
 union Bits { i: u32; f: f32; }
 struct Empty {}
 
@@ -18,7 +23,6 @@ type Bytes = []u8;
 type Alloc = mem.Allocator;
 
 const MAX: i32 = 64;
-pub const NAME = "x";
 let counter: u64;
 let ready = false;
 
@@ -26,4 +30,3 @@ extern fn printf(fmt: *u8, ...) -> i32;
 extern fn exit(code: i32);
 extern fn callback(x: i32) -> i32 { return x; }
 fn alloc(size: usize, a: mem.Allocator = context.allocator) -> *void { return null; }
-pub fn noop() {}

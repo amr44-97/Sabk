@@ -1,5 +1,5 @@
 // a switch that handles every variant still catches a value made with `as`
-import "std/io";
+#import "std/io";
 
 enum Color { Red, Green }
 

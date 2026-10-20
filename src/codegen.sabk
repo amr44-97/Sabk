@@ -13,78 +13,30 @@
 // the compiler is compiled. They're pieces of the output, not C files of
 // their own.
 
-import "std/array";
-import "std/fmt";
-import "std/io";
-import "std/map";
-import "std/mem";
-import "std/os";
-import "std/path";
-import "std/str";
-import "ast";
-import "const";
-import "module";
-import "resolve";
-import "source";
-import "token";
-import "types";
-import "check";
-import "comptime";
-import "expressions";
-import "generics";
-import "lower";
-import "patterns";
-import "vm";
+#import "std/array";
+#import "std/fmt";
+#import "std/io";
+#import "std/map";
+#import "std/mem";
+#import "std/os";
+#import "std/path";
+#import "std/str";
+#import "ast";
+#import "const";
+#import "module";
+#import "resolve";
+#import "source";
+#import "token";
+#import "types";
+#import "check";
+#import "comptime";
+#import "expressions";
+#import "generics";
+#import "lower";
+#import "patterns";
+#import "vm";
 
-const C_PRELUDE = #run read_text("src/runtime_start.c");
-const C_RUNTIME = #run read_text("src/runtime_new.c");
-
-fn read_text(path: string) -> string {
-    let text, err = read_file(path);
-    if (err != .None)
-        panic(tformat("can't read % (build from the repository's top): %", path, io_error_message(err)));
-    return text;
-}
-
-// names C (or the generated code) already uses
-const RESERVED = .[
-    "auto", "break", "case", "char", "const", "continue", "default", "do",
-    "double", "else", "enum", "extern", "float", "for", "goto", "if",
-    "inline", "int", "long", "register", "restrict", "return", "short",
-    "signed", "sizeof", "static", "struct", "switch", "typedef", "union",
-    "unsigned", "void", "volatile", "while", "_Bool", "_Alignof", "bool",
-    "true", "false", "NULL", "main", "ctx", "i8", "i16", "i32", "i64",
-    "isize", "u8", "u16", "u32", "u64", "usize", "f32", "f64", "rawptr",
-    "abort", "memset", "dprintf", "fflush",
-];
-
-enum ScopeKind { Fn, Block, Loop, Switch, Macro }
-
-struct Scope {
-    kind: ScopeKind;
-    ctx: string;          // the C name of this scope's `Context *`
-    defers: [..]*Node;
-    // Macro: a macro expansion
-    expansion: i32;
-    result: string;       // the variable holding its value, if it returns one
-    end_label: string;    // where its `return`s jump to
-    owner: *Node;         // Loop, Switch: the loop or switch it's the body of
-}
-
-struct Reached {
-    use: *Node;
-    from: *Node;          // the function or global it was used in
-}
-
-// Sabk evaluates left to right; C leaves the order of arguments and
-// operands open. The C of the parts, in temps declared in `prefix` when
-// the order could matter (wrapped as `({ prefix ...; })`)
-struct Ordered {
-    prefix: string;
-    values: [..]string;
-}
-
-pub struct CodeGen {
+struct CodeGen {
     res: *Resolver;
     c: *Checker;
     error_count: isize;
@@ -149,8 +101,224 @@ pub struct CodeGen {
     type_infos: string;
 }
 
-pub fn make_codegen(r: *Resolver, c: *Checker) -> CodeGen {
+fn make_codegen(r: *Resolver, c: *Checker) -> CodeGen {
     return .{ .res = r, .c = c, .line_directives = true };
+}
+
+/* ---------------------------------------------------------------- helpers */
+
+// `bytes` as a C string literal
+fn c_string(bytes: string) -> string {
+    let s: [..]u8;
+    s.allocator = context.temp_allocator;
+    array_add(&s, '"');
+    for (c in bytes) {
+        // `?` is escaped to avoid trigraphs; everything unusual is octal,
+        // which (unlike \x) never runs into the next character
+        if (c == '"' || c == '\\' || c == '?') {
+            array_add(&s, '\\');
+            array_add(&s, c);
+        } else if (c >= 32 && c < 127) {
+            array_add(&s, c);
+        } else {
+            array_add(&s, '\\');
+            array_add(&s, '0' + (c >> 6));
+            array_add(&s, '0' + ((c >> 3) & 7));
+            array_add(&s, '0' + (c & 7));
+        }
+    }
+    array_add(&s, '"');
+    return s as string;
+}
+
+/* ---------------------------------------------------------------- program */
+
+// the C source, or "" if errors were reported
+fn generate(g: *CodeGen) -> string {
+    g.out = &g.bodies;
+    // module prefixes: the file name, made unique
+    let used: Map(string, i32);
+    map_put(&g.module_prefix, g.res.prelude, "prelude");
+    for (m in g.res.modules) {
+        let stem: [..]u8;
+        for (c in path_stem(m.path))
+            array_add(&stem, if (is_alnum(c)) c else '_');
+        let name = stem as string;
+        if (name.len == 0 || (name[0] >= '0' && name[0] <= '9'))
+            name = cat("m_", name);
+        let n = map_get(&used, name) or_else 0;
+        map_put(&used, name, n + 1);
+        map_put(&g.module_prefix, m, if (n != 0) format("%{}%", name, n) else copy_string(name));
+    }
+
+    // the entry point
+    let root = g.res.modules[0];
+    let main_fn = module_decl(root, "main");
+    if (main_fn == null || !is_function(main_fn) || is_extern_decl(main_fn)) {
+        gen_error(g, root.tokens[0], tformat("the program needs a `fn main()` in %", root.path));
+        return "";
+    }
+    let ret = main_fn.ty.ret;
+    if (fn_params(main_fn).len > 0 || (ret.kind != .Void && ret != ts(g).i32 && !ret.is_failure)) {
+        gen_error(g, main_fn.tok, "`main` must take no parameters and return `void`, `i32` or `Error`");
+        return "";
+    }
+
+    // the prelude's types are needed by the runtime
+    c_type(g, g.c.context_type);
+
+    let all: [..]*Module;
+    array_add(&all, g.res.prelude);
+    array_append(&all, g.res.modules);
+    // functions: everything declared, minus generic templates, plus the
+    // instances the checker made of them
+    find_reachable(g, main_fn);
+    // std/build's functions are the compiler's: they don't exist at run time
+    for (m in all) {
+        for (d in root_list(m)) {
+            let native = false;
+            if (d.kind is .Fn{is_extern: true, body} && body == null)
+                native = true;
+            if (!native || !map_has(&g.reachable, d) || !is_build_function(d.tok.text))
+                continue;
+            // blame the use outside the module that wraps it:
+            // link_library(), not the declaration in std/build
+            let fun = d;
+            let reached = map_get(&g.reached_from, fun) or_else Reached.{};
+            while (reached.from != null && reached.from.owner == d.owner &&
+                   (map_get(&g.reached_from, reached.from) or_else Reached.{}).use != null) {
+                fun = reached.from;
+                reached = map_get(&g.reached_from, fun) or_else Reached.{};
+            }
+            let at = if (reached.use != null) reached.use else d;
+            gen_error(g, at.tok, tformat("`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it",
+                                         fun.tok.text));
+            return "";
+        }
+    }
+    let functions: [..]*Node;
+    for (m in all) {
+        for (d in root_list(m)) {
+            if (is_function(d) && !is_template(d)) {
+                g.functions_total++;
+                if (map_has(&g.reachable, d))
+                    array_add(&functions, d);
+            } else if ((d.kind.tag == .Let || d.kind.tag == .Const) && map_has(&g.reachable, d)) {
+                emit_global(g, d);
+            }
+        }
+    }
+    for (instance in g.c.instances) {
+        if (instance.kind.tag == .Fn) {
+            g.functions_total++;
+            if (map_has(&g.reachable, instance))
+                array_add(&functions, instance);
+        }
+    }
+    g.functions_emitted = functions.len;
+    for (f in functions)
+        emit_fn_prototype(g, f);
+    for (f in functions)
+        emit_fn_body(g, f);
+
+    // C's main: every line of it is the program's `fn main`, for debuggers
+    g.here = main_fn.tok;
+    mapped(g, "int main(int argc, char **argv) {");
+    mapped(g, "  rt_argc = argc;");
+    mapped(g, "  rt_argv = argv;");
+    mapped(g, cat("  ", c_type(g, g.c.context_type), " ctx = ", default_context(g), "(&rt_boot_context);"));
+    if (ret.kind == .Void) {
+        mapped(g, cat("  ", global_name(g, main_fn), "(&ctx);"));
+        mapped(g, "  return 0;");
+    } else if (ret.is_failure) {
+        // what failed, once main has returned (and its defers have run)
+        mapped(g, cat("  ", c_type(g, ret), " failed = ", global_name(g, main_fn), "(&ctx);"));
+        mapped(g, "  if (failed) {");
+        mapped(g, "    rt_report_error(failed);");
+        mapped(g, "    return 1;");
+        mapped(g, "  }");
+        mapped(g, "  return 0;");
+    } else {
+        mapped(g, cat("  return ", global_name(g, main_fn), "(&ctx);"));
+    }
+    mapped(g, "}");
+
+    let errors = error_table(g, ret.is_failure);
+    define_type_infos(g);
+    define_pending_types(g);
+
+    if (g.error_count > 0)
+        return "";
+    let source: [..]u8;
+    append_string(&source, C_PRELUDE);
+    append_string(&source, "\n/* types */\n");
+    append_string(&source, g.fwd as string);
+    append_string(&source, "\n");
+    append_string(&source, g.fn_typedefs as string);
+    append_string(&source, "\n");
+    append_string(&source, g.defs as string);
+    append_string(&source, C_RUNTIME);
+    append_string(&source, g.helpers as string);
+    append_string(&source, "\n/* functions */\n");
+    append_string(&source, g.protos as string);
+    append_string(&source, "\n/* type info */\n");
+    append_string(&source, g.type_infos);
+    append_string(&source, errors);
+    append_string(&source, "\n/* globals */\n");
+    append_string(&source, g.globals as string);
+    append_string(&source, "\n");
+    append_string(&source, g.bodies as string);
+    return source as string;
+}
+
+#scope_file
+
+const C_PRELUDE = #run read_text("src/runtime_start.c");
+const C_RUNTIME = #run read_text("src/runtime_new.c");
+
+fn read_text(path: string) -> string {
+    let text, err = read_file(path);
+    if (err != .None)
+        panic(tformat("can't read % (build from the repository's top): %", path, io_error_message(err)));
+    return text;
+}
+
+// names C (or the generated code) already uses
+const RESERVED = .[
+    "auto", "break", "case", "char", "const", "continue", "default", "do",
+    "double", "else", "enum", "extern", "float", "for", "goto", "if",
+    "inline", "int", "long", "register", "restrict", "return", "short",
+    "signed", "sizeof", "static", "struct", "switch", "typedef", "union",
+    "unsigned", "void", "volatile", "while", "_Bool", "_Alignof", "bool",
+    "true", "false", "NULL", "main", "ctx", "i8", "i16", "i32", "i64",
+    "isize", "u8", "u16", "u32", "u64", "usize", "f32", "f64", "rawptr",
+    "abort", "memset", "dprintf", "fflush",
+];
+
+enum ScopeKind { Fn, Block, Loop, Switch, Macro }
+
+struct Scope {
+    kind: ScopeKind;
+    ctx: string;          // the C name of this scope's `Context *`
+    defers: [..]*Node;
+    // Macro: a macro expansion
+    expansion: i32;
+    result: string;       // the variable holding its value, if it returns one
+    end_label: string;    // where its `return`s jump to
+    owner: *Node;         // Loop, Switch: the loop or switch it's the body of
+}
+
+struct Reached {
+    use: *Node;
+    from: *Node;          // the function or global it was used in
+}
+
+// Sabk evaluates left to right; C leaves the order of arguments and
+// operands open. The C of the parts, in temps declared in `prefix` when
+// the order could matter (wrapped as `({ prefix ...; })`)
+struct Ordered {
+    prefix: string;
+    values: [..]string;
 }
 
 /* ---------------------------------------------------------------- helpers */
@@ -180,30 +348,6 @@ fn num(n: i64) -> string { return tformat("%", n); }
 fn unum(n: u64) -> string { return tformat("%", n); }
 
 fn ts(g: *CodeGen) -> *Types { return &g.c.types; }
-
-// `bytes` as a C string literal
-pub fn c_string(bytes: string) -> string {
-    let s: [..]u8;
-    s.allocator = context.temp_allocator;
-    array_add(&s, '"');
-    for (c in bytes) {
-        // `?` is escaped to avoid trigraphs; everything unusual is octal,
-        // which (unlike \x) never runs into the next character
-        if (c == '"' || c == '\\' || c == '?') {
-            array_add(&s, '\\');
-            array_add(&s, c);
-        } else if (c >= 32 && c < 127) {
-            array_add(&s, c);
-        } else {
-            array_add(&s, '\\');
-            array_add(&s, '0' + (c >> 6));
-            array_add(&s, '0' + ((c >> 3) & 7));
-            array_add(&s, '0' + (c & 7));
-        }
-    }
-    array_add(&s, '"');
-    return s as string;
-}
 
 fn gen_error(g: *CodeGen, t: Token, message: string) {
     say(g.res, .Error, t, message);
@@ -1709,7 +1853,7 @@ fn slice(g: *CodeGen, n: *Node) -> string {
 }
 
 fn prelude_decl(g: *CodeGen, name: string) -> *Node {
-    return map_get(&g.res.prelude.scope, ScopeKey.{ .name = name }) or_else null;
+    return module_decl(g.res.prelude, name);
 }
 
 fn default_context(g: *CodeGen) -> string { return global_name(g, prelude_decl(g, "default_context")); }
@@ -1794,144 +1938,6 @@ fn struct_init(g: *CodeGen, n: *Node) -> string {
 /* ---------------------------------------------------------------- program */
 
 fn is_alnum(c: u8) -> bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'); }
-
-// the C source, or "" if errors were reported
-pub fn generate(g: *CodeGen) -> string {
-    g.out = &g.bodies;
-    // module prefixes: the file name, made unique
-    let used: Map(string, i32);
-    map_put(&g.module_prefix, g.res.prelude, "prelude");
-    for (m in g.res.modules) {
-        let stem: [..]u8;
-        for (c in path_stem(m.path))
-            array_add(&stem, if (is_alnum(c)) c else '_');
-        let name = stem as string;
-        if (name.len == 0 || (name[0] >= '0' && name[0] <= '9'))
-            name = cat("m_", name);
-        let n = map_get(&used, name) or_else 0;
-        map_put(&used, name, n + 1);
-        map_put(&g.module_prefix, m, if (n != 0) format("%{}%", name, n) else copy_string(name));
-    }
-
-    // the entry point
-    let root = g.res.modules[0];
-    let main_fn = map_get(&root.scope, ScopeKey.{ .name = "main" }) or_else null;
-    if (main_fn == null || !is_function(main_fn) || is_extern_decl(main_fn)) {
-        gen_error(g, root.tokens[0], tformat("the program needs a `fn main()` in %", root.path));
-        return "";
-    }
-    let ret = main_fn.ty.ret;
-    if (fn_params(main_fn).len > 0 || (ret.kind != .Void && ret != ts(g).i32 && !ret.is_failure)) {
-        gen_error(g, main_fn.tok, "`main` must take no parameters and return `void`, `i32` or `Error`");
-        return "";
-    }
-
-    // the prelude's types are needed by the runtime
-    c_type(g, g.c.context_type);
-
-    let all: [..]*Module;
-    array_add(&all, g.res.prelude);
-    array_append(&all, g.res.modules);
-    // functions: everything declared, minus generic templates, plus the
-    // instances the checker made of them
-    find_reachable(g, main_fn);
-    // std/build's functions are the compiler's: they don't exist at run time
-    for (m in all) {
-        for (d in root_list(m)) {
-            let native = false;
-            if (d.kind is .Fn{is_extern: true, body} && body == null)
-                native = true;
-            if (!native || !map_has(&g.reachable, d) || !is_build_function(d.tok.text))
-                continue;
-            // blame the use outside the module that wraps it:
-            // link_library(), not the declaration in std/build
-            let fun = d;
-            let reached = map_get(&g.reached_from, fun) or_else Reached.{};
-            while (reached.from != null && reached.from.owner == d.owner &&
-                   (map_get(&g.reached_from, reached.from) or_else Reached.{}).use != null) {
-                fun = reached.from;
-                reached = map_get(&g.reached_from, fun) or_else Reached.{};
-            }
-            let at = if (reached.use != null) reached.use else d;
-            gen_error(g, at.tok, tformat("`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it",
-                                         fun.tok.text));
-            return "";
-        }
-    }
-    let functions: [..]*Node;
-    for (m in all) {
-        for (d in root_list(m)) {
-            if (is_function(d) && !is_template(d)) {
-                g.functions_total++;
-                if (map_has(&g.reachable, d))
-                    array_add(&functions, d);
-            } else if ((d.kind.tag == .Let || d.kind.tag == .Const) && map_has(&g.reachable, d)) {
-                emit_global(g, d);
-            }
-        }
-    }
-    for (instance in g.c.instances) {
-        if (instance.kind.tag == .Fn) {
-            g.functions_total++;
-            if (map_has(&g.reachable, instance))
-                array_add(&functions, instance);
-        }
-    }
-    g.functions_emitted = functions.len;
-    for (f in functions)
-        emit_fn_prototype(g, f);
-    for (f in functions)
-        emit_fn_body(g, f);
-
-    // C's main: every line of it is the program's `fn main`, for debuggers
-    g.here = main_fn.tok;
-    mapped(g, "int main(int argc, char **argv) {");
-    mapped(g, "  rt_argc = argc;");
-    mapped(g, "  rt_argv = argv;");
-    mapped(g, cat("  ", c_type(g, g.c.context_type), " ctx = ", default_context(g), "(&rt_boot_context);"));
-    if (ret.kind == .Void) {
-        mapped(g, cat("  ", global_name(g, main_fn), "(&ctx);"));
-        mapped(g, "  return 0;");
-    } else if (ret.is_failure) {
-        // what failed, once main has returned (and its defers have run)
-        mapped(g, cat("  ", c_type(g, ret), " failed = ", global_name(g, main_fn), "(&ctx);"));
-        mapped(g, "  if (failed) {");
-        mapped(g, "    rt_report_error(failed);");
-        mapped(g, "    return 1;");
-        mapped(g, "  }");
-        mapped(g, "  return 0;");
-    } else {
-        mapped(g, cat("  return ", global_name(g, main_fn), "(&ctx);"));
-    }
-    mapped(g, "}");
-
-    let errors = error_table(g, ret.is_failure);
-    define_type_infos(g);
-    define_pending_types(g);
-
-    if (g.error_count > 0)
-        return "";
-    let source: [..]u8;
-    append_string(&source, C_PRELUDE);
-    append_string(&source, "\n/* types */\n");
-    append_string(&source, g.fwd as string);
-    append_string(&source, "\n");
-    append_string(&source, g.fn_typedefs as string);
-    append_string(&source, "\n");
-    append_string(&source, g.defs as string);
-    append_string(&source, C_RUNTIME);
-    append_string(&source, g.helpers as string);
-    append_string(&source, "\n/* functions */\n");
-    append_string(&source, g.protos as string);
-    append_string(&source, "\n/* type info */\n");
-    append_string(&source, g.type_infos);
-    append_string(&source, errors);
-    append_string(&source, "\n/* globals */\n");
-    append_string(&source, g.globals as string);
-    append_string(&source, "\n");
-    append_string(&source, g.bodies as string);
-    return source as string;
-}
 
 fn mapped(g: *CodeGen, text: string) {
     if (g.line_directives)

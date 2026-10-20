@@ -1,5 +1,5 @@
 // std/build's functions only exist while compiling
-import "std/build";
+#import "std/build";
 
 fn main() {
     link_library("m");

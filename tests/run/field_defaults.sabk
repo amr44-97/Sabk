@@ -1,8 +1,8 @@
 // a type's field defaults apply wherever a value of it is made without
 // saying what it is, and new() can take the value to start with
-import "std/io";
-import "std/fmt";
-import "std/array";
+#import "std/io";
+#import "std/fmt";
+#import "std/array";
 
 struct Spec { width: i32 = 8; precision: i32 = -1; }
 struct Outer { name: string; spec: Spec; many: [3]Spec; }  // defaults inside

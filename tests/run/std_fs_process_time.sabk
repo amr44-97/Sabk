@@ -1,13 +1,13 @@
 // std/fs, std/process and std/time
-import "std/io";
-import "std/fs";
-import "std/path";
-import "std/process";
-import "std/time";
-import "std/mem";
-import "std/str";
-import "std/fmt";
-import "std/logging";
+#import "std/io";
+#import "std/fs";
+#import "std/path";
+#import "std/process";
+#import "std/time";
+#import "std/mem";
+#import "std/str";
+#import "std/fmt";
+#import "std/logging";
 
 fn ran(args: []string) -> string {
     let exit, err = run_command(args);

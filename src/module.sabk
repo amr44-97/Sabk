@@ -1,24 +1,24 @@
 // Modules: one per source file, with its tokens, its syntax tree and its
 // top-level names; and the prelude, the module every other one sees.
 
-import "std/array";
-import "std/fmt";
-import "std/io";
-import "std/map";
-import "std/os";
-import "std/str";
-import "ast";
-import "source";
-import "token";
+#import "std/array";
+#import "std/fmt";
+#import "std/io";
+#import "std/map";
+#import "std/os";
+#import "std/str";
+#import "ast";
+#import "source";
+#import "token";
 
 // a name in a scope, with the color of the code that declared it (see
 // Resolver), so a macro's names and its caller's never meet
-pub struct ScopeKey {
+struct ScopeKey {
     name: string;
     color: i32;
 }
 
-pub struct Module {
+struct Module {
     path: string;       // as reached from the root file; messages show it
     src: Source;
     tokens: []Token;
@@ -38,12 +38,8 @@ pub struct Module {
     inserted_by: *Node;
 
     // visibility: the declarations after a `#scope_module` or `#scope_file`,
-    // with that directive (the rest are exported); a module that still
-    // writes `pub` (uses_pub) keeps the rule from before: what isn't `pub`
-    // is private
+    // with that directive (the rest are exported)
     regions: Map(*Node, *Node);
-    uses_pub: bool;
-    first_pub: *Node;
 
     // #load "x.sabk": the files that are part of this module (their
     // declarations are in its root); for such a file, the module
@@ -52,8 +48,25 @@ pub struct Module {
     // for a file (a module's own, or one it loads): its `#scope_file`
     // names, which only its own code sees
     file_scope: Map(ScopeKey, *Node);
-    first_region: *Node;
 }
+
+fn prelude_source() -> string { return PRELUDE; }
+
+// what C's perror says about a file that couldn't be read
+fn system_error_text(err: IoError) -> string {
+    return switch (err) {
+    case .None:             "Success";
+    case .NotFound:         "No such file or directory";
+    case .PermissionDenied: "Permission denied";
+    case .IsDirectory:      "Is a directory";
+    case .NotDirectory:     "Not a directory";
+    case .AlreadyExists:    "File exists";
+    case .NoSpace:          "No space left on device";
+    case .Other:            "Input/output error";
+    };
+}
+
+#scope_file
 
 // The prelude's text, with the target's names in it: the compiler builds
 // for the machine it runs on, so its own OS and ARCH say which. Read from
@@ -69,8 +82,6 @@ fn prelude_text() -> string {
     return replace_all(with_os, "@ARCH@", tformat("%", ARCH));
 }
 
-pub fn prelude_source() -> string { return PRELUDE; }
-
 fn replace_all(s: string, what: string, with: string) -> string {
     let out: [..]u8;
     let i: isize = 0;
@@ -84,18 +95,4 @@ fn replace_all(s: string, what: string, with: string) -> string {
         }
     }
     return out as string;
-}
-
-// what C's perror says about a file that couldn't be read
-pub fn system_error_text(err: IoError) -> string {
-    return switch (err) {
-    case .None:             "Success";
-    case .NotFound:         "No such file or directory";
-    case .PermissionDenied: "Permission denied";
-    case .IsDirectory:      "Is a directory";
-    case .NotDirectory:     "Not a directory";
-    case .AlreadyExists:    "File exists";
-    case .NoSpace:          "No space left on device";
-    case .Other:            "Input/output error";
-    };
 }

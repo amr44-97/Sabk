@@ -1,6 +1,6 @@
 // only code reachable from main is compiled to C; these functions are
 // reached in roundabout ways, so they must still be there
-import "std/io";
+#import "std/io";
 
 fn doubled(x: i32) -> i32 { return x * 2; }
 fn tripled(x: i32) -> i32 { return x * 3; }

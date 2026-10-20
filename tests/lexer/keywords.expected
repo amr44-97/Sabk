@@ -6,8 +6,8 @@
    1:26  keyword_struct         `struct`
    1:33  keyword_enum           `enum`
    1:38  keyword_union          `union`
-   1:44  keyword_import         `import`
-   1:51  keyword_pub            `pub`
+   1:44  identifier             `import`
+   1:51  identifier             `pub`
    1:55  keyword_extern         `extern`
    1:62  keyword_as             `as`
    2:1   keyword_if             `if`

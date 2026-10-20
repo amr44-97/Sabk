@@ -1,6 +1,6 @@
 // top-level #if: the branch taken is part of the module, picked by
 // constants known at compile time such as OS, ARCH and POINTER_SIZE
-import "std/io";
+#import "std/io";
 
 #if (OS == .Windows) {
     extern fn Sleep(ms: u32);
@@ -29,7 +29,7 @@ const LEVEL = 2;
 } else #if (LEVEL == 2) {
     fn level() -> string { return "two"; }
     #if (LEVEL > 1) {                    // nested: decided once this is taken
-        pub fn verbose() -> bool { return true; }
+        fn verbose() -> bool { return true; }
     }
 } else {
     fn level() -> string { return "many"; }

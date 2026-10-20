@@ -1,7 +1,7 @@
 // #no_bounds_check: a function whose indexing and slicing aren't checked.
 // Here the slices view part of a larger array, so reading past their
 // length still reads the array
-import "std/io";
+#import "std/io";
 
 fn peek(xs: []i32, i: isize) -> i32 #no_bounds_check {
     return xs[i];                           // past xs.len: not checked

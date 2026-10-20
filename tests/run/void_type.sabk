@@ -1,6 +1,6 @@
 // void is a real type: zero bytes, one value .{}, allowed where a type is
 // (variables, fields, parameters, generics); C's void spells only results
-import "std/io";
+#import "std/io";
 
 struct Tagged($T) { id: i32; value: T; }
 struct Marker { done: void; }

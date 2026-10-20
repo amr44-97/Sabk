@@ -1,7 +1,7 @@
 // what an Error isn't
-import "std/io";
-import "std/os";
-import "std/str";
+#import "std/io";
+#import "std/os";
+#import "std/str";
 enum Shape { Circle(f64), Dot }
 enum NoZero { A = 1, B }
 enum Big: Error { Huge = 5000000000 }

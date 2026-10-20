@@ -1,6 +1,6 @@
 // values_equal can't look inside a union: which field holds the value
 // isn't known, so the code that writes it stops with a compile error
-import "std/reflect";
+#import "std/reflect";
 
 union Bits { f: f32; u: u32; }
 struct Holder { name: []u8; bits: Bits; }

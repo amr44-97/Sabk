@@ -1,1 +1,1 @@
-pub struct Allocator { data: *void; }
+struct Allocator { data: *void; }

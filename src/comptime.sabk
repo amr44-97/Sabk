@@ -2,24 +2,25 @@
 // strings `#insert` splices in, top-level `#if` conditions, what type_info
 // says about a type, build steps, and field defaults.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "std/str";
-import "ast";
-import "const";
-import "lexer";
-import "module";
-import "types";
-import "check";
-import "expressions";
-import "patterns";
-import "vm";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/str";
+#import "ast";
+#import "const";
+#import "lexer";
+#import "module";
+#import "resolve";
+#import "types";
+#import "check";
+#import "expressions";
+#import "patterns";
+#import "vm";
 
 /* -------------------------------------------------------------------- #run */
 
 // #run expr: runs `expr` now and puts its value in its place
-pub fn check_run(c: *Checker, n: *Node, expected: *Type) -> *Type {
+fn check_run(c: *Checker, n: *Node, expected: *Type) -> *Type {
     let inner: *Node = null;
     if (n.kind is .Run{value})
         inner = value;
@@ -65,18 +66,9 @@ pub fn check_run(c: *Checker, n: *Node, expected: *Type) -> *Type {
     return n.ty;
 }
 
-fn mark_baked(n: *Node, color: i32) {
-    if (n == null)
-        return;
-    n.is_baked = true;
-    n.color = color;
-    for (child in code_children(n)) // a variant's value, the items
-        mark_baked(child, color);
-}
-
 // `#insert e`: e must come to a string literal: `#run f()`, a string, or a
 // constant holding one. The resolver calls this while it's resolving `m`.
-pub fn insert_text_of(c: *Checker, e: *Node, m: *Module) -> (string, bool) {
+fn insert_text_of(c: *Checker, e: *Node, m: *Module) -> (string, bool) {
     prepare(c);
     let place = leave_place(c);
     c.mod = m;
@@ -108,7 +100,7 @@ pub fn insert_text_of(c: *Checker, e: *Node, m: *Module) -> (string, bool) {
 // branch is part of the program: a bool known at compile time. Its value,
 // and whether it's known; `top_level`: a top-level #if, which reports a
 // condition that isn't known.
-pub fn static_condition(c: *Checker, e: *Node, m: *Module, top_level: bool) -> (bool, bool) {
+fn static_condition(c: *Checker, e: *Node, m: *Module, top_level: bool) -> (bool, bool) {
     prepare(c);
     let saved_mod = c.mod;
     let saved_fn = c.current_fn;
@@ -134,7 +126,7 @@ pub fn static_condition(c: *Checker, e: *Node, m: *Module, top_level: bool) -> (
 
 // Does `use` name a declaration a top-level #if set aside? Code that's
 // compiled can't: the declaration isn't part of the program.
-pub fn untaken(c: *Checker, use: *Node, d: *Node) -> bool {
+fn untaken(c: *Checker, use: *Node, d: *Node) -> bool {
     if (d == null || d.untaken_if == null)
         return false;
     let cond: *Node = null;
@@ -148,13 +140,13 @@ pub fn untaken(c: *Checker, use: *Node, d: *Node) -> bool {
 
 /* -------------------------------------------------------------- type info */
 
-pub struct FieldShape {
+struct FieldShape {
     name: string;
     ty: *Type;
     offset: u64;
 }
 
-pub struct VariantShape {
+struct VariantShape {
     name: string;
     value: i64;
     payload: *Type; // or null
@@ -162,7 +154,7 @@ pub struct VariantShape {
 
 // What a TypeInfo (the prelude's) says about a type: the code generator
 // writes it as C data, the #run interpreter builds it in memory
-pub struct TypeShape {
+struct TypeShape {
     kind: string; // a TypeKind variant: "Int", "Struct", ...
     elem: *Type;
     count: u64;
@@ -170,7 +162,7 @@ pub struct TypeShape {
     variants: [..]VariantShape;
 }
 
-pub fn shape_of(c: *Checker, t: *Type) -> TypeShape {
+fn shape_of(c: *Checker, t: *Type) -> TypeShape {
     layout(c, t);
     let s: TypeShape;
     switch (t.kind) {
@@ -217,8 +209,8 @@ pub fn shape_of(c: *Checker, t: *Type) -> TypeShape {
 }
 
 // TypeKind.<kind>
-pub fn type_kind_value(c: *Checker, kind: string) -> i64 {
-    let d = map_get(&c.res.prelude.scope, ScopeKey.{ .name = "TypeKind" }) or_else null;
+fn type_kind_value(c: *Checker, kind: string) -> i64 {
+    let d = module_decl(c.res.prelude, "TypeKind");
     for (v in enum_variants(d))
         if (v.tok.text == kind)
             return i128_to_i64(v.cval.i);
@@ -230,7 +222,7 @@ pub fn type_kind_value(c: *Checker, kind: string) -> i64 {
 // Top-level `#run`s, in order, once the program checks without errors:
 // build scripts, which can set how it's built (std/build). Any value they
 // make is dropped.
-pub fn run_build_steps(c: *Checker) {
+fn run_build_steps(c: *Checker) {
     for (n in c.build_steps) {
         if (c.error_count > 0)
             return; // the code they'd run may be broken
@@ -263,7 +255,7 @@ pub fn run_build_steps(c: *Checker) {
 // Field defaults apply wherever a value is made without saying what it is
 // (`let x: T;`, new(T), a field left out of a literal): does `t`, or
 // something it holds by value, have any? Types without are just zeroed.
-pub fn has_defaults(c: *Checker, t: *Type) -> bool {
+fn has_defaults(c: *Checker, t: *Type) -> bool {
     let known = map_get(&c.defaults_known, t) or_else 0;
     if (known != 0)
         return known == 3; // 1: a type holding itself is reported elsewhere
@@ -285,7 +277,7 @@ pub fn has_defaults(c: *Checker, t: *Type) -> bool {
 
 // a global without a value starts as its type's defaults, which C needs to
 // know at compile time: a default that isn't constant, or null
-pub fn non_constant_default(c: *Checker, t: *Type) -> *Node {
+fn non_constant_default(c: *Checker, t: *Type) -> *Node {
     if (!has_defaults(c, t))
         return null;
     if (t.kind == .Array)
@@ -303,4 +295,17 @@ pub fn non_constant_default(c: *Checker, t: *Type) -> *Node {
         }
     }
     return null;
+}
+
+#scope_file
+
+/* -------------------------------------------------------------------- #run */
+
+fn mark_baked(n: *Node, color: i32) {
+    if (n == null)
+        return;
+    n.is_baked = true;
+    n.color = color;
+    for (child in code_children(n)) // a variant's value, the items
+        mark_baked(child, color);
 }

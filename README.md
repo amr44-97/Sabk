@@ -4,10 +4,10 @@ Sabk is a small systems programming language in the spirit of C, with ideas
 from Jai, Odin and Zig. It compiles to C.
 
 ```
-import "std/fmt";
-import "std/io";
-import "std/mem";
-import "std/str";
+#import "std/fmt";
+#import "std/io";
+#import "std/mem";
+#import "std/str";
 
 struct List($T) {
     items: []T;
@@ -57,8 +57,10 @@ $ ./sabk --run example.sabk
 - **C's model:** structs, pointers, manual memory and no hidden control flow.
   It also keeps C's syntax, except that declarations start with a keyword
   and put the type after the name (`let x: i32`, `fn f(a: i32) -> i32`).
-- **File modules**, as in Zig. A plain `import "std/io";` brings in the
-  module's names, as Jai does, and `io.println` stays available.
+- **File modules**, as in Jai. A plain `#import "std/io";` brings in the
+  module's names, and `io.println` stays available; `#load` makes one
+  module of several files, and `#scope_file` / `#scope_module` keep
+  helpers private (there's no `pub`).
 - **An implicit context**, as in Jai and Odin: every function receives the
   current allocator, and a block can switch it for everything it calls.
   There are arenas, a temp allocator, and an allocator interface you can
@@ -209,9 +211,10 @@ Sabk-*.md            design notes: decisions, the review, the memory
 
 The first compiler was written in C++ (`../the-compiler`, archived now).
 This one is a port of it, and a redesign inside: what users see (programs'
-output, error messages, the command line) stayed the same, and
-`tests/compare.sh` still diffs the dumps and messages against the C++
-compiler. Where the two differ inside:
+output, error messages, the command line) stayed the same. Until the
+language moved on (`#import` and regions, Oct 20, 2026), a script diffed
+the dumps against the C++ compiler's on every file; it's in git history.
+Where the two differ inside:
 
 
 - Tokens are views of the file's text with a line and column, and hold no
@@ -222,7 +225,7 @@ compiler. Where the two differ inside:
   tagged enum `NodeKind` whose variants name their parts (`.If{cond,
   then, else_}`), instead of one struct with `lhs`, `rhs`, `extra`, `list`
   and flags. `--ast` still prints the old layout, mapping the parts back,
-  so the two parsers can be compared.
+  which is what the parser tests check.
 - Copying and walking a tree go through `NodeKind`'s type information (a
   variant's `*Node` and `[]*Node` parts are its children), so a new kind
   of node needs no code there.

@@ -1,7 +1,7 @@
 // patterns inside variants (following pointers; null matches none), guards,
 // and is with nested patterns, at run time and in #run
-import "std/io";
-import "std/mem";
+#import "std/io";
+#import "std/mem";
 
 enum Op { Add, Mul }
 enum Expr {

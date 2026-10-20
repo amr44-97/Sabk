@@ -1,6 +1,6 @@
 // x.Variant: the value a variant holds, checked to be that variant unless
 // it's known to be (narrowing); a place, assignable through a pointer
-import "std/io";
+#import "std/io";
 
 enum Shape { Circle(r: f64), Rect(w: f64, h: f64), Dot }
 struct Item { shape: Shape; name: string; }

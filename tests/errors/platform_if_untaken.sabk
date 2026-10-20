@@ -2,7 +2,7 @@
 #if (POINTER_SIZE == 3) {
     extern fn exotic_sleep(ms: u32);
     struct Exotic { handle: *void; }
-    pub const EXOTIC_PAGE = 512;
+    const EXOTIC_PAGE = 512;
 }
 
 fn main() {

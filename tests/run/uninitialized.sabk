@@ -1,7 +1,7 @@
 // `let x: T = ---;` leaves a local as it is: no zeroing, no field defaults.
 // The program has to write it before reading it; #run fills it with 0xAA,
 // so a read before the write shows
-import "std/io";
+#import "std/io";
 
 struct Point { x: i32 = 5; y: i32 = 6; }
 

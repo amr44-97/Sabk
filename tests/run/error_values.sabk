@@ -1,11 +1,11 @@
 // How failures look with several results: std's functions return their
 // value and what went wrong (an IoError, a ParseError, or a bool), and
 // or_return / or_else pass them on or replace them.
-import "std/fmt";
-import "std/io";
-import "std/mem";
-import "std/os";
-import "std/str";
+#import "std/fmt";
+#import "std/io";
+#import "std/mem";
+#import "std/os";
+#import "std/str";
 
 struct Config {
     name: string = "server";

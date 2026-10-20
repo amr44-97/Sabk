@@ -1,9 +1,9 @@
 // formatting and appending text onto a [..]u8, at run time and in #run
-import "std/io";
-import "std/fmt";
-import "std/str";
-import "std/array";
-import "std/mem";
+#import "std/io";
+#import "std/fmt";
+#import "std/str";
+#import "std/array";
+#import "std/mem";
 
 fn report(n: i64) -> string {
     let buf: [..]u8;

@@ -1,5 +1,5 @@
-import "../resolve/lib/util";
-import "lib/helper";
+#import "../resolve/lib/util";
+#import "lib/helper";
 extern fn printf(fmt: *u8, ...) -> i32;
 
 fn main() -> i32 {

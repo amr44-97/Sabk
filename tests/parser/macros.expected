@@ -1,4 +1,12 @@
 ROOT
+  MACRO_DECL `value`
+    type: TYPE_NAME `i32`
+    rhs: BLOCK
+      RETURN
+        lhs: IDENTIFIER `x`
+    FUN_PARAM `x`
+      type: TYPE_NAME `i32`
+  SCOPE_REGION `#scope_file`
   MACRO_DECL `plain`
     rhs: BLOCK
       VAR_DECL `it` [caller]
@@ -21,13 +29,6 @@ ROOT
       type: TYPE_NAME `i32`
     FUN_PARAM `body`
       type: TYPE_NAME `Code`
-  MACRO_DECL `value` [pub]
-    type: TYPE_NAME `i32`
-    rhs: BLOCK
-      RETURN
-        lhs: IDENTIFIER `x`
-    FUN_PARAM `x`
-      type: TYPE_NAME `i32`
   FUN_DECL `f`
     rhs: BLOCK
       EXPR_STMT `plain`

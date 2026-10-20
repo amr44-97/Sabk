@@ -1,4 +1,4 @@
-import "lib/badmacro";
+#import "lib/badmacro";
 fn m() #expand {}
 fn f() {
     let a = m;

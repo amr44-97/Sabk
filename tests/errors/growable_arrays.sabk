@@ -1,5 +1,5 @@
 // [..]T: its elements are allocated, so no literal or constant is one
-import "std/array";
+#import "std/array";
 
 const WORDS: [..]string = .["a"];  // a constant would own heap memory
 let empty: [..]void;               // nothing to hold

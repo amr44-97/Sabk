@@ -1,8 +1,8 @@
 // p.* is what p points at; p[i] is the i-th value from p, whatever its
 // type: for a *[N]T that's the i-th array, as in C
-import "std/io";
-import "std/array";
-import "std/mem";
+#import "std/io";
+#import "std/array";
+#import "std/mem";
 
 struct Node { value: i64; next: *Node; }
 

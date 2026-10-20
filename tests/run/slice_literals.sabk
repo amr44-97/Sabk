@@ -1,8 +1,8 @@
-import "std/io";
-import "std/mem";
-import "std/array";
-import "std/sorting";
-import "std/str";
+#import "std/io";
+#import "std/mem";
+#import "std/array";
+#import "std/sorting";
+#import "std/str";
 
 struct Point { x: i32; y: i32; }
 

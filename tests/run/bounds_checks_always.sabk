@@ -1,7 +1,7 @@
 // set_bounds_checks(.Always): #no_bounds_check functions are checked too,
 // to find a bug one hides
-import "std/io";
-import "std/build";
+#import "std/io";
+#import "std/build";
 
 #run set_bounds_checks(.Always);
 

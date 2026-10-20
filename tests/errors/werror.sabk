@@ -1,5 +1,5 @@
 // set_werror(true) (or --werror): a warning fails the build
-import "std/build";
+#import "std/build";
 
 #run set_werror(true);
 

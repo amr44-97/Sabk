@@ -1,8 +1,8 @@
 // a result's default: `return x;` leaves out the results after it that
 // have one, `or_return` fills the others with theirs, and a function whose
 // results all have one may end without a `return`
-import "std/io";
-import "std/str";
+#import "std/io";
+#import "std/str";
 
 enum LookupError: Error { Missing, Empty }
 

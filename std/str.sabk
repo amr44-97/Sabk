@@ -28,23 +28,19 @@
 //   builder_print(&b, "% items", 42);   any values, formatted (std/fmt)
 //   println(builder_string(&b));
 
-import "std/mem";
-import "std/os";
-import "std/array";
-import "std/logging";
-
-extern fn strlen(s: *u8) -> usize;
-extern fn memcmp(a: *void, b: *void, size: usize) -> i32;
-extern fn strtod(s: *u8, end: **u8) -> f64;
+#import "std/mem";
+#import "std/os";
+#import "std/array";
+#import "std/logging";
 
 // ---- comparing and searching
 
-pub fn equal(a: string, b: string) -> bool {
+fn equal(a: string, b: string) -> bool {
     return a.len == b.len && (a.len == 0 || memcmp(a.ptr, b.ptr, a.len as usize) == 0);
 }
 
 // byte-by-byte order; a prefix sorts first
-pub fn compare_strings(a: string, b: string) -> i32 {
+fn compare_strings(a: string, b: string) -> i32 {
     let n = a.len;
     if (b.len < n)
         n = b.len;
@@ -60,24 +56,24 @@ pub fn compare_strings(a: string, b: string) -> i32 {
     return 0;
 }
 
-pub fn string_less(a: string, b: string) -> bool { return compare_strings(a, b) < 0; }
+fn string_less(a: string, b: string) -> bool { return compare_strings(a, b) < 0; }
 
-pub fn starts_with(s: string, prefix: string) -> bool {
+fn starts_with(s: string, prefix: string) -> bool {
     return s.len >= prefix.len && equal(s[..prefix.len], prefix);
 }
 
-pub fn ends_with(s: string, suffix: string) -> bool {
+fn ends_with(s: string, suffix: string) -> bool {
     return s.len >= suffix.len && equal(s[s.len - suffix.len..], suffix);
 }
 
-pub fn index_of_char(s: string, c: u8) -> isize {
+fn index_of_char(s: string, c: u8) -> isize {
     for (i in 0..s.len)
         if (s[i] == c)
             return i;
     return -1;
 }
 
-pub fn index_of(s: string, needle: string) -> isize {
+fn index_of(s: string, needle: string) -> isize {
     if (needle.len > s.len)
         return -1;
     for (i in 0..s.len - needle.len + 1)
@@ -86,21 +82,19 @@ pub fn index_of(s: string, needle: string) -> isize {
     return -1;
 }
 
-pub fn contains(s: string, needle: string) -> bool { return index_of(s, needle) >= 0; }
+fn contains(s: string, needle: string) -> bool { return index_of(s, needle) >= 0; }
 
 // the text before and after the first `separator`, and whether there was
 // one (if not, all of `s` and ""): views of s
-pub fn cut(s: string, separator: string) -> (string, string, bool) {
+fn cut(s: string, separator: string) -> (string, string, bool) {
     let at = index_of(s, separator);
     if (at < 0)
         return s, "", false;
     return s[..at], s[at + separator.len..], true;
 }
 
-fn is_space(c: u8) -> bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
-
 // without the spaces, tabs and newlines at both ends
-pub fn trim(s: string) -> string {
+fn trim(s: string) -> string {
     let start = 0;
     let end = s.len;
     while (start < end && is_space(s[start]))
@@ -114,7 +108,7 @@ pub fn trim(s: string) -> string {
 
 // the parts of `s` between separators: views of `s`, in a slice from `a`.
 // "a,b,,c" gives "a", "b", "", "c"; an empty separator gives `s` itself.
-pub fn split(s: string, separator: string, a: Allocator = context.allocator) -> []string {
+fn split(s: string, separator: string, a: Allocator = context.allocator) -> []string {
     let count = 1;
     if (separator.len > 0) {
         let rest = s;
@@ -138,7 +132,7 @@ pub fn split(s: string, separator: string, a: Allocator = context.allocator) -> 
 }
 
 // the parts with the separator between them, as a new string from `a`
-pub fn join(parts: []string, separator: string, a: Allocator = context.allocator) -> string {
+fn join(parts: []string, separator: string, a: Allocator = context.allocator) -> string {
     if (parts.len == 0)
         return .[]; // nothing allocated; free(s.ptr) on it is fine
     let size = separator.len * (parts.len - 1);
@@ -156,21 +150,21 @@ pub fn join(parts: []string, separator: string, a: Allocator = context.allocator
 
 // ---- copies and C strings
 
-pub fn copy_string(s: string, a: Allocator = context.allocator) -> string {
+fn copy_string(s: string, a: Allocator = context.allocator) -> string {
     let copy = new([]u8, s.len, a);
     copy_bytes(copy, s as []u8);
     return copy as string;
 }
 
 // a NUL-terminated copy; free it with mem.free
-pub fn to_cstring(s: string, a: Allocator = context.allocator) -> *u8 {
+fn to_cstring(s: string, a: Allocator = context.allocator) -> *u8 {
     let copy = new([]u8, s.len + 1, a); // zeroed, so it ends in NUL
     copy_bytes(copy, s as []u8);
     return copy.ptr;
 }
 
 // a view of a C string, without copying; null gives ""
-pub fn from_cstring(s: *u8) -> string {
+fn from_cstring(s: *u8) -> string {
     if (s == null)
         return null;
     return s[0..strlen(s)] as string;
@@ -179,7 +173,7 @@ pub fn from_cstring(s: *u8) -> string {
 // ---- numbers
 
 // writes `n` in decimal at the end of `buffer` and returns that part
-pub fn format_uint(n: u64, buffer: *[24]u8) -> string {
+fn format_uint(n: u64, buffer: *[24]u8) -> string {
     let i = buffer.len;
     do {
         i--;
@@ -189,7 +183,7 @@ pub fn format_uint(n: u64, buffer: *[24]u8) -> string {
     return buffer.*[i..] as string;
 }
 
-pub fn format_int(n: i64, buffer: *[24]u8) -> string {
+fn format_int(n: i64, buffer: *[24]u8) -> string {
     if (n >= 0)
         return format_uint(n as u64, buffer);
     // -n overflows for the smallest i64 and wraps back to it, whose u64
@@ -201,14 +195,14 @@ pub fn format_int(n: i64, buffer: *[24]u8) -> string {
 }
 
 // Why a string isn't the value asked for; None when it is.
-pub enum ParseError: Error {
+enum ParseError: Error {
     Empty,
     Invalid,    // something that isn't part of one, like `x` in "12x"
     OutOfRange, // a number too big (or small) for the type
 }
 
 // an optionally signed decimal integer: "42", "-7", "+3"
-pub fn parse_int(s: string) -> (i64, ParseError = .None) {
+fn parse_int(s: string) -> (i64, ParseError = .None) {
     let negative = s.len > 0 && s[0] == '-';
     let digits = s;
     if (negative || (s.len > 0 && s[0] == '+'))
@@ -225,12 +219,83 @@ pub fn parse_int(s: string) -> (i64, ParseError = .None) {
 }
 
 // a decimal integer without a sign: "42"
-pub fn parse_uint(s: string) -> (u64, ParseError = .None) {
+fn parse_uint(s: string) -> (u64, ParseError = .None) {
     let value, err = parse_digits(s, 18446744073709551615);
     if (err != .None)
         return 0, parse_failed(err, s, "an unsigned integer");
     return value;
 }
+
+// a decimal or scientific number, as C's strtod reads it: "1.5", "-2e10",
+// "inf", "nan"
+fn parse_float(s: string) -> (f64, ParseError = .None) {
+    if (s.len == 0)
+        return 0, parse_failed(.Empty, s, "a number");
+    if (s[0] == ' ' || s[0] == '\t' || s[0] == '\n') // strtod would skip them
+        return 0, parse_failed(.Invalid, s, "a number");
+    let c = to_cstring(s);
+    defer free(c);
+    let end: *u8;
+    let value = strtod(c, &end);
+    if (end != &c[s.len]) // it stopped early, or `s` has a NUL in it
+        return 0, parse_failed(.Invalid, s, "a number");
+    let huge = 1.7976931348623157e308;
+    if ((value > huge || value < -huge) && index_of_char(s, 'i') < 0 &&
+        index_of_char(s, 'I') < 0)
+        return 0, parse_failed(.OutOfRange, s, "a number"); // too big, but not written as infinity
+    return value;
+}
+
+// "true" or "false"
+fn parse_bool(s: string) -> (bool, ParseError = .None) {
+    switch (s) {
+    case "true":  return true;
+    case "false": return false;
+    case "":      return false, parse_failed(.Empty, s, "`true` or `false`");
+    default:      return false, parse_failed(.Invalid, s, "`true` or `false`");
+    }
+}
+
+// ---- building strings
+
+// Text built a piece at a time. Its bytes are a growable array, so a zero
+// Builder is ready to use (it grows with context.allocator), and copying
+// one shares the bytes, as copying a [..]u8 does.
+struct Builder {
+    bytes: [..]u8;
+}
+
+fn make_builder(a: Allocator = context.allocator) -> Builder {
+    let b: Builder;
+    b.bytes.allocator = a;
+    return b;
+}
+
+// the built string; valid until the builder grows or is freed
+fn builder_string(b: *Builder) -> string { return b.bytes as string; }
+
+fn builder_clear(b: *Builder) { b.bytes.len = 0; }
+
+fn builder_free(b: *Builder) { array_free(&b.bytes); }
+
+fn builder_append(b: *Builder, s: string) { array_append(&b.bytes, s as []u8); }
+
+fn builder_append_char(b: *Builder, c: u8) { array_add(&b.bytes, c); }
+
+// text onto the end of a [..]u8, without `as []u8`
+fn append_string(buf: *[..]u8, s: string) { array_append(buf, s as []u8); }
+
+#scope_file
+
+extern fn strlen(s: *u8) -> usize;
+extern fn memcmp(a: *void, b: *void, size: usize) -> i32;
+extern fn strtod(s: *u8, end: **u8) -> f64;
+
+// ---- comparing and searching
+
+fn is_space(c: u8) -> bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+// ---- numbers
 
 // a failure, logged as a warning: `"12x" isn't an integer`
 fn parse_failed(err: ParseError, s: string, what: string) -> ParseError {
@@ -256,63 +321,3 @@ fn parse_digits(s: string, limit: u64) -> (u64, ParseError = .None) {
     }
     return value;
 }
-
-// a decimal or scientific number, as C's strtod reads it: "1.5", "-2e10",
-// "inf", "nan"
-pub fn parse_float(s: string) -> (f64, ParseError = .None) {
-    if (s.len == 0)
-        return 0, parse_failed(.Empty, s, "a number");
-    if (s[0] == ' ' || s[0] == '\t' || s[0] == '\n') // strtod would skip them
-        return 0, parse_failed(.Invalid, s, "a number");
-    let c = to_cstring(s);
-    defer free(c);
-    let end: *u8;
-    let value = strtod(c, &end);
-    if (end != &c[s.len]) // it stopped early, or `s` has a NUL in it
-        return 0, parse_failed(.Invalid, s, "a number");
-    let huge = 1.7976931348623157e308;
-    if ((value > huge || value < -huge) && index_of_char(s, 'i') < 0 &&
-        index_of_char(s, 'I') < 0)
-        return 0, parse_failed(.OutOfRange, s, "a number"); // too big, but not written as infinity
-    return value;
-}
-
-// "true" or "false"
-pub fn parse_bool(s: string) -> (bool, ParseError = .None) {
-    switch (s) {
-    case "true":  return true;
-    case "false": return false;
-    case "":      return false, parse_failed(.Empty, s, "`true` or `false`");
-    default:      return false, parse_failed(.Invalid, s, "`true` or `false`");
-    }
-}
-
-// ---- building strings
-
-// Text built a piece at a time. Its bytes are a growable array, so a zero
-// Builder is ready to use (it grows with context.allocator), and copying
-// one shares the bytes, as copying a [..]u8 does.
-pub struct Builder {
-    bytes: [..]u8;
-}
-
-pub fn make_builder(a: Allocator = context.allocator) -> Builder {
-    let b: Builder;
-    b.bytes.allocator = a;
-    return b;
-}
-
-// the built string; valid until the builder grows or is freed
-pub fn builder_string(b: *Builder) -> string { return b.bytes as string; }
-
-pub fn builder_clear(b: *Builder) { b.bytes.len = 0; }
-
-pub fn builder_free(b: *Builder) { array_free(&b.bytes); }
-
-pub fn builder_append(b: *Builder, s: string) { array_append(&b.bytes, s as []u8); }
-
-pub fn builder_append_char(b: *Builder, c: u8) { array_add(&b.bytes, c); }
-
-// text onto the end of a [..]u8, without `as []u8`
-pub fn append_string(buf: *[..]u8, s: string) { array_append(buf, s as []u8); }
-

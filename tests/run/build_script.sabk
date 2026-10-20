@@ -1,8 +1,8 @@
 // build scripts: top-level #run code, run once the program checks, that
 // sets how it's built (std/build)
-import "std/io";
-import "std/build";
-import "lib/needs_libm";
+#import "std/io";
+#import "std/build";
+#import "lib/needs_libm";
 
 extern fn sqrt(x: f64) -> f64;
 extern fn helper_twice(x: i32) -> i32;

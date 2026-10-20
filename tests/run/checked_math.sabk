@@ -1,9 +1,9 @@
 // std/checked: arithmetic that reports overflow, the same at run time and
 // while compiling
-import "std/io";
-import "std/fmt";
-import "std/str";
-import "std/checked";
+#import "std/io";
+#import "std/fmt";
+#import "std/str";
+#import "std/checked";
 
 // each result, or "overflow"
 fn signed(b: *Builder, ok: bool, value: i64) {

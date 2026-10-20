@@ -1,4 +1,7 @@
-pub fn shared() {}
-pub fn only_left() {}
-pub struct Shape {}
+fn shared() {}
+fn only_left() {}
+struct Shape {}
+
+#scope_file
+
 fn private_one() {}

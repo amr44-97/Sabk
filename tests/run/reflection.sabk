@@ -1,10 +1,10 @@
 // compile-time reflection: code written from type information by #run and
 // compiled with #insert, at the top level or once per generic instance
-import "std/io";
-import "std/fmt";
-import "std/map";
-import "std/reflect";
-import "std/str";
+#import "std/io";
+#import "std/fmt";
+#import "std/map";
+#import "std/reflect";
+#import "std/str";
 
 struct Point { x: i32; y: i32; }
 struct Size { w: f64; h: f64; }

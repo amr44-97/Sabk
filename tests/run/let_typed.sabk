@@ -1,6 +1,6 @@
 // let a, b: T; several names of one type, each starting as its zero (or
 // the type's defaults)
-import "std/io";
+#import "std/io";
 
 struct Point { x: i32 = 1; y: i32; }
 

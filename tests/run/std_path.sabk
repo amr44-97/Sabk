@@ -1,7 +1,7 @@
 // std/path: taking paths apart (views) and putting them together
-import "std/io";
-import "std/path";
-import "std/str";
+#import "std/io";
+#import "std/path";
+#import "std/str";
 
 fn show(p: string) {
     println("% | dir [%] base [%] stem [%] ext [%]", p, path_dir(p),

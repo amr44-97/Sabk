@@ -15,11 +15,11 @@
 // pointer (Logger, in the prelude); the message it gets is only valid
 // during the call.
 
-import "std/array";
-import "std/fmt";
-import "std/str";
+#import "std/array";
+#import "std/fmt";
+#import "std/str";
 
-pub fn log(level: LogLevel, fmt: string, args: ..Any) #format {
+fn log(level: LogLevel, fmt: string, args: ..Any) #format {
     if ((level as u8) < (context.log_level as u8))
         return; // below the context's level: not even formatted
     let b = make_builder();
@@ -29,17 +29,19 @@ pub fn log(level: LogLevel, fmt: string, args: ..Any) #format {
 }
 
 // keeps a copy of each message, made with context.allocator, in `lines`
-pub fn capture_logger(lines: *[..]string) -> Logger {
+fn capture_logger(lines: *[..]string) -> Logger {
     return Logger.{ .procedure = capture, .data = lines };
 }
 
-fn capture(data: *void, level: LogLevel, message: string) {
-    array_add(data as *[..]string, copy_string(message));
+// drops every message
+fn silent_logger() -> Logger {
+    return Logger.{ .procedure = drop };
 }
 
-// drops every message
-pub fn silent_logger() -> Logger {
-    return Logger.{ .procedure = drop };
+#scope_file
+
+fn capture(data: *void, level: LogLevel, message: string) {
+    array_add(data as *[..]string, copy_string(message));
 }
 
 fn drop(data: *void, level: LogLevel, message: string) {}

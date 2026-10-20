@@ -1,5 +1,4 @@
-
-pub enum AllocatorMode { Alloc, Free, Resize, FreeAll }
+enum AllocatorMode { Alloc, Free, Resize, FreeAll }
 
 // An allocator: (data, mode, size, alignment, old_memory, old_size) -> memory
 //   Alloc    `size` bytes of zeroed memory, aligned to `alignment`
@@ -8,14 +7,14 @@ pub enum AllocatorMode { Alloc, Free, Resize, FreeAll }
 //            `old_memory`, the rest zeroed; `old_memory` is freed
 //   FreeAll  frees everything the allocator handed out, if it can
 // Running out of memory returns null. `alignment` is a power of two.
-pub type AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
+type AllocatorProc = fn(*void, AllocatorMode, isize, isize, *void, isize) -> *void;
 
-pub struct Allocator {
+struct Allocator {
     procedure: AllocatorProc;
     data: *void;                // passed to `procedure`
 }
 
-pub struct Context {
+struct Context {
     allocator: Allocator;        // the heap, unless a block changes it
     temp_allocator: Allocator;   // an arena: free it all with FreeAll
     logger: Logger;              // where std/log's log() goes: stderr
@@ -23,13 +22,13 @@ pub struct Context {
     panic_handler: PanicHandler; // what std's panic and assert call
 }
 
-pub enum LogLevel { Debug, Info, Warning, Error }
+enum LogLevel { Debug, Info, Warning, Error }
 
 // A logger: (data, level, message). The message is only valid during the
 // call, so a logger that keeps it copies it.
-pub type LoggerProc = fn(*void, LogLevel, string);
+type LoggerProc = fn(*void, LogLevel, string);
 
-pub struct Logger {
+struct Logger {
     procedure: LoggerProc;
     data: *void;                // passed to `procedure`
 }
@@ -38,9 +37,9 @@ pub struct Logger {
 // `what` "panic" or "assertion failed" and the location "file:line:col".
 // It shouldn't return: if it does, the program aborts there anyway, since
 // the code after a panic can't go on.
-pub type PanicProc = fn(*void, string, string, string);
+type PanicProc = fn(*void, string, string, string);
 
-pub struct PanicHandler {
+struct PanicHandler {
     procedure: PanicProc;
     data: *void;                // passed to `procedure`
 }
@@ -51,12 +50,12 @@ pub struct PanicHandler {
 // needs it, at run time and at compile time. A value of any type converts
 // to Any implicitly: a pointer to (a copy of) it and its type.
 
-pub enum TypeKind {
+enum TypeKind {
     Void, Bool, Int, Float, Rawptr, Pointer, Array, Slice, Growable, String,
     Function, Struct, Union, Enum, TaggedEnum,
 }
 
-pub struct TypeInfo {
+struct TypeInfo {
     kind: TypeKind;
     name: string;             // as messages write it, like []u8 or List(i32)
     size: isize;
@@ -70,22 +69,66 @@ pub struct TypeInfo {
     variants: []TypeVariant;  // Enum, TaggedEnum
 }
 
-pub struct TypeField {
+struct TypeField {
     name: string;
     info: *TypeInfo;
     offset: isize;
 }
 
-pub struct TypeVariant {
+struct TypeVariant {
     name: string;
     value: i64;
     payload: *TypeInfo;       // TaggedEnum: what it holds, or null
 }
 
-pub struct Any {
+struct Any {
     value: *void;
     info: *TypeInfo;
 }
+
+// ---- the temp allocator: one arena per program, freed all at once
+
+// ---- the target: what the program is built for, for `#if`:
+//   #if (OS == .Windows) { ... } else { ... }
+enum OperatingSystem { Linux, MacOS, Windows, FreeBSD, Other }
+enum Architecture { X64, Arm64, X86, Arm32, RiscV64, Other }
+const OS = OperatingSystem.@OS@;
+const ARCH = Architecture.@ARCH@;
+const POINTER_SIZE = sizeof(*void);
+
+// ---- Error: one type every error enum converts to
+//
+// An error enum, `enum IoError: Error { NotFound, ... }`, has Error's None
+// at 0 and converts to Error implicitly, so `or_return` passes failures of
+// any enum on from a function returning Error, and `fn main() -> Error`
+// reports what failed. The value is which enum it came from (a number the
+// compiler gives each one, in the high 32 bits) and the variant's value
+// (the low 32); each enum's None is Error's None. Back is a checked match:
+// `if (err is IoError(e))`, `case IoError(.NotFound):`.
+
+enum Error: u64 { None }
+
+// A value that may be missing: `?T` is short for Option(T). A new one is
+// None, and `o or_else fallback` is its value, or the fallback for None.
+enum Option($T) { None, Some(T) }
+
+// the failure enum `e` came from, or null for None
+fn error_enum(e: Error) -> *TypeInfo {
+    return sabk_error_type(((e as u64) >> 32) as u32);
+}
+
+// the value of the variant `e` came from
+fn error_value(e: Error) -> i64 {
+    return ((e as u64) & 0xFFFFFFFF) as i64;
+}
+
+#scope_file
+
+// ---- type information, for printing any value (std/fmt) and reflection
+//
+// type_info(T) is a *TypeInfo; the compiler makes one for every type that
+// needs it, at run time and at compile time. A value of any type converts
+// to Any implicitly: a pointer to (a copy of) it and its type.
 
 extern fn calloc(count: usize, size: usize) -> *void;
 extern fn realloc(memory: *void, size: usize) -> *void;
@@ -246,14 +289,6 @@ fn temp_proc(data: *void, mode: AllocatorMode, size: isize, align: isize, old: *
     }
 }
 
-// ---- the target: what the program is built for, for `#if`:
-//   #if (OS == .Windows) { ... } else { ... }
-pub enum OperatingSystem { Linux, MacOS, Windows, FreeBSD, Other }
-pub enum Architecture { X64, Arm64, X86, Arm32, RiscV64, Other }
-pub const OS = OperatingSystem.@OS@;
-pub const ARCH = Architecture.@ARCH@;
-pub const POINTER_SIZE = sizeof(*void);
-
 // ---- Error: one type every error enum converts to
 //
 // An error enum, `enum IoError: Error { NotFound, ... }`, has Error's None
@@ -263,22 +298,6 @@ pub const POINTER_SIZE = sizeof(*void);
 // compiler gives each one, in the high 32 bits) and the variant's value
 // (the low 32); each enum's None is Error's None. Back is a checked match:
 // `if (err is IoError(e))`, `case IoError(.NotFound):`.
-
-pub enum Error: u64 { None }
-
-// A value that may be missing: `?T` is short for Option(T). A new one is
-// None, and `o or_else fallback` is its value, or the fallback for None.
-pub enum Option($T) { None, Some(T) }
-
-// the failure enum `e` came from, or null for None
-pub fn error_enum(e: Error) -> *TypeInfo {
-    return sabk_error_type(((e as u64) >> 32) as u32);
-}
-
-// the value of the variant `e` came from
-pub fn error_value(e: Error) -> i64 {
-    return ((e as u64) & 0xFFFFFFFF) as i64;
-}
 
 // the compiler's table of the enums that became Errors
 extern fn sabk_error_type(id: u32) -> *TypeInfo;

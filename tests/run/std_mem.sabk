@@ -1,7 +1,7 @@
-import "std/io";
-import "std/mem";
-import "std/os";
-import "std/str";
+#import "std/io";
+#import "std/mem";
+#import "std/os";
+#import "std/str";
 
 struct Point { x: i64; y: i64; }
 

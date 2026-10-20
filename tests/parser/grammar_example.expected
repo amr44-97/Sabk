@@ -1,32 +1,14 @@
-ROOT
+ROOT `#`
   IMPORT `"std/io"`
   IMPORT `"std/mem"`
   IMPORT `"vendor/my-lib"`
     rhs: IDENTIFIER `lib`
-  STRUCT `Vec2` [pub]
+  STRUCT `Vec2`
     STRUCT_FIELD `x`
       type: TYPE_NAME `f32`
     STRUCT_FIELD `y`
       type: TYPE_NAME `f32`
-  ENUM `Color`
-    type: TYPE_NAME `u8`
-    ENUM_VARIANT `Red`
-    ENUM_VARIANT `Green`
-    ENUM_VARIANT `Blue`
-      lhs: NUMBER_LITERAL `10`
-  TYPE_ALIAS `Callback`
-    type: TYPE_FN
-      type: TYPE_NAME `bool`
-      TYPE_NAME `i32`
-  CONST_DECL `MAX`
-    type: TYPE_NAME `i32`
-    lhs: NUMBER_LITERAL `64`
-  FUN_DECL `printf` [extern] [variadic]
-    type: TYPE_NAME `i32`
-    FUN_PARAM `fmt`
-      type: TYPE_PTR `*`
-        lhs: TYPE_NAME `u8`
-  FUN_DECL `main` [pub]
+  FUN_DECL `main`
     type: TYPE_NAME `i32`
     rhs: BLOCK
       VAR_DECL `arena`
@@ -100,3 +82,22 @@ ROOT
               STRING_LITERAL `"small\n"`
       RETURN
         lhs: NUMBER_LITERAL `0`
+  SCOPE_REGION `#scope_file`
+  ENUM `Color`
+    type: TYPE_NAME `u8`
+    ENUM_VARIANT `Red`
+    ENUM_VARIANT `Green`
+    ENUM_VARIANT `Blue`
+      lhs: NUMBER_LITERAL `10`
+  TYPE_ALIAS `Callback`
+    type: TYPE_FN
+      type: TYPE_NAME `bool`
+      TYPE_NAME `i32`
+  CONST_DECL `MAX`
+    type: TYPE_NAME `i32`
+    lhs: NUMBER_LITERAL `64`
+  FUN_DECL `printf` [extern] [variadic]
+    type: TYPE_NAME `i32`
+    FUN_PARAM `fmt`
+      type: TYPE_PTR `*`
+        lhs: TYPE_NAME `u8`

@@ -1,8 +1,8 @@
 // string: a view of text, laid out like []u8 but its own type
-import "std/io";
-import "std/fmt";
-import "std/mem";
-import "std/str";
+#import "std/io";
+#import "std/fmt";
+#import "std/mem";
+#import "std/str";
 
 fn keyword(word: string) -> i32 {
     switch (word) {                     // by content; needs no case for all

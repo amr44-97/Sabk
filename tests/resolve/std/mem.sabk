@@ -1,8 +1,8 @@
-import "std/io";
+#import "std/io";
 
-pub struct Arena { data: *void; }
-pub struct Pair { a: i32; b: i32; }
-pub fn alloc(size: usize, a: Allocator = context.allocator) -> *void {
+struct Arena { data: *void; }
+struct Pair { a: i32; b: i32; }
+fn alloc(size: usize, a: Allocator = context.allocator) -> *void {
     io.print("alloc\n");
     return null;
 }

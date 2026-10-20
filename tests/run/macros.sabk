@@ -1,4 +1,4 @@
-import "lib/macrolib";
+#import "lib/macrolib";
 extern fn printf(fmt: *u8, ...) -> i32;
 extern fn exit(code: i32);
 

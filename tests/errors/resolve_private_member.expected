@@ -1,6 +1,6 @@
-[error]: `secret` is private to module `tests/errors/lib/priv.sabk` at [tests/errors/resolve_private_member.sabk:2:15]
+[error]: `secret` is private to file `tests/errors/lib/priv.sabk` at [tests/errors/resolve_private_member.sabk:2:15]
      2 | fn f() { priv.secret(); }
        |               ^
-[note]: declared here, add `pub` to export it at [tests/errors/lib/priv.sabk:2:4]
-     2 | fn secret() {}
-       |    ^
+[note]: `#scope_file` keeps what follows it inside its file; to export `secret`, put it before, or after a `#scope_export` at [tests/errors/lib/priv.sabk:4:1]
+     4 | #scope_file
+       | ^

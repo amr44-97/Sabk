@@ -1,6 +1,6 @@
 // if expressions, labeled blocks and switch expressions that give values:
 // what the type checker refuses
-import "std/io";
+#import "std/io";
 enum E { A, B }
 
 fn f(x: i64, e: E) -> i64 {

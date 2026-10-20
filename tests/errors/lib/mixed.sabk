@@ -1,4 +1,0 @@
-pub fn old() {}
-
-#scope_file
-fn newer() {}

@@ -2,15 +2,53 @@
 // function's own code shows (warnings); see "Memory traps" in
 // docs/reference.md and Sabk-memory-traps.md.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "std/str";
-import "ast";
-import "resolve";
-import "types";
-import "check";
-import "generics";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/str";
+#import "ast";
+#import "resolve";
+#import "types";
+#import "check";
+#import "generics";
+
+/* ---------------------------------------------------- memory that escapes */
+
+fn check_escapes(c: *Checker, fun: *Node) {
+    let e = Escapes.{ .c = c, .fun = fun };
+    let body = fn_body(fun);
+    e.changed = true;
+    while (e.changed) {
+        e.changed = false;
+        find_held(&e, body);
+    }
+    find_escapes(&e, body);
+    map_free(&e.held);
+}
+
+// Warnings for the memory traps (Sabk-memory-traps.md) that a function's
+// own code shows:
+//   1-5  memory that dies with a block, a loop's pass or the function,
+//        kept where it outlives that: stored in an outer variable, or
+//        given to a call along with a pointer to outer memory that can
+//        hold it (array_add(&pairs, .[i, i]))
+//   8    a [..]T copied, then one copy grown while the other is used
+//   9    a write to a local that only ever holds a string literal
+//   12   a [..]T handed to a call while a loop reads it
+//   13   a by-value [..]T parameter handed to a call that can grow it
+// Like Escapes it's conservative: what it can't see, it lets through.
+// Stores that outlive the function are Escapes' errors, not warnings here.
+
+fn check_traps(c: *Checker, fun: *Node) {
+    let t = Traps.{ .c = c, .fun = fun };
+    push(&t, false);
+    for (s in block_list(fn_body(fun)))
+        visit(&t, s);
+    report_copies(&t);
+    report_literal_writes(&t);
+}
+
+#scope_file
 
 /* ---------------------------------------------------- memory that escapes */
 
@@ -24,18 +62,6 @@ struct Escapes {
     fun: *Node;
     held: Map(*Node, *Node); // a local -> what it points into
     changed: bool;
-}
-
-pub fn check_escapes(c: *Checker, fun: *Node) {
-    let e = Escapes.{ .c = c, .fun = fun };
-    let body = fn_body(fun);
-    e.changed = true;
-    while (e.changed) {
-        e.changed = false;
-        find_held(&e, body);
-    }
-    find_escapes(&e, body);
-    map_free(&e.held);
 }
 
 fn is_local(d: *Node) -> bool {
@@ -314,8 +340,6 @@ fn find_escapes(x: *Escapes, n: *Node) {
         find_escapes(x, child);
 }
 
-/* ------------------------------------------------------------ memory traps */
-
 // Warnings for the memory traps (Sabk-memory-traps.md) that a function's
 // own code shows:
 //   1-5  memory that dies with a block, a loop's pass or the function,
@@ -376,15 +400,6 @@ struct Traps {
     // trap 9: locals holding a string literal, and the writes to them
     literal_only: Map(*Node, bool);
     literal_writes: [..]LiteralWrite;
-}
-
-pub fn check_traps(c: *Checker, fun: *Node) {
-    let t = Traps.{ .c = c, .fun = fun };
-    push(&t, false);
-    for (s in block_list(fn_body(fun)))
-        visit(&t, s);
-    report_copies(&t);
-    report_literal_writes(&t);
 }
 
 fn current(t: *Traps) -> i32 { return (t.loop_scopes.len - 1) as i32; }
@@ -933,3 +948,5 @@ fn report_literal_writes(t: *Traps) {
             warning(t.c, w.write.tok, tformat("`%` holds a string literal, whose bytes are read-only: this write crashes the program; to change the text, copy it first: `copy_string(...)` (std/str)",
                                               w.local.tok.text));
 }
+
+/* ------------------------------------------------------------ memory traps */

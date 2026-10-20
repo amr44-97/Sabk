@@ -1,6 +1,6 @@
-[error]: code made by `#insert` can't import; import in the file instead at [tests/errors/insert_import.sabk:2:1 #insert:1:8]
-     1 | import "std/io";
-       |        ^
+[error]: code made by `#insert` can't `#import` or `#load`; do it in the file instead at [tests/errors/insert_import.sabk:2:1 #insert:1:9]
+     1 | #import "std/io";
+       |         ^
 [note]: in the code `#insert` made here at [tests/errors/insert_import.sabk:2:1]
-     2 | #insert "import \"std/io\";";
+     2 | #insert "#import \"std/io\";";
        | ^

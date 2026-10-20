@@ -1,6 +1,6 @@
 // a type found inside another type (T in *[..]T) can't convert, so it
 // decides T, and the other arguments must convert to it
-import "std/array";
+#import "std/array";
 
 fn f() {
     let xs: [..]i32;

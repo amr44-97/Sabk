@@ -1,3 +1,6 @@
-pub struct Writer { fd: i32; }
-pub fn print(s: string) { write(Writer.{ .fd = 1 }, s); }
+struct Writer { fd: i32; }
+fn print(s: string) { write(Writer.{ .fd = 1 }, s); }
+
+#scope_file
+
 fn write(w: Writer, s: string) {}

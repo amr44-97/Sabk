@@ -1,7 +1,7 @@
 // set_bounds_checks(.Off): no index or slice checks anywhere; division by
 // zero is still checked
-import "std/io";
-import "std/build";
+#import "std/io";
+#import "std/build";
 
 #run set_bounds_checks(.Off);
 

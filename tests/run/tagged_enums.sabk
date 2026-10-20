@@ -1,7 +1,7 @@
 // tagged enums: variants that hold values, and switches that bind them
-import "std/io";
-import "std/mem";
-import "std/str";
+#import "std/io";
+#import "std/mem";
+#import "std/str";
 
 enum Op { Add, Sub, Mul }
 

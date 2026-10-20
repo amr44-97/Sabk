@@ -1,5 +1,5 @@
 // panic calls abort(), which stops the #run instead of the compiler
-import "std/os";
+#import "std/os";
 
 fn check(n: i32) -> i32 {
     if (n < 0)

@@ -1,8 +1,8 @@
 // array_add_new fills an element in place; array_find and
 // array_remove_value compare by value (std/reflect's values_equal)
-import "std/io";
-import "std/array";
-import "std/str";
+#import "std/io";
+#import "std/array";
+#import "std/str";
 
 struct Book { title: string; pages: i64 = 100; tags: [..]string; }
 

@@ -1,29 +1,29 @@
 // The checker's conversions and expressions.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "std/mem";
-import "std/str";
-import "ast";
-import "const";
-import "lexer";
-import "module";
-import "resolve";
-import "token";
-import "types";
-import "check";
-import "statements";
-import "patterns";
-import "generics";
-import "comptime";
-import "formats";
-import "narrowing";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/mem";
+#import "std/str";
+#import "ast";
+#import "const";
+#import "lexer";
+#import "module";
+#import "resolve";
+#import "token";
+#import "types";
+#import "check";
+#import "statements";
+#import "patterns";
+#import "generics";
+#import "comptime";
+#import "formats";
+#import "narrowing";
 
 /* ------------------------------------------------------------ conversions */
 
 // can a value of type `from` be used where `to` is expected, without `as`?
-pub fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
+fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
     if (from == to)
         return true;
     // a value becomes an option holding it: `let o: ?i64 = 5;` (not
@@ -75,13 +75,13 @@ pub fn can_coerce(c: *Checker, e: *Node, from: *Type, to: *Type) -> bool {
 }
 
 // a plain enum with a 0 variant (its success) becomes an Error
-pub fn widens_to_error(from: *Type) -> bool {
+fn widens_to_error(from: *Type) -> bool {
     return from.is_error_enum; // enum IoError: Error, tagged or not
 }
 
 // the number an enum's Errors carry, given the first time one is made; 0
 // (reported at `at`) when its variants don't fit in an Error's 32 bits
-pub fn error_id(c: *Checker, at: *Node, from: *Type) -> u32 {
+fn error_id(c: *Checker, at: *Node, from: *Type) -> u32 {
     let known, found = map_get(&c.error_ids, from);
     if (found)
         return known;
@@ -102,7 +102,7 @@ pub fn error_id(c: *Checker, at: *Node, from: *Type) -> u32 {
 
 // `e`, a failure enum's value, becomes an Error: a constant one is folded
 // (so a case label stays a constant), anything else converted when it runs
-pub fn widen_to_error(c: *Checker, e: *Node) {
+fn widen_to_error(c: *Checker, e: *Node) {
     let id = error_id(c, e, e.ty);
     if (id == 0)
         return;
@@ -116,7 +116,7 @@ pub fn widen_to_error(c: *Checker, e: *Node) {
 }
 
 // converts `e` to `to` or reports why it can't be
-pub fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
+fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
     let from = e.ty;
     if (from.kind == .Error || to.kind == .Error)
         return true;
@@ -194,57 +194,10 @@ pub fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
     return false;
 }
 
-// `e` becomes `.Some(e)` of option type `to`: the value is moved into a
-// node of its own, converted to what the option holds
-fn wrap_some(c: *Checker, e: *Node, to: *Type) -> bool {
-    let value = new(e.*);
-    if (!coerce(c, value, option_value(to)))
-        return false;
-    let some: *Node = null;
-    for (v in enum_variants(to.decl))
-        if (v.tok.text == "Some")
-            some = v;
-    let tok = e.tok;
-    let color = e.color;
-    e.* = Node.{ .tok = tok, .color = color, .span = value.span, .decl = some, .kind = .VariantValue(value), .ty = to };
-    return true;
-}
-
-// what a literal that takes its type from where it's used takes it from:
-// inside an option, what the option holds (`let p: ?Point = .{ ... };`,
-// then wrapped), unless it names the option's own variants
-fn context_type(c: *Checker, n: *Node, expected: *Type) -> *Type {
-    if (expected == null || !expected.is_tagged || !is_option(c, expected))
-        return expected;
-    let e = ungroup(n);
-    let name = "";
-    switch (e.kind) {
-    case .StructInit{declared}:
-        if (declared != null)
-            return expected;
-        if (e.kind is .StructInit{variant: true} && declared == null)
-            return expected;
-        return option_value(expected);
-    case .ArrayLiteral{elem}:
-        return if (elem == null) option_value(expected) else expected;
-    case .EnumShorthand:
-        name = e.tok.text;
-    case .Call{callee}:
-        if (callee.kind.tag != .EnumShorthand)
-            return expected;
-        name = callee.tok.text;
-    default:
-        return expected;
-    }
-    if (name == ".Some" || name == ".None")
-        return expected;
-    return option_value(expected);
-}
-
 // `p[i]` on a `*[N]T` or `*[..]T` is the i-th array from `p`, as in C.
 // When one turns up where an element was meant, say how to index the array
 // instead.
-pub fn explain_pointer_index(c: *Checker, e: *Node) {
+fn explain_pointer_index(c: *Checker, e: *Node) {
     let n = ungroup(e);
     let object: *Node = null;
     switch (n.kind) {
@@ -269,7 +222,7 @@ pub fn explain_pointer_index(c: *Checker, e: *Node) {
 }
 
 // gives an untyped expression its default type: `let x = 5;` is an isize
-pub fn default_type(c: *Checker, e: *Node) -> *Type {
+fn default_type(c: *Checker, e: *Node) -> *Type {
     switch (e.ty.kind) {
     case .GenericFn:
         error(c, e.tok, tformat("% is generic; give the variable a function type to say which instance to use",
@@ -297,7 +250,7 @@ pub fn default_type(c: *Checker, e: *Node) -> *Type {
 }
 
 // can `n` be assigned to (and have its address taken)?
-pub fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
+fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
     switch (n.kind) {
     case .Grouped{inner}:
         return assignable(c, inner, why);
@@ -357,7 +310,7 @@ pub fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
 
 /* ------------------------------------------------------------ expressions */
 
-pub fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
+fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
     if (n.is_baked)
         return n.ty;
     expected = context_type(c, n, expected);
@@ -623,6 +576,143 @@ pub fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
     return t;
 }
 
+// the prelude's Option(T), written ?T
+fn is_option(c: *Checker, t: *Type) -> bool {
+    return t.is_tagged && t.decl.generic != null && t.decl.generic == c.option_decl;
+}
+
+// what a ?T holds when it's Some: T
+fn option_value(t: *Type) -> *Type { return t.decl.instance_args[0]; }
+
+fn value_of_decl(c: *Checker, n: *Node, d: *Node) -> *Type {
+    if (untaken(c, n, d))
+        return c.types.error;
+    switch (d.kind) {
+    case .Fn{is_extern, is_macro}:
+        if (is_macro)
+            return c.types.error;
+        // extern functions use the C calling convention, which our function
+        // types don't describe: as a value one is an opaque C function
+        // pointer
+        if (is_extern && n != c.extern_callee) {
+            decl_type(c, d);
+            return c.types.rawptr;
+        }
+        // a generic function: its instance is picked by the function type
+        // it's converted to (see coerce)
+        if (is_template(d))
+            return c.types.generic_fn;
+        return decl_type(c, d);
+    case .Let, .Param, .ForIn, .LoopIndex, .Binding:
+        return decl_type(c, d);
+    case .Const:
+        let t = decl_type(c, d);
+        n.cval = d.cval;
+        return t;
+    case .Variant:
+        // only reachable as a bare name inside the enum: `B = A + 1`
+        n.cval = d.cval;
+        return c.types.untyped_int;
+    default:
+        // types and modules: the resolver already reported the misuse
+        return c.types.error;
+    }
+}
+
+// gives two checked operands a common type, converting untyped constants
+fn unify(c: *Checker, n: *Node, lhs: *Node, rhs: *Node) -> *Type {
+    let l, r = lhs.ty, rhs.ty;
+    if (l.kind == .Error || r.kind == .Error)
+        return c.types.error;
+    if (l == r)
+        return l;
+
+    if (is_untyped(l) && is_untyped(r)) {
+        if (is_numeric(l) && is_numeric(r))
+            return c.types.untyped_float; // int and float mix
+    } else if (is_untyped(l)) {
+        if (coerce(c, lhs, r))
+            return r;
+        explain_pointer_index(c, rhs);
+        return c.types.error;
+    } else if (is_untyped(r)) {
+        if (coerce(c, rhs, l))
+            return l;
+        explain_pointer_index(c, lhs);
+        return c.types.error;
+    } else if (can_coerce(c, lhs, l, r)) {
+        if (r.is_failure)
+            widen_to_error(c, lhs);
+        else
+            lhs.conv = r;
+        return r;
+    } else if (can_coerce(c, rhs, r, l)) {
+        if (l.is_failure)
+            widen_to_error(c, rhs);
+        else
+            rhs.conv = l;
+        return l;
+    }
+    let ql, qr = q2(l, r);
+    error(c, n.tok, tformat("mismatched types % and % for %", ql, qr, q(n.tok.text)));
+    explain_pointer_index(c, lhs);
+    explain_pointer_index(c, rhs);
+    return c.types.error;
+}
+
+#scope_file
+
+/* ------------------------------------------------------------ conversions */
+
+// `e` becomes `.Some(e)` of option type `to`: the value is moved into a
+// node of its own, converted to what the option holds
+fn wrap_some(c: *Checker, e: *Node, to: *Type) -> bool {
+    let value = new(e.*);
+    if (!coerce(c, value, option_value(to)))
+        return false;
+    let some: *Node = null;
+    for (v in enum_variants(to.decl))
+        if (v.tok.text == "Some")
+            some = v;
+    let tok = e.tok;
+    let color = e.color;
+    e.* = Node.{ .tok = tok, .color = color, .span = value.span, .decl = some, .kind = .VariantValue(value), .ty = to };
+    return true;
+}
+
+// what a literal that takes its type from where it's used takes it from:
+// inside an option, what the option holds (`let p: ?Point = .{ ... };`,
+// then wrapped), unless it names the option's own variants
+fn context_type(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    if (expected == null || !expected.is_tagged || !is_option(c, expected))
+        return expected;
+    let e = ungroup(n);
+    let name = "";
+    switch (e.kind) {
+    case .StructInit{declared}:
+        if (declared != null)
+            return expected;
+        if (e.kind is .StructInit{variant: true} && declared == null)
+            return expected;
+        return option_value(expected);
+    case .ArrayLiteral{elem}:
+        return if (elem == null) option_value(expected) else expected;
+    case .EnumShorthand:
+        name = e.tok.text;
+    case .Call{callee}:
+        if (callee.kind.tag != .EnumShorthand)
+            return expected;
+        name = callee.tok.text;
+    default:
+        return expected;
+    }
+    if (name == ".Some" || name == ".None")
+        return expected;
+    return option_value(expected);
+}
+
+/* ------------------------------------------------------------ expressions */
+
 // a side of `T == Map`: a generic struct named without its types, which
 // matches any of its instances
 fn any_instance(side: *Node) -> *Node {
@@ -787,14 +877,6 @@ fn check_or_return(c: *Checker, n: *Node) -> *Type {
     return tuple_of(&c.types, rest);
 }
 
-// the prelude's Option(T), written ?T
-pub fn is_option(c: *Checker, t: *Type) -> bool {
-    return t.is_tagged && t.decl.generic != null && t.decl.generic == c.option_decl;
-}
-
-// what a ?T holds when it's Some: T
-pub fn option_value(t: *Type) -> *Type { return t.decl.instance_args[0]; }
-
 // f() or_else fallback: f's value, or the fallback when f's last value
 // says it failed; or a ?T's value, or a pointer that isn't null
 fn check_or_else(c: *Checker, n: *Node) -> *Type {
@@ -828,82 +910,6 @@ fn check_or_else(c: *Checker, n: *Node) -> *Type {
     if (ft.kind != .Error)
         ok = coerce(c, fallback, value) && ok;
     return if (ok) value else c.types.error;
-}
-
-pub fn value_of_decl(c: *Checker, n: *Node, d: *Node) -> *Type {
-    if (untaken(c, n, d))
-        return c.types.error;
-    switch (d.kind) {
-    case .Fn{is_extern, is_macro}:
-        if (is_macro)
-            return c.types.error;
-        // extern functions use the C calling convention, which our function
-        // types don't describe: as a value one is an opaque C function
-        // pointer
-        if (is_extern && n != c.extern_callee) {
-            decl_type(c, d);
-            return c.types.rawptr;
-        }
-        // a generic function: its instance is picked by the function type
-        // it's converted to (see coerce)
-        if (is_template(d))
-            return c.types.generic_fn;
-        return decl_type(c, d);
-    case .Let, .Param, .ForIn, .LoopIndex, .Binding:
-        return decl_type(c, d);
-    case .Const:
-        let t = decl_type(c, d);
-        n.cval = d.cval;
-        return t;
-    case .Variant:
-        // only reachable as a bare name inside the enum: `B = A + 1`
-        n.cval = d.cval;
-        return c.types.untyped_int;
-    default:
-        // types and modules: the resolver already reported the misuse
-        return c.types.error;
-    }
-}
-
-// gives two checked operands a common type, converting untyped constants
-pub fn unify(c: *Checker, n: *Node, lhs: *Node, rhs: *Node) -> *Type {
-    let l, r = lhs.ty, rhs.ty;
-    if (l.kind == .Error || r.kind == .Error)
-        return c.types.error;
-    if (l == r)
-        return l;
-
-    if (is_untyped(l) && is_untyped(r)) {
-        if (is_numeric(l) && is_numeric(r))
-            return c.types.untyped_float; // int and float mix
-    } else if (is_untyped(l)) {
-        if (coerce(c, lhs, r))
-            return r;
-        explain_pointer_index(c, rhs);
-        return c.types.error;
-    } else if (is_untyped(r)) {
-        if (coerce(c, rhs, l))
-            return l;
-        explain_pointer_index(c, lhs);
-        return c.types.error;
-    } else if (can_coerce(c, lhs, l, r)) {
-        if (r.is_failure)
-            widen_to_error(c, lhs);
-        else
-            lhs.conv = r;
-        return r;
-    } else if (can_coerce(c, rhs, r, l)) {
-        if (l.is_failure)
-            widen_to_error(c, rhs);
-        else
-            rhs.conv = l;
-        return l;
-    }
-    let ql, qr = q2(l, r);
-    error(c, n.tok, tformat("mismatched types % and % for %", ql, qr, q(n.tok.text)));
-    explain_pointer_index(c, lhs);
-    explain_pointer_index(c, rhs);
-    return c.types.error;
 }
 
 fn is_comparison(op: BinaryOp) -> bool {

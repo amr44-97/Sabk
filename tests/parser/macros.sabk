@@ -1,3 +1,7 @@
+fn value(x: i32) -> i32 #expand { return x; }
+
+#scope_file
+
 fn plain(a: i32, body: Code) #expand {
     `let it = a;
     `defer finish();
@@ -7,7 +11,6 @@ fn plain(a: i32, body: Code) #expand {
     `counter += #insert body;
     `return 1;
 }
-pub fn value(x: i32) -> i32 #expand { return x; }
 
 fn f() {
     plain(1) { work(); }

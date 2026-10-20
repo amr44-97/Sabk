@@ -17,20 +17,20 @@
 //
 //   return a.x == b.x && a.y == b.y;
 
-import "std/fmt";
-import "std/os";
-import "std/str";
+#import "std/fmt";
+#import "std/os";
+#import "std/str";
 
-pub fn values_equal(a: $T, b: T) -> bool {
+fn values_equal(a: $T, b: T) -> bool {
     #insert #run equal_code(type_info(T));
 }
 
-pub fn hash_value(v: $T) -> u64 {
+fn hash_value(v: $T) -> u64 {
     #insert #run hash_code(type_info(T));
 }
 
 // FNV-1a over bytes, and a way to combine two hashes into one
-pub fn hash_memory(memory: *void, size: isize) -> u64 {
+fn hash_memory(memory: *void, size: isize) -> u64 {
     let h: u64 = 14695981039346656037;
     for (b in (memory as *u8)[0..size]) {
         h ^= b;
@@ -39,9 +39,11 @@ pub fn hash_memory(memory: *void, size: isize) -> u64 {
     return h;
 }
 
-pub fn combine_hashes(h: u64, more: u64) -> u64 {
+fn combine_hashes(h: u64, more: u64) -> u64 {
     return h ^ (more + 0x9e3779b97f4a7c15 + (h << 6) + (h >> 2));
 }
+
+#scope_file
 
 // ---- the code they're made of
 

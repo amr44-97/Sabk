@@ -1,6 +1,6 @@
 // keywords as field names: in declarations, after `.`, in `.name =`,
 // in variant fields and their patterns; the C gets them with a `_`
-import "std/io";
+#import "std/io";
 
 struct Token {
     type: i32;

@@ -1,2 +1,3 @@
-import "b";
-pub fn ping(n: i32) { if (n > 0) b.pong(n - 1); }
+#import "b";
+
+fn ping(n: i32) { if (n > 0) b.pong(n - 1); }

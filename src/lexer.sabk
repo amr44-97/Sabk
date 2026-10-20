@@ -6,24 +6,15 @@
 // or char literal keeps its quotes and escapes; decoding them is the
 // parser's. A zero byte ends the file, as the end of the text does.
 
-import "std/array";
-import "std/checked";
-import "std/fmt";
-import "std/mem";
-import "std/str";
-import "source";
-import "token";
+#import "std/array";
+#import "std/checked";
+#import "std/fmt";
+#import "std/mem";
+#import "std/str";
+#import "source";
+#import "token";
 
-struct Lexer {
-    src: *Source;
-    tokens: [..]Token;
-    pos: isize;         // the next byte
-    start: isize;       // where the token being made starts
-    line: i32;
-    line_start: isize;  // where the line `pos` is on starts
-}
-
-pub fn lex(src: *Source) -> ([..]Token, bool) {
+fn lex(src: *Source) -> ([..]Token, bool) {
     let l = Lexer.{ .src = src, .line = 1 };
     while (true) {
         let kind, ok = next_token(&l);
@@ -34,6 +25,89 @@ pub fn lex(src: *Source) -> ([..]Token, bool) {
         if (kind == .Eof)
             return l.tokens, true;
     }
+}
+
+// ---- the values of number tokens
+
+// a Number token's value, and false when it doesn't fit in a u64
+fn integer_value(text: string) -> (u64, bool) {
+    let base: u64 = 10;
+    let digits = text;
+    if (text.len > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
+        base = 16;
+        digits = text[2..];
+    }
+    let value: u64 = 0;
+    for (c in digits) {
+        let digit: u64 = if (is_digit(c)) (c - '0') as u64
+                         else if (c >= 'a') (c - 'a' + 10) as u64
+                         else (c - 'A' + 10) as u64;
+        let times, ok1 = mul_u64(value, base);
+        let plus, ok2 = add_u64(times, digit);
+        if (!ok1 || !ok2)
+            return 0xffffffffffffffff, false;
+        value = plus;
+    }
+    return value, true;
+}
+
+// a Float token's value, rounded to the nearest f64
+fn float_value(text: string) -> f64 {
+    let buffer: [64]u8 = ---;
+    if (text.len >= buffer.len) {
+        let c_text = to_cstring(text);
+        defer free(c_text);
+        return strtod(c_text, null);
+    }
+    copy_bytes(buffer[..], text as []u8);
+    buffer[text.len] = 0;
+    return strtod(buffer.ptr, null);
+}
+
+// A string or char literal's body (without its quotes) with its escapes
+// decoded; on a bad escape, false and the escape
+fn decode_escapes(body: string) -> (string, string, bool) {
+    let out: [..]u8;
+    let i: isize = 0;
+    while (i < body.len) {
+        if (body[i] != '\\') {
+            array_add(&out, body[i]);
+            i++;
+            continue;
+        }
+        let c: u8 = if (i + 1 < body.len) body[i + 1] else 0;
+        switch (c) {
+        case 'n': array_add(&out, '\n');
+        case 't': array_add(&out, '\t');
+        case 'r': array_add(&out, '\r');
+        case '0': array_add(&out, 0);
+        case '\\': array_add(&out, '\\');
+        case '\'': array_add(&out, '\'');
+        case '"': array_add(&out, '"');
+        case 'x':
+            if (i + 3 < body.len && is_hex(body[i + 2]) && is_hex(body[i + 3])) {
+                array_add(&out, (hex_value(body[i + 2]) * 16 + hex_value(body[i + 3])) as u8);
+                i += 4;
+                continue;
+            }
+            return out as string, body[i..min_index(i + 4, body.len)], false;
+        default:
+            return out as string, body[i..min_index(i + 2, body.len)], false;
+        }
+        i += 2;
+    }
+    return out as string, "", true;
+}
+
+#scope_file
+
+struct Lexer {
+    src: *Source;
+    tokens: [..]Token;
+    pos: isize;         // the next byte
+    start: isize;       // where the token being made starts
+    line: i32;
+    line_start: isize;  // where the line `pos` is on starts
 }
 
 // the byte `ahead` places after pos; 0 past the end
@@ -301,77 +375,7 @@ fn skip_block_comment(l: *Lexer) -> bool {
 
 // ---- the values of number tokens
 
-// a Number token's value, and false when it doesn't fit in a u64
-pub fn integer_value(text: string) -> (u64, bool) {
-    let base: u64 = 10;
-    let digits = text;
-    if (text.len > 2 && text[0] == '0' && (text[1] == 'x' || text[1] == 'X')) {
-        base = 16;
-        digits = text[2..];
-    }
-    let value: u64 = 0;
-    for (c in digits) {
-        let digit: u64 = if (is_digit(c)) (c - '0') as u64
-                         else if (c >= 'a') (c - 'a' + 10) as u64
-                         else (c - 'A' + 10) as u64;
-        let times, ok1 = mul_u64(value, base);
-        let plus, ok2 = add_u64(times, digit);
-        if (!ok1 || !ok2)
-            return 0xffffffffffffffff, false;
-        value = plus;
-    }
-    return value, true;
-}
-
 extern fn strtod(text: *u8, end: **u8) -> f64;
-
-// a Float token's value, rounded to the nearest f64
-pub fn float_value(text: string) -> f64 {
-    let buffer: [64]u8 = ---;
-    if (text.len >= buffer.len) {
-        let c_text = to_cstring(text);
-        defer free(c_text);
-        return strtod(c_text, null);
-    }
-    copy_bytes(buffer[..], text as []u8);
-    buffer[text.len] = 0;
-    return strtod(buffer.ptr, null);
-}
-
-// A string or char literal's body (without its quotes) with its escapes
-// decoded; on a bad escape, false and the escape
-pub fn decode_escapes(body: string) -> (string, string, bool) {
-    let out: [..]u8;
-    let i: isize = 0;
-    while (i < body.len) {
-        if (body[i] != '\\') {
-            array_add(&out, body[i]);
-            i++;
-            continue;
-        }
-        let c: u8 = if (i + 1 < body.len) body[i + 1] else 0;
-        switch (c) {
-        case 'n': array_add(&out, '\n');
-        case 't': array_add(&out, '\t');
-        case 'r': array_add(&out, '\r');
-        case '0': array_add(&out, 0);
-        case '\\': array_add(&out, '\\');
-        case '\'': array_add(&out, '\'');
-        case '"': array_add(&out, '"');
-        case 'x':
-            if (i + 3 < body.len && is_hex(body[i + 2]) && is_hex(body[i + 3])) {
-                array_add(&out, (hex_value(body[i + 2]) * 16 + hex_value(body[i + 3])) as u8);
-                i += 4;
-                continue;
-            }
-            return out as string, body[i..min_index(i + 4, body.len)], false;
-        default:
-            return out as string, body[i..min_index(i + 2, body.len)], false;
-        }
-        i += 2;
-    }
-    return out as string, "", true;
-}
 
 fn is_hex(c: u8) -> bool { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 

@@ -1,6 +1,6 @@
-[error]: can't find module `lib/missing` (looked for `tests/errors/lib/missing.sabk`) at [tests/errors/resolve_multiple_errors.sabk:1:8]
-     1 | import "lib/missing";
-       |        ^
+[error]: can't find module `lib/missing` (looked for `tests/errors/lib/missing.sabk`) at [tests/errors/resolve_multiple_errors.sabk:1:9]
+     1 | #import "lib/missing";
+       |         ^
 [error]: unknown type `Nope` at [tests/errors/resolve_multiple_errors.sabk:2:11]
      2 | fn f() -> Nope {
        |           ^

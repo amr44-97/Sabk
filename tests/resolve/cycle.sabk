@@ -1,2 +1,2 @@
-import "lib/a";
+#import "lib/a";
 fn main() { a.ping(3); }

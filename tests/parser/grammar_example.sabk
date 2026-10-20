@@ -1,21 +1,13 @@
-import "std/io";
-import "std/mem";
-import "vendor/my-lib" as lib;
+#import "std/io";
+#import "std/mem";
+#import "vendor/my-lib" as lib;
 
-pub struct Vec2 {
+struct Vec2 {
     x: f32;
     y: f32;
 }
 
-enum Color: u8 { Red, Green, Blue = 10 }
-
-type Callback = fn(i32) -> bool;
-
-const MAX: i32 = 64;
-
-extern fn printf(fmt: *u8, ...) -> i32;
-
-pub fn main() -> i32 {
+fn main() -> i32 {
     let arena = mem.arena_init(4096);
     defer mem.arena_free(&arena);
     context.allocator = mem.arena_allocator(&arena);
@@ -36,3 +28,13 @@ pub fn main() -> i32 {
     }
     return 0;
 }
+
+#scope_file
+
+enum Color: u8 { Red, Green, Blue = 10 }
+
+type Callback = fn(i32) -> bool;
+
+const MAX: i32 = 64;
+
+extern fn printf(fmt: *u8, ...) -> i32;

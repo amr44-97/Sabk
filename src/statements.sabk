@@ -1,22 +1,22 @@
 // The checker's statements, and the statements and expressions that take
 // or give several values: `let a, b = f();`, `a, b = b, a;`, `return a, b;`.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "std/str";
-import "ast";
-import "const";
-import "resolve";
-import "token";
-import "types";
-import "check";
-import "patterns";
-import "expressions";
-import "generics";
-import "narrowing";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/str";
+#import "ast";
+#import "const";
+#import "resolve";
+#import "token";
+#import "types";
+#import "check";
+#import "patterns";
+#import "expressions";
+#import "generics";
+#import "narrowing";
 
-pub fn check_cond(c: *Checker, n: *Node) {
+fn check_cond(c: *Checker, n: *Node) {
     let t = check_expr(c, n, null);
     if (t.kind == .Bool || t.kind == .Error)
         return;
@@ -29,13 +29,13 @@ pub fn check_cond(c: *Checker, n: *Node) {
 }
 
 // `.{}`, void's one value
-pub fn is_unit_literal(e: *Node) -> bool {
+fn is_unit_literal(e: *Node) -> bool {
     if (e.kind is .StructInit{declared, items})
         return declared == null && items.len == 0;
     return false;
 }
 
-pub fn check_stmt(c: *Checker, n: *Node) {
+fn check_stmt(c: *Checker, n: *Node) {
     switch (n.kind) {
     case .Block{stmts}:
         let known = c.facts.len; // what's learned in it ends with it
@@ -160,22 +160,7 @@ pub fn check_stmt(c: *Checker, n: *Node) {
     }
 }
 
-// x++ and x--
-fn check_step(c: *Checker, n: *Node, target: *Node) {
-    let t = check_expr(c, target, null);
-    if (t.kind == .Error)
-        return;
-    let why = "";
-    let immovable = why_immovable(t);
-    if (!assignable(c, target, &why))
-        error(c, n.tok, tformat("can't modify this: %", why));
-    else if (immovable.len > 0)
-        error(c, n.tok, tformat("can't move this pointer: %", immovable));
-    else if (t.kind != .Int && t.kind != .Float && t.kind != .Ptr)
-        error(c, n.tok, tformat("% needs a number or a pointer, found %", q(n.tok.text), qt(t)));
-}
-
-pub fn check_return(c: *Checker, n: *Node) {
+fn check_return(c: *Checker, n: *Node) {
     // the resolver set decl to the macro expansion this returns from
     let ret = if (n.decl != null) n.decl.ty else c.current_fn.ty.ret;
     let name = q(if (n.decl != null) n.decl.decl.tok.text else c.current_fn.tok.text);
@@ -242,6 +227,139 @@ pub fn check_return(c: *Checker, n: *Node) {
     } else if (ret.kind != .Void && ret.kind != .Error) {
         error(c, n.tok, tformat("% must return a value of type %{}%", name, qt(ret), defaults_hint(fun, ret)));
     }
+}
+
+// one of the values a labeled block or switch expression gives: of the
+// type its context wants, or the first value's
+fn give_value(c: *Checker, target: *Node, value: *Node) {
+    let want = map_get(&c.value_types, target) or_else null;
+    let t = check_expr(c, value, want);
+    if (t.kind == .Error)
+        return;
+    if (want == null)
+        map_put(&c.value_types, target, if (is_untyped(t)) default_type(c, value) else t);
+    else
+        coerce(c, value, want);
+}
+
+// `f();` as a statement, where f is #nodiscard: its result can't be
+// dropped without saying so. `taken`: how many of its results are taken
+// (`let n = f();`, `let a, b = f();`), the rest dropped
+fn check_dropped(c: *Checker, call: *Node, t: *Type, taken: isize = 0) {
+    let count: isize = if (t.is_tuple) t.fields.len else 1;
+    if (taken >= count)
+        return;
+    let fun: *Node = null;
+    let name = "";
+    let at = call.tok;
+    switch (call.kind) {
+    case .Call{callee}:
+        if (callee.decl != null && callee.decl.kind.tag == .Fn) {
+            fun = callee.decl;
+            name = callee.tok.text;
+            at = callee.tok;
+        }
+    case .MacroExpansion:
+        fun = call.decl;
+        name = fun.tok.text;
+    default:
+    }
+    if (fun == null || !(fun.kind is .Fn{nodiscard: true})) {
+        note_dropped_failure(c, call, t, taken);
+        return;
+    }
+    if (taken > 0) {
+        error(c, at, tformat("% is `#nodiscard`, and this takes % of its % results, dropping the rest; take them all (with `_` for those you don't want)",
+                             q(name), taken, count));
+        return;
+    }
+    let it = if (t.is_tuple) "them" else "it";
+    let what = if (t.is_tuple) "its results" else tformat("its %", qt(t));
+    error(c, at, tformat("% is `#nodiscard`, and this drops %; use %, or drop % on purpose with `_ = %(...);`",
+                         q(name), what, it, it, name));
+}
+
+// "`divide`", or "this" when the callee has no name
+fn callee_name(n: *Node) -> string {
+    let e = n;
+    while (true) {
+        if (e.kind is .OrReturn{value})
+            e = value;
+        else if (e.kind is .Grouped{inner})
+            e = inner;
+        else
+            break;
+    }
+    if (e.kind is .Call{callee} && (callee.kind.tag == .Identifier || callee.kind.tag == .Member))
+        return q(callee.tok.text);
+    return "this";
+}
+
+// p + n, n + p, p - n: n of what p points at, the way p[n] counts, so
+// p + n is &p[n]. q - p: how many of them lie between p and q, an isize.
+fn pointer_arithmetic(c: *Checker, n: *Node, l: *Type, r: *Type) -> *Type {
+    let op = q(n.tok.text);
+    let is_add = n.kind is .Binary{op: .Add};
+    let is_sub = n.kind is .Binary{op: .Sub};
+    let lhs: *Node = null;
+    let rhs: *Node = null;
+    if (n.kind is .Binary{lhs: a, rhs: b})
+        lhs, rhs = a, b;
+    let both = is_pointer_like(l) && is_pointer_like(r);
+    if (both && is_add) {
+        error(c, n.tok, "can't add two pointers; `q - p` counts what's between them, and `p + n` moves a pointer");
+        return c.types.error;
+    }
+    if (both) {
+        let why = why_immovable(l);
+        if (why.len > 0) {
+            error(c, n.tok, tformat("can't subtract these pointers: %", why));
+            return c.types.error;
+        }
+        if (l != r) {
+            error(c, n.tok, tformat("`-` between pointers needs them to point at the same type, found % and %",
+                                    qt(l), qt(r)));
+            return c.types.error;
+        }
+        return c.types.isize;
+    }
+    let ptr = if (is_pointer_like(l)) l else r;
+    let count = if (ptr == l) rhs else lhs;
+    let count_type = if (ptr == l) r else l;
+    if (ptr == r && is_sub) {
+        error(c, n.tok, "can't subtract a pointer from a number; `p - n` moves the pointer back");
+        return c.types.error;
+    }
+    let why = why_immovable(ptr);
+    if (why.len > 0) {
+        error(c, n.tok, tformat("can't move this pointer: %", why));
+        return c.types.error;
+    }
+    if (!is_count(count_type)) {
+        error(c, count.tok, tformat("a pointer moves by a whole number of values, so % needs an integer here, found %",
+                                    op, qt(count_type)));
+        return c.types.error;
+    }
+    if (count_type.kind == .UntypedInt)
+        coerce(c, count, c.types.isize);
+    return ptr;
+}
+
+#scope_file
+
+// x++ and x--
+fn check_step(c: *Checker, n: *Node, target: *Node) {
+    let t = check_expr(c, target, null);
+    if (t.kind == .Error)
+        return;
+    let why = "";
+    let immovable = why_immovable(t);
+    if (!assignable(c, target, &why))
+        error(c, n.tok, tformat("can't modify this: %", why));
+    else if (immovable.len > 0)
+        error(c, n.tok, tformat("can't move this pointer: %", immovable));
+    else if (t.kind != .Int && t.kind != .Float && t.kind != .Ptr)
+        error(c, n.tok, tformat("% needs a number or a pointer, found %", q(n.tok.text), qt(t)));
 }
 
 // for "found one value": results can be left out once they have defaults
@@ -312,19 +430,6 @@ fn set_return_value(n: *Node, value: *Node) {
     case .Return{value: &slot}: slot.* = value;
     default:
     }
-}
-
-// one of the values a labeled block or switch expression gives: of the
-// type its context wants, or the first value's
-pub fn give_value(c: *Checker, target: *Node, value: *Node) {
-    let want = map_get(&c.value_types, target) or_else null;
-    let t = check_expr(c, value, want);
-    if (t.kind == .Error)
-        return;
-    if (want == null)
-        map_put(&c.value_types, target, if (is_untyped(t)) default_type(c, value) else t);
-    else
-        coerce(c, value, want);
 }
 
 // a name, or a field of one through any number of pointers: checking it
@@ -409,43 +514,6 @@ fn nth(i: isize) -> string {
     };
 }
 
-// `f();` as a statement, where f is #nodiscard: its result can't be
-// dropped without saying so. `taken`: how many of its results are taken
-// (`let n = f();`, `let a, b = f();`), the rest dropped
-pub fn check_dropped(c: *Checker, call: *Node, t: *Type, taken: isize = 0) {
-    let count: isize = if (t.is_tuple) t.fields.len else 1;
-    if (taken >= count)
-        return;
-    let fun: *Node = null;
-    let name = "";
-    let at = call.tok;
-    switch (call.kind) {
-    case .Call{callee}:
-        if (callee.decl != null && callee.decl.kind.tag == .Fn) {
-            fun = callee.decl;
-            name = callee.tok.text;
-            at = callee.tok;
-        }
-    case .MacroExpansion:
-        fun = call.decl;
-        name = fun.tok.text;
-    default:
-    }
-    if (fun == null || !(fun.kind is .Fn{nodiscard: true})) {
-        note_dropped_failure(c, call, t, taken);
-        return;
-    }
-    if (taken > 0) {
-        error(c, at, tformat("% is `#nodiscard`, and this takes % of its % results, dropping the rest; take them all (with `_` for those you don't want)",
-                             q(name), taken, count));
-        return;
-    }
-    let it = if (t.is_tuple) "them" else "it";
-    let what = if (t.is_tuple) "its results" else tformat("its %", qt(t));
-    error(c, at, tformat("% is `#nodiscard`, and this drops %; use %, or drop % on purpose with `_ = %(...);`",
-                         q(name), what, it, it, name));
-}
-
 // --strict: a call's failure dropped, with all its results (`f();`) or
 // the last ones (`let n = f();`), kept to be given after checking
 fn note_dropped_failure(c: *Checker, call: *Node, t: *Type, taken: isize) {
@@ -464,22 +532,6 @@ fn note_dropped_failure(c: *Checker, call: *Node, t: *Type, taken: isize) {
         tformat("this takes % of %'s % results, dropping its failure (%): take it too (`let ..., err = ...`), or drop it on purpose with `_`",
                 taken, name, count, qt(last));
     array_add(&c.dropped_failures, Finding.{ .at = at, .message = message });
-}
-
-// "`divide`", or "this" when the callee has no name
-pub fn callee_name(n: *Node) -> string {
-    let e = n;
-    while (true) {
-        if (e.kind is .OrReturn{value})
-            e = value;
-        else if (e.kind is .Grouped{inner})
-            e = inner;
-        else
-            break;
-    }
-    if (e.kind is .Call{callee} && (callee.kind.tag == .Identifier || callee.kind.tag == .Member))
-        return q(callee.tok.text);
-    return "this";
 }
 
 // The results a call's callee spells out, void ones too: `-> (T, IoError)`
@@ -700,56 +752,6 @@ fn check_assign_values(c: *Checker, n: *Node) {
         error(c, targets[i].tok, tformat("%'s % value is %, which can't be assigned to %",
                                          callee_name(v), nth(i), qfrom, qto));
     }
-}
-
-// p + n, n + p, p - n: n of what p points at, the way p[n] counts, so
-// p + n is &p[n]. q - p: how many of them lie between p and q, an isize.
-pub fn pointer_arithmetic(c: *Checker, n: *Node, l: *Type, r: *Type) -> *Type {
-    let op = q(n.tok.text);
-    let is_add = n.kind is .Binary{op: .Add};
-    let is_sub = n.kind is .Binary{op: .Sub};
-    let lhs: *Node = null;
-    let rhs: *Node = null;
-    if (n.kind is .Binary{lhs: a, rhs: b})
-        lhs, rhs = a, b;
-    let both = is_pointer_like(l) && is_pointer_like(r);
-    if (both && is_add) {
-        error(c, n.tok, "can't add two pointers; `q - p` counts what's between them, and `p + n` moves a pointer");
-        return c.types.error;
-    }
-    if (both) {
-        let why = why_immovable(l);
-        if (why.len > 0) {
-            error(c, n.tok, tformat("can't subtract these pointers: %", why));
-            return c.types.error;
-        }
-        if (l != r) {
-            error(c, n.tok, tformat("`-` between pointers needs them to point at the same type, found % and %",
-                                    qt(l), qt(r)));
-            return c.types.error;
-        }
-        return c.types.isize;
-    }
-    let ptr = if (is_pointer_like(l)) l else r;
-    let count = if (ptr == l) rhs else lhs;
-    let count_type = if (ptr == l) r else l;
-    if (ptr == r && is_sub) {
-        error(c, n.tok, "can't subtract a pointer from a number; `p - n` moves the pointer back");
-        return c.types.error;
-    }
-    let why = why_immovable(ptr);
-    if (why.len > 0) {
-        error(c, n.tok, tformat("can't move this pointer: %", why));
-        return c.types.error;
-    }
-    if (!is_count(count_type)) {
-        error(c, count.tok, tformat("a pointer moves by a whole number of values, so % needs an integer here, found %",
-                                    op, qt(count_type)));
-        return c.types.error;
-    }
-    if (count_type.kind == .UntypedInt)
-        coerce(c, count, c.types.isize);
-    return ptr;
 }
 
 fn check_assign(c: *Checker, n: *Node) {

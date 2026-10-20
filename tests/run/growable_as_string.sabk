@@ -1,7 +1,7 @@
 // a [..]u8 reads as text with `as string`, a view of its elements, like
 // a []u8; the same at run time and in #run
-import "std/io";
-import "std/array";
+#import "std/io";
+#import "std/array";
 
 fn greeting() -> string {
     let raw: [..]u8;

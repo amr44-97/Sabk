@@ -1,9 +1,9 @@
 // Tokens: the pieces the lexer cuts a file into. A token's text is a view
 // of the file's text, so the file has to outlive its tokens.
 
-import "std/map";
+#import "std/map";
 
-pub enum TokenKind: u8 {
+enum TokenKind: u8 {
     Eof,
     Identifier,
     Number,          // 42, 0x1F
@@ -35,65 +35,28 @@ pub enum TokenKind: u8 {
     Greater, GreaterEq, Shr, ShrEq,
 
     // keywords
-    Fn, Return, Let, Const, Type, Struct, Enum, Union, Import, Pub, Extern,
+    Fn, Return, Let, Const, Type, Struct, Enum, Union, Extern,
     As, If, Else, For, In, While, Do, Switch, Case, Default, Break,
     Continue, Defer, Sizeof, Is, TypeInfo, New, Context, OrElse, OrReturn,
     True, False, Null,
 }
 
-pub struct Token {
+struct Token {
     text: string;   // a view of the file: `fn`, `"a string"`, `` at the end
     kind: TokenKind;
     line: i32;      // where it starts, from 1; a string over several lines
     column: i32;    // is where its opening quote is
 }
 
-const KEYWORDS = #run static_map(.[
-    Pair.{ "fn", TokenKind.Fn },
-    Pair.{ "return", TokenKind.Return },
-    Pair.{ "let", TokenKind.Let },
-    Pair.{ "const", TokenKind.Const },
-    Pair.{ "type", TokenKind.Type },
-    Pair.{ "struct", TokenKind.Struct },
-    Pair.{ "enum", TokenKind.Enum },
-    Pair.{ "union", TokenKind.Union },
-    Pair.{ "import", TokenKind.Import },
-    Pair.{ "pub", TokenKind.Pub },
-    Pair.{ "extern", TokenKind.Extern },
-    Pair.{ "as", TokenKind.As },
-    Pair.{ "if", TokenKind.If },
-    Pair.{ "else", TokenKind.Else },
-    Pair.{ "for", TokenKind.For },
-    Pair.{ "in", TokenKind.In },
-    Pair.{ "while", TokenKind.While },
-    Pair.{ "do", TokenKind.Do },
-    Pair.{ "switch", TokenKind.Switch },
-    Pair.{ "case", TokenKind.Case },
-    Pair.{ "default", TokenKind.Default },
-    Pair.{ "break", TokenKind.Break },
-    Pair.{ "continue", TokenKind.Continue },
-    Pair.{ "defer", TokenKind.Defer },
-    Pair.{ "sizeof", TokenKind.Sizeof },
-    Pair.{ "is", TokenKind.Is },
-    Pair.{ "type_info", TokenKind.TypeInfo },
-    Pair.{ "new", TokenKind.New },
-    Pair.{ "context", TokenKind.Context },
-    Pair.{ "or_else", TokenKind.OrElse },
-    Pair.{ "or_return", TokenKind.OrReturn },
-    Pair.{ "true", TokenKind.True },
-    Pair.{ "false", TokenKind.False },
-    Pair.{ "null", TokenKind.Null },
-]);
-
 // the keyword `word` is, or Identifier
-pub fn keyword_kind(word: string) -> TokenKind {
+fn keyword_kind(word: string) -> TokenKind {
     return static_map_get(KEYWORDS, word) or_else .Identifier;
 }
 
-pub fn is_keyword(word: string) -> bool { return static_map_has(KEYWORDS, word); }
+fn is_keyword(word: string) -> bool { return static_map_has(KEYWORDS, word); }
 
 // as --tokens prints it
-pub fn token_name(kind: TokenKind) -> string {
+fn token_name(kind: TokenKind) -> string {
     return switch (kind) {
     case .Eof:         "eof";
     case .Identifier:  "identifier";
@@ -164,8 +127,6 @@ pub fn token_name(kind: TokenKind) -> string {
     case .Struct:      "keyword_struct";
     case .Enum:        "keyword_enum";
     case .Union:       "keyword_union";
-    case .Import:      "keyword_import";
-    case .Pub:         "keyword_pub";
     case .Extern:      "keyword_extern";
     case .As:          "keyword_as";
     case .If:          "keyword_if";
@@ -192,3 +153,40 @@ pub fn token_name(kind: TokenKind) -> string {
     case .Null:        "keyword_null";
     };
 }
+
+#scope_file
+
+const KEYWORDS = #run static_map(.[
+    Pair.{ "fn", TokenKind.Fn },
+    Pair.{ "return", TokenKind.Return },
+    Pair.{ "let", TokenKind.Let },
+    Pair.{ "const", TokenKind.Const },
+    Pair.{ "type", TokenKind.Type },
+    Pair.{ "struct", TokenKind.Struct },
+    Pair.{ "enum", TokenKind.Enum },
+    Pair.{ "union", TokenKind.Union },
+    Pair.{ "extern", TokenKind.Extern },
+    Pair.{ "as", TokenKind.As },
+    Pair.{ "if", TokenKind.If },
+    Pair.{ "else", TokenKind.Else },
+    Pair.{ "for", TokenKind.For },
+    Pair.{ "in", TokenKind.In },
+    Pair.{ "while", TokenKind.While },
+    Pair.{ "do", TokenKind.Do },
+    Pair.{ "switch", TokenKind.Switch },
+    Pair.{ "case", TokenKind.Case },
+    Pair.{ "default", TokenKind.Default },
+    Pair.{ "break", TokenKind.Break },
+    Pair.{ "continue", TokenKind.Continue },
+    Pair.{ "defer", TokenKind.Defer },
+    Pair.{ "sizeof", TokenKind.Sizeof },
+    Pair.{ "is", TokenKind.Is },
+    Pair.{ "type_info", TokenKind.TypeInfo },
+    Pair.{ "new", TokenKind.New },
+    Pair.{ "context", TokenKind.Context },
+    Pair.{ "or_else", TokenKind.OrElse },
+    Pair.{ "or_return", TokenKind.OrReturn },
+    Pair.{ "true", TokenKind.True },
+    Pair.{ "false", TokenKind.False },
+    Pair.{ "null", TokenKind.Null },
+]);

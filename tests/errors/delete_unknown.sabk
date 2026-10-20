@@ -1,5 +1,5 @@
 // delete frees strings, slices, growable arrays, Maps and Builders; a
 // pointer is freed with free(p)
-import "std/mem";
+#import "std/mem";
 
 fn f(p: *i64) { delete(p); }

@@ -1,6 +1,6 @@
 // braces after a variant are for its fields: not for one holding a value
 // of another type, or none, or a plain enum's
-import "std/io";
+#import "std/io";
 enum K { Let(declared: i32, uninit: bool), Wrap(i32), Nil }
 enum Color { Red }
 struct Point { x: i32; }

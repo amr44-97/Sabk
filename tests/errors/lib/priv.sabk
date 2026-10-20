@@ -1,3 +1,6 @@
-pub fn open() {}
+fn open() {}
+let value: i32 = 1;
+
+#scope_file
+
 fn secret() {}
-pub let value: i32 = 1;

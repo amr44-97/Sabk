@@ -1,10 +1,10 @@
 // delete(x) frees what a string, slice, growable array, Map or Builder
 // holds; #if (T == Map) asks whether T is any Map
-import "std/io";
-import "std/mem";
-import "std/array";
-import "std/map";
-import "std/str";
+#import "std/io";
+#import "std/mem";
+#import "std/array";
+#import "std/map";
+#import "std/str";
 
 fn kind($T: Type) -> string {
     #if (T == Map) return "a Map";

@@ -1,5 +1,5 @@
 // extern let: variables C defines, under their C names
-import "std/io";
+#import "std/io";
 
 extern let stdout: *void;         // C's FILE *stdout
 extern let environ: **u8;          // the environment, NULL-terminated

@@ -1,9 +1,9 @@
 // a plain import: the names directly, and the module name too
-import "std/io";
+#import "std/io";
 // a file name that is not a valid name: the names directly, no module name
-import "lib/my-lib";
+#import "lib/my-lib";
 // `as`: only through the name
-import "std/mem" as m;
+#import "std/mem" as m;
 
 fn print() {}                 // our own declaration wins over io.print
 

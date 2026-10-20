@@ -16,18 +16,13 @@
 // path_normalize works on the text alone, like C++'s lexically_normal:
 // `a/../b` is `b` even when `a` is a link.
 
-import "std/io";
-import "std/mem";
-import "std/str";
-import "std/array";
-
-extern fn getcwd(buffer: *u8, size: usize) -> *u8;
-extern fn realpath(path: *u8, resolved: *u8) -> *u8;
-
-const PATH_MAX = 4096; // Linux's; macOS's is 1024
+#import "std/io";
+#import "std/mem";
+#import "std/str";
+#import "std/array";
 
 // the parent directory: "" for a bare name, "/" for a part of the root
-pub fn path_dir(p: string) -> string {
+fn path_dir(p: string) -> string {
     let slash = last_slash(p);
     if (slash < 0)
         return "";
@@ -38,19 +33,19 @@ pub fn path_dir(p: string) -> string {
 }
 
 // the last part: the file's name
-pub fn path_base(p: string) -> string {
+fn path_base(p: string) -> string {
     return p[last_slash(p) + 1..];
 }
 
 // the last part without its extension
-pub fn path_stem(p: string) -> string {
+fn path_stem(p: string) -> string {
     let base = path_base(p);
     return base[..base.len - path_ext(p).len];
 }
 
 // the last part's extension with its dot: ".sabk"; "" when there's none,
 // and for names like ".bashrc", "." and ".."
-pub fn path_ext(p: string) -> string {
+fn path_ext(p: string) -> string {
     let base = path_base(p);
     let dot = index_of_last(base, '.');
     if (dot <= 0 || base == "..")
@@ -58,12 +53,12 @@ pub fn path_ext(p: string) -> string {
     return base[dot..];
 }
 
-pub fn path_is_absolute(p: string) -> bool {
+fn path_is_absolute(p: string) -> bool {
     return p.len > 0 && p[0] == '/';
 }
 
 // `b` inside `a`; `b` itself when it's absolute
-pub fn path_join(a: string, b: string, alloc: Allocator = context.allocator) -> string {
+fn path_join(a: string, b: string, alloc: Allocator = context.allocator) -> string {
     let out: [..]u8;
     out.allocator = alloc;
     if (!path_is_absolute(b) && a.len > 0) {
@@ -77,7 +72,7 @@ pub fn path_join(a: string, b: string, alloc: Allocator = context.allocator) -> 
 
 // without `.` parts, doubled slashes and the parts `..` steps back over;
 // "." when nothing's left
-pub fn path_normalize(p: string, alloc: Allocator = context.allocator) -> string {
+fn path_normalize(p: string, alloc: Allocator = context.allocator) -> string {
     let out: [..]u8;
     out.allocator = alloc;
     let absolute = path_is_absolute(p);
@@ -113,7 +108,7 @@ pub fn path_normalize(p: string, alloc: Allocator = context.allocator) -> string
 }
 
 // the path from the root, normalized; the file needn't exist
-pub fn path_absolute(p: string, alloc: Allocator = context.allocator) -> (string, IoError = .None) {
+fn path_absolute(p: string, alloc: Allocator = context.allocator) -> (string, IoError = .None) {
     if (path_is_absolute(p))
         return path_normalize(p, alloc);
     let buffer: [PATH_MAX]u8 = ---;
@@ -126,7 +121,7 @@ pub fn path_absolute(p: string, alloc: Allocator = context.allocator) -> (string
 
 // the file's own path: absolute, with links followed and `.` and `..`
 // resolved; the file has to exist
-pub fn path_real(p: string, alloc: Allocator = context.allocator) -> (string, IoError = .None) {
+fn path_real(p: string, alloc: Allocator = context.allocator) -> (string, IoError = .None) {
     let c_path = to_cstring(p);
     defer free(c_path);
     let buffer: [PATH_MAX]u8 = ---;
@@ -134,6 +129,13 @@ pub fn path_real(p: string, alloc: Allocator = context.allocator) -> (string, Io
         return "", log_io_error(last_io_error(), "find the real path of", p);
     return copy_string(from_cstring(buffer.ptr), alloc);
 }
+
+#scope_file
+
+extern fn getcwd(buffer: *u8, size: usize) -> *u8;
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+const PATH_MAX = 4096; // Linux's; macOS's is 1024
 
 fn last_slash(p: string) -> isize { return index_of_last(p, '/'); }
 

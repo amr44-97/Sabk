@@ -1,9 +1,9 @@
 // fn main() -> Error: a failure that reaches main is printed with its enum
 // and variant once main has returned (its defers have run), and the
 // program exits with 1
-import "std/io";
-import "std/mem";
-import "std/str";
+#import "std/io";
+#import "std/mem";
+#import "std/str";
 
 fn main() -> Error = .None {
     defer println("main's defer ran");

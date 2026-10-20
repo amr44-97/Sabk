@@ -1,5 +1,5 @@
 // Conditions without parentheses take a block; with them, any statement
-import "std/io";
+#import "std/io";
 
 struct Point { x: i64; y: i64; }
 

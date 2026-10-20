@@ -1,22 +1,14 @@
-import "std/fmt";
-import "std/io";
-import "std/mem";
-import "std/str" as strings;
+#import "std/fmt";
+#import "std/io";
+#import "std/mem";
+#import "std/str" as strings;
 
-pub struct Vec2 {
+struct Vec2 {
     x: f32;
     y: f32;
 }
 
-enum Color: u8 { Red, Green, Blue = 10 }
-
-type Callback = fn(i32) -> bool;
-
-const MAX: i32 = 64;
-
-extern fn printf(fmt: *u8, ...) -> i32;
-
-pub fn main() -> i32 {
+fn main() -> i32 {
     let arena = arena_init(4096);         // from std/mem, no prefix needed
     defer arena_destroy(&arena);
     context.allocator = arena_allocator(&arena);
@@ -42,3 +34,13 @@ pub fn main() -> i32 {
     }
     return 0;
 }
+
+#scope_file
+
+enum Color: u8 { Red, Green, Blue = 10 }
+
+type Callback = fn(i32) -> bool;
+
+const MAX: i32 = 64;
+
+extern fn printf(fmt: *u8, ...) -> i32;

@@ -1,6 +1,6 @@
 // a call with several results, taken from the left: what isn't taken is dropped
-import "std/io";
-import "std/str";
+#import "std/io";
+#import "std/str";
 
 fn parse_prefix(s: string) -> (i64, isize, ParseError) {
     let n: i64 = 0;

@@ -1,7 +1,7 @@
 // a void result can be left out: -> (void, E) is -> E, a generic's
 // (T, E) matches it with T = void, and a let can still name the void
-import "std/io";
-import "std/map";
+#import "std/io";
+#import "std/map";
 
 enum LoadError: Error { Busy }
 

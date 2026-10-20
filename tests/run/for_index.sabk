@@ -1,6 +1,6 @@
 // for (x, i in xs): each element and its index, an isize
-import "std/io";
-import "std/array";
+#import "std/io";
+#import "std/array";
 
 fn sum_weighted(xs: []i64) -> i64 {
     let total: i64 = 0;

@@ -1,7 +1,7 @@
 // a variant with fields made like a struct: K.Let{ .declared = 1 } or
 // .Let{ ... } where the enum is known, by name or in order, the rest
 // defaulted
-import "std/io";
+#import "std/io";
 enum K { Let(declared: i32, value: i32 = 7, uninit: bool), Wrap(i32), Nil }
 fn make() -> K { return .Let{ .uninit = true, .declared = 9 }; }
 const BAKED = #run make();

@@ -13,32 +13,23 @@
 //   get_env("HOME")       an environment variable, and whether it's set:
 //                         let home = get_env("HOME") or_else "/";
 
-import "std/mem";
-import "std/str";
+#import "std/mem";
+#import "std/str";
 
-pub extern fn exit(code: i32);
-pub extern fn abort();
-extern fn getenv(name: *u8) -> *u8;
-extern fn fflush(file: *void) -> i32;
+extern fn exit(code: i32);
+extern fn abort();
 
 // the location printed is where the message is written
-pub fn panic(message: Code) #expand {
+fn panic(message: Code) #expand {
     fail(#location(message), "panic", #insert message);
 }
 
-pub fn assert(condition: Code) #expand {
+fn assert(condition: Code) #expand {
     if (!(#insert condition))
         fail(#location(condition), "assertion failed", #text(condition));
 }
 
-fn fail(location: string, what: string, message: string) {
-    let handler = context.panic_handler;
-    handler.procedure(handler.data, what, message, location);
-    fflush(null); // what the handler printed
-    abort(); // a handler that returns can't let the code after it run
-}
-
-pub fn args() -> []string {
+fn args() -> []string {
     if (saved_args.len == 0) {
         let count = sabk_arg_count();
         saved_args = new([]string, count);
@@ -48,16 +39,28 @@ pub fn args() -> []string {
     return saved_args;
 }
 
-let saved_args: []string;
-
-// the C runtime keeps argc and argv for these
-extern fn sabk_arg_count() -> i32;
-extern fn sabk_arg(i: i32) -> *u8;
-
 // a view of C's copy, which setting the variable may change
-pub fn get_env(name: string) -> (string, bool) {
+fn get_env(name: string) -> (string, bool) {
     let c_name = to_cstring(name);
     defer free(c_name);
     let value = getenv(c_name);
     return from_cstring(value), value != null;
 }
+
+#scope_file
+
+extern fn getenv(name: *u8) -> *u8;
+extern fn fflush(file: *void) -> i32;
+
+fn fail(location: string, what: string, message: string) {
+    let handler = context.panic_handler;
+    handler.procedure(handler.data, what, message, location);
+    fflush(null); // what the handler printed
+    abort(); // a handler that returns can't let the code after it run
+}
+
+let saved_args: []string;
+
+// the C runtime keeps argc and argv for these
+extern fn sabk_arg_count() -> i32;
+extern fn sabk_arg(i: i32) -> *u8;

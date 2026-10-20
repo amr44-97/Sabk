@@ -1,2 +1,3 @@
-import "a";
-pub fn pong(n: i32) { a.ping(n); }
+#import "a";
+
+fn pong(n: i32) { a.ping(n); }

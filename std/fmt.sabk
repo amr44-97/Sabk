@@ -62,13 +62,10 @@
 //   an Any: the value it holds
 // Pointers aren't followed, so a value that points at itself prints fine.
 
-import "std/mem";
-import "std/str";
+#import "std/mem";
+#import "std/str";
 
-extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
-extern fn strtod(text: *u8, end: **u8) -> f64;
-
-pub fn format(fmt: string, args: ..Any) -> string #format {
+fn format(fmt: string, args: ..Any) -> string #format {
     let b = make_builder();
     format_into(&b, fmt, args);
     return builder_string(&b);
@@ -76,24 +73,24 @@ pub fn format(fmt: string, args: ..Any) -> string #format {
 
 // for text that's only needed for a while: it's freed with the rest of
 // the temp allocator (free_all(context.temp_allocator))
-pub fn tformat(fmt: string, args: ..Any) -> string #format {
+fn tformat(fmt: string, args: ..Any) -> string #format {
     let b = make_builder(context.temp_allocator);
     format_into(&b, fmt, args);
     return builder_string(&b);
 }
 
-pub fn builder_print(b: *Builder, fmt: string, args: ..Any) #format {
+fn builder_print(b: *Builder, fmt: string, args: ..Any) #format {
     format_into(b, fmt, args);
 }
 
 // onto the end of a [..]u8, as builder_print does onto a Builder
-pub fn print_to(buf: *[..]u8, fmt: string, args: ..Any) #format {
+fn print_to(buf: *[..]u8, fmt: string, args: ..Any) #format {
     let b = Builder.{ .bytes = buf.* };  // the same bytes, grown in b
     format_into(&b, fmt, args);
     buf.* = b.bytes;
 }
 
-pub fn format_into(b: *Builder, fmt: string, args: []Any) {
+fn format_into(b: *Builder, fmt: string, args: []Any) {
     if (args.len == 0) {
         builder_append(b, fmt);
         return;
@@ -181,13 +178,13 @@ pub fn format_into(b: *Builder, fmt: string, args: []Any) {
     }
 }
 
-pub fn append_value(b: *Builder, value: Any) {
+fn append_value(b: *Builder, value: Any) {
     let plain: FormatSpec;
     put(b, value.value, value.info, false, &plain);
 }
 
 // how one value is formatted: what %{spec} says
-pub struct FormatSpec {
+struct FormatSpec {
     align: u8;              // '<', '>', '^', or 0 for the default
     plus: bool;
     zero: bool;
@@ -198,7 +195,7 @@ pub struct FormatSpec {
 
 // "<+08.2x" and the like; false if it isn't one. The compiler checks
 // format strings it can see by the same rules (parse_spec in src/formats.sabk).
-pub fn parse_format_spec(text: string, spec: *FormatSpec) -> bool {
+fn parse_format_spec(text: string, spec: *FormatSpec) -> bool {
     spec.* = .{};
     let i = 0;
     if (i < text.len && (text[i] == '<' || text[i] == '>' || text[i] == '^')) {
@@ -237,19 +234,10 @@ pub fn parse_format_spec(text: string, spec: *FormatSpec) -> bool {
 }
 
 // the letters that say how to show a value: %s, %{8x}
-pub fn is_format_kind(c: u8) -> bool { return is_kind(c); }
-
-fn is_kind(c: u8) -> bool {
-    switch (c) {
-    case 's', 'q', 'w', 'x', 'X', 'b', 'o', 'e', 'f', 'c': return true;
-    default: return false;
-    }
-}
-
-fn is_letter(c: u8) -> bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+fn is_format_kind(c: u8) -> bool { return is_kind(c); }
 
 // one value, padded to the spec's width
-pub fn append_formatted(b: *Builder, value: Any, spec: FormatSpec) {
+fn append_formatted(b: *Builder, value: Any, spec: FormatSpec) {
     if (spec.width == 0) {
         put(b, value.value, value.info, false, &spec);
         return;
@@ -287,6 +275,20 @@ pub fn append_formatted(b: *Builder, value: Any, spec: FormatSpec) {
     builder_append(b, text);
     repeat_char(b, ' ', padding - before);
 }
+
+#scope_file
+
+extern fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32;
+extern fn strtod(text: *u8, end: **u8) -> f64;
+
+fn is_kind(c: u8) -> bool {
+    switch (c) {
+    case 's', 'q', 'w', 'x', 'X', 'b', 'o', 'e', 'f', 'c': return true;
+    default: return false;
+    }
+}
+
+fn is_letter(c: u8) -> bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 // ---- inside
 

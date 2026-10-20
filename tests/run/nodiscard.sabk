@@ -1,6 +1,6 @@
 // #nodiscard: a call's result can't be dropped by accident; `_ =` drops
 // one on purpose, in the program and in #run code
-import "std/io";
+#import "std/io";
 
 enum SaveError: Error { Full }
 

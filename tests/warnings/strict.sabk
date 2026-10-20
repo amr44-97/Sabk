@@ -1,8 +1,8 @@
 // --strict's warnings, turned on by the build script: failures dropped,
 // and values used before the failure that came with them is looked at
-import "std/build";
-import "std/io";
-import "std/str";
+#import "std/build";
+#import "std/io";
+#import "std/str";
 
 #run set_strict(true);
 

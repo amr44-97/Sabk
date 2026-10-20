@@ -10,26 +10,18 @@
 // second is by the order of the source, not by every path through it:
 // `err` read anywhere before `n` (`if (err != .None) return;`) counts.
 
-import "std/array";
-import "std/fmt";
-import "std/map";
-import "ast";
-import "check";
-import "module";
-import "resolve";
-import "statements";
-import "token";
-import "types";
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "ast";
+#import "check";
+#import "module";
+#import "resolve";
+#import "statements";
+#import "token";
+#import "types";
 
-struct Unchecked {
-    c: *Checker;
-    failure_of: Map(*Node, *Node); // a value's name: its failure's name
-    callee: Map(*Node, string);    // ... and the call they came from
-    checked: Map(*Node, bool);     // a failure's name: read since it was set
-    found: [..]Finding;
-}
-
-pub fn strict_warnings(c: *Checker) {
+fn strict_warnings(c: *Checker) {
     let u = Unchecked.{ .c = c };
     array_append(&u.found, c.dropped_failures);
     for (m in c.res.modules)
@@ -51,6 +43,16 @@ pub fn strict_warnings(c: *Checker) {
     }
     for (f in found)
         warning(c, f.at, f.message);
+}
+
+#scope_file
+
+struct Unchecked {
+    c: *Checker;
+    failure_of: Map(*Node, *Node); // a value's name: its failure's name
+    callee: Map(*Node, string);    // ... and the call they came from
+    checked: Map(*Node, bool);     // a failure's name: read since it was set
+    found: [..]Finding;
 }
 
 fn comes_before(c: *Checker, a: Token, b: Token) -> bool {

@@ -9,31 +9,27 @@
 // kept in the Vm (`error`), and every step returns false up to evaluate(),
 // which reports it.
 
-import "std/array";
-import "std/fmt";
-import "std/io";
-import "std/map";
-import "std/mem";
-import "std/str";
-import "ast";
-import "const";
-import "module";
-import "token";
-import "types";
-import "check";
-import "comptime";
-import "lower";
-
-// a runaway #run (an endless loop) stops with an error instead of hanging
-const MAX_STEPS: u64 = 1000000000;
-const MAX_DEPTH = 100000;
-const STACK_SIZE = 64 << 20;
+#import "std/array";
+#import "std/fmt";
+#import "std/io";
+#import "std/map";
+#import "std/mem";
+#import "std/str";
+#import "ast";
+#import "const";
+#import "module";
+#import "resolve";
+#import "token";
+#import "types";
+#import "check";
+#import "comptime";
+#import "lower";
 
 // how a scalar is stored, which picks the arithmetic; vm_ffi.c knows the
 // order
-pub enum VmKind: u8 { I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, Bool, Ptr }
+enum VmKind: u8 { I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, Bool, Ptr }
 
-pub enum VmOp: u8 {
+enum VmOp: u8 {
     Const,       // slot a = imm (the low bytes, for kind)
     Zero,        // slot a = imm zero bytes
     Fill,        // slot a = imm bytes of 0xAA: a `---` local, so reading
@@ -62,11 +58,11 @@ pub enum VmOp: u8 {
     StrEq,       // bool slot a = the strings in slots b and c are equal
 }
 
-pub enum VmBin: u8 { Add, Sub, Mul, Div, Mod, And, Or, Xor, Shl, Shr }
-pub enum VmCmp: u8 { Eq, Ne, Lt, Gt, Le, Ge }
-pub enum VmUn: u8 { Neg, Not, BitNot }
+enum VmBin: u8 { Add, Sub, Mul, Div, Mod, And, Or, Xor, Shl, Shr }
+enum VmCmp: u8 { Eq, Ne, Lt, Gt, Le, Ge }
+enum VmUn: u8 { Neg, Not, BitNot }
 
-pub struct VmInstr {
+struct VmInstr {
     op: VmOp;
     kind: VmKind = .I64;
     sub: u8;
@@ -77,12 +73,12 @@ pub struct VmInstr {
     loc: u32; // index into VmFunction.locs, for errors
 }
 
-pub struct ArgSlot {
+struct ArgSlot {
     slot: u32;
     size: u32;
 }
 
-pub struct VmCallSite {
+struct VmCallSite {
     callee: *VmFunction; // a direct call, or null: the function value in
     fn_slot: u32;        // this slot
     args: [..]ArgSlot;   // in order
@@ -96,7 +92,7 @@ pub struct VmCallSite {
     ffi_args: [..]*void;
 }
 
-pub struct VmFunction {
+struct VmFunction {
     decl: *Node;
     name: string;
     compiled: bool;
@@ -122,7 +118,7 @@ pub struct VmFunction {
 }
 
 // an error while compiling or running compile-time code
-pub struct VmError {
+struct VmError {
     where: Token;
     message: string;
     silent: bool;          // the problem was reported already
@@ -130,7 +126,7 @@ pub struct VmError {
     trace: [..]Token;      // the calls that led to it, innermost first
 }
 
-pub struct Vm {
+struct Vm {
     c: *Checker;
     functions: Map(*Node, *VmFunction);
     globals: Map(*Node, *u8);
@@ -144,7 +140,7 @@ pub struct Vm {
     error: VmError;
 }
 
-pub fn make_vm(c: *Checker) -> *Vm {
+fn make_vm(c: *Checker) -> *Vm {
     let vm = new(Vm);
     vm.c = c;
     vm.stack = new([]u8, STACK_SIZE);
@@ -153,7 +149,7 @@ pub fn make_vm(c: *Checker) -> *Vm {
 }
 
 // the first failure is the one kept
-pub fn vm_fail(vm: *Vm, where: Token, message: string, in_lowering: bool) {
+fn vm_fail(vm: *Vm, where: Token, message: string, in_lowering: bool) {
     if (vm.failed)
         return;
     vm.failed = true;
@@ -163,7 +159,7 @@ pub fn vm_fail(vm: *Vm, where: Token, message: string, in_lowering: bool) {
 
 /* ------------------------------------------------------------------ types */
 
-pub fn concrete(vm: *Vm, t: *Type) -> *Type {
+fn concrete(vm: *Vm, t: *Type) -> *Type {
     let ts = &vm.c.types;
     return switch (t.kind) {
     case .UntypedInt: ts.i64;
@@ -174,7 +170,7 @@ pub fn concrete(vm: *Vm, t: *Type) -> *Type {
     };
 }
 
-pub fn kind_of(t: *Type) -> VmKind {
+fn kind_of(t: *Type) -> VmKind {
     switch (t.kind) {
     case .Int:
         return switch (t.bits) {
@@ -192,7 +188,7 @@ pub fn kind_of(t: *Type) -> VmKind {
     }
 }
 
-pub fn kind_size(k: VmKind) -> u32 {
+fn kind_size(k: VmKind) -> u32 {
     return switch (k) {
     case .I8, .U8, .Bool: 1;
     case .I16, .U16: 2;
@@ -201,9 +197,418 @@ pub fn kind_size(k: VmKind) -> u32 {
     };
 }
 
-fn kind_signed(k: VmKind) -> bool { return k == .I8 || k == .I16 || k == .I32 || k == .I64; }
+fn is_float(k: VmKind) -> bool { return k == .F32 || k == .F64; }
 
-pub fn is_float(k: VmKind) -> bool { return k == .F32 || k == .F64; }
+// a float's bits as an instruction's immediate
+fn float_bits(k: VmKind, v: f64) -> u64 {
+    let bits: u64 = 0;
+    write_float(&bits as *u8, k, v);
+    return bits;
+}
+
+fn vm_size_of(vm: *Vm, of_type: *Type) -> u32 {
+    let t = concrete(vm, of_type);
+    if (t.kind == .Void)
+        return 0;
+    layout(vm.c, t);
+    return t.size as u32;
+}
+
+fn vm_align_of(vm: *Vm, of_type: *Type) -> u32 {
+    let t = concrete(vm, of_type);
+    layout(vm.c, t);
+    return if (t.align != 0) t.align as u32 else 1;
+}
+
+/* ------------------------------------------------------------------ C */
+
+fn vm_dlsym(name: string) -> *void {
+    let c_name = to_cstring(name);
+    defer free(c_name);
+    return vmffi_dlsym(c_name);
+}
+
+/* ---------------------------------------------- build script functions */
+
+// What build scripts (top-level `#run`, using std/build) set. The compiler
+// starts from these; options given on the command line win.
+// std/build's BoundsChecks, in its order: index and slice checks as
+// written (#no_bounds_check turns a function's off), none, or everywhere
+enum BoundsChecks { On, Off, Always }
+
+struct BuildOptions {
+    output: string;        // the executable's path
+    release: bool;
+    bounds_checks: BoundsChecks;
+    strict: bool;          // the strict warnings: dropped failures, values
+                           // used before their failure is checked
+    werror: bool;          // warnings fail the build
+    c_flags: [..]string;   // passed to the C compiler as written
+    libraries: [..]string; // -l<name>
+    c_files: [..]string;   // compiled and linked with the program
+    base_dir: string;      // relative paths are relative to this: the
+                           // directory of the program's main file
+    program_args: [..]string; // args() while compiling: the program's
+                              // name, then what follows `--`
+}
+
+// std/build's functions: the compiler's own, which exist only while
+// compiling
+fn is_build_function(name: string) -> bool {
+    return starts_with(name, "sabk_build_") && host_function(name) != null;
+}
+
+/* -------------------------------------------------------------- the VM */
+
+// NUL-terminated, kept forever
+fn vm_intern(vm: *Vm, bytes: string) -> *u8 {
+    let p = alloc(bytes.len + 1) as *u8;
+    copy_memory(p, bytes.ptr, bytes.len);
+    p[bytes.len] = 0;
+    return p;
+}
+
+// zeroed, 16-aligned, kept forever
+fn vm_keep(vm: *Vm, size: isize) -> *u8 {
+    let rounded = (size + 15) / 16 * 16 + 16;
+    let p = alloc(rounded, 16) as *u8;
+    zero_memory(p, rounded);
+    return p;
+}
+
+fn vm_function_for(vm: *Vm, decl: *Node) -> *VmFunction {
+    let known = map_get(&vm.functions, decl) or_else null;
+    if (known != null)
+        return known;
+    let f = new(VmFunction);
+    f.decl = decl;
+    f.name = decl.tok.text;
+    if (decl.kind is .Fn{is_extern: true, body} && body == null) {
+        f.native = true;
+        f.is_abort = f.name == "abort";
+        f.is_exit = f.name == "exit";
+        f.address = host_function(f.name);
+        if (f.address == null)
+            f.address = vm_dlsym(f.name);
+    }
+    map_put(&vm.functions, decl, f);
+    return f;
+}
+
+// a global's memory, its value in it; null (with the error kept) if it
+// can't have one while compiling
+fn vm_global_storage(vm: *Vm, decl: *Node) -> *u8 {
+    let known = map_get(&vm.globals, decl) or_else null;
+    if (known != null)
+        return known;
+    decl_type(vm.c, decl); // its initializer is checked, any #run in it baked
+    if (decl.kind is .Let{is_extern: true}) { // C's own: the compiler's copy of it
+        let address = vm_dlsym(decl.tok.text) as *u8;
+        if (address == null) {
+            let none: Token;
+            vm_fail(vm, none, tformat("the C variable `%` isn't available while compiling", decl.tok.text), false);
+            return null;
+        }
+        map_put(&vm.globals, decl, address);
+        return address;
+    }
+    let t = concrete(vm, decl.ty);
+    let size = vm_size_of(vm, t);
+    let storage = vm_keep(vm, size as isize);
+    map_put(&vm.globals, decl, storage);
+    let value = value_of(decl);
+    if (value != null || has_defaults(vm.c, t)) {
+        // the initializer (or the type's defaults) is a constant: run it
+        // once, like the C's static data
+        let init = new(VmFunction);
+        init.name = "initializer";
+        let l = make_lower(vm, init);
+        l.lasting = true;
+        if (value != null)
+            lower_thunk(&l, value);
+        else
+            lower_default_thunk(&l, t);
+        if (vm.failed)
+            return null;
+        let saved = vm.stack_top;
+        let frame = push_frame(vm, init);
+        if (frame == null || !execute(vm, init, frame))
+            return null;
+        copy_memory(storage, frame + init.ret_offset, size as isize);
+        vm.stack_top = saved;
+    }
+    return storage;
+}
+
+// the compile-time context: the prelude's default_context(), run with an
+// empty context to start
+fn vm_context(vm: *Vm) -> *u8 {
+    if (vm.ctx != null)
+        return vm.ctx;
+    let size = vm_size_of(vm, vm.c.context_type);
+    vm.ctx = vm_keep(vm, size as isize);
+    let boot = vm_keep(vm, size as isize);
+    let decl = module_decl(vm.c.res.prelude, "default_context");
+    let f = vm_function_for(vm, decl);
+    if (!compile(vm, f))
+        return vm.ctx;
+    let saved = vm.stack_top;
+    let frame = push_frame(vm, f);
+    if (frame == null)
+        return vm.ctx;
+    ((frame + f.param_offsets[0] as isize) as **u8).* = boot;
+    if (execute(vm, f, frame))
+        copy_memory(vm.ctx, frame + f.ret_offset, size as isize);
+    vm.stack_top = saved;
+    return vm.ctx;
+}
+
+// a type's TypeInfo (the prelude's), built once: the same data the code
+// generator writes for the program
+fn vm_type_info(vm: *Vm, of_type: *Type) -> *u8 {
+    let t = concrete(vm, of_type);
+    let known = map_get(&vm.type_infos, t) or_else null;
+    if (known != null)
+        return known;
+    let info_type = vm.c.type_info_type;
+    let info = vm_keep(vm, vm_size_of(vm, info_type) as isize);
+    map_put(&vm.type_infos, t, info); // first: a type can refer to itself
+    let shape = shape_of(vm.c, t);
+    set_int(info, info_type, "kind", type_kind_value(vm.c, shape.kind) as u64);
+    set_text(vm, info, info_type, "name", type_name(t));
+    set_int(info, info_type, "size", t.size);
+    set_int(info, info_type, "align", t.align);
+    set_int(info, info_type, "is_signed", if (t.kind == .Int && t.is_signed) 1 else 0);
+    if (shape.elem != null)
+        set_int(info, info_type, "elem", vm_type_info(vm, shape.elem) as usize);
+    set_int(info, info_type, "count", shape.count);
+    if (shape.fields.len > 0) {
+        let field_type = prelude_type(vm, "TypeField");
+        let size = vm_size_of(vm, field_type) as isize;
+        let fields = vm_keep(vm, size * shape.fields.len);
+        for (i in 0..shape.fields.len) {
+            let f = fields + i * size;
+            set_text(vm, f, field_type, "name", shape.fields[i].name);
+            set_int(f, field_type, "info", vm_type_info(vm, shape.fields[i].ty) as usize);
+            set_int(f, field_type, "offset", shape.fields[i].offset);
+        }
+        set_slice(info, info_type, "fields", fields, shape.fields.len as u64);
+    }
+    if (shape.variants.len > 0) {
+        let variant_type = prelude_type(vm, "TypeVariant");
+        let size = vm_size_of(vm, variant_type) as isize;
+        let variants = vm_keep(vm, size * shape.variants.len);
+        for (i in 0..shape.variants.len) {
+            let v = variants + i * size;
+            let shaped = shape.variants[i];
+            set_text(vm, v, variant_type, "name", shaped.name);
+            set_int(v, variant_type, "value", shaped.value as u64);
+            if (shaped.payload != null)
+                set_int(v, variant_type, "payload", vm_type_info(vm, shaped.payload) as usize);
+        }
+        set_slice(info, info_type, "variants", variants, shape.variants.len as u64);
+    }
+    return info;
+}
+
+// Runs `n`, a checked expression, and returns its value's bytes; on
+// failure reports an error at `at` and returns false.
+fn vm_evaluate(vm: *Vm, n: *Node, at: *Node) -> ([]u8, bool) {
+    let saved_top = vm.stack_top;
+    // While #run code runs, what it prints goes to stderr, like the
+    // compiler's own messages: stdout may be carrying --emit-c's output.
+    fflush(null);
+    let saved_stdout = dup(1);
+    dup2(2, 1);
+    if (vm.depth == 0)
+        vm.steps = 0;
+    // a #run inside the code being compiled for another has its own errors
+    let outer_failed, outer_error = vm.failed, vm.error;
+    vm.failed = false;
+
+    let out: []u8;
+    let run = new(VmFunction);
+    run.name = "#run";
+    let l = make_lower(vm, run);
+    l.lasting = true; // baked after this frame is gone
+    lower_thunk(&l, n);
+    if (!vm.failed) {
+        let frame = push_frame(vm, run);
+        if (frame != null && execute(vm, run, frame))
+            out = clone_slice((frame + run.ret_offset)[0..run.ret_size as isize]);
+    }
+
+    fflush(null);
+    dup2(saved_stdout, 1);
+    close(saved_stdout);
+    vm.stack_top = saved_top;
+    let ok = !vm.failed;
+    if (!ok)
+        report_failure(vm, at);
+    vm.failed, vm.error = outer_failed, outer_error;
+    return out, ok;
+}
+
+/* --------------------------------------------------------- calls into C */
+
+// a function C code can call: a C function, or a closure for an `extern
+// fn` with a body; null if there's none
+fn vm_c_address(vm: *Vm, f: *VmFunction) -> *void {
+    if (f.native)
+        return f.address;
+    if (f.closure_code != null)
+        return f.closure_code;
+    let t = f.decl.ty;
+    f.closure_args.len = 0;
+    for (p in t.params) {
+        if (!is_scalar(p))
+            return null;
+        array_add(&f.closure_args, ffi_type_for(vm, p));
+    }
+    if (t.ret.kind != .Void && !is_scalar(t.ret))
+        return null;
+    let ret = if (t.ret.kind == .Void) vmffi_type(-1) else ffi_type_for(vm, t.ret);
+    let cif = vmffi_cif(-1, f.closure_args.len as i32, f.closure_args.ptr, ret);
+    if (cif == null)
+        return null;
+    let data = new(ClosureData.{ .vm = vm, .f = f });
+    f.closure_code = vmffi_closure(cif, closure_entry, data);
+    return f.closure_code;
+}
+
+/* ----------------------------------------------------------------- baking */
+
+// `#run` results that can become part of the program: no pointers; why
+// not, if not
+fn vm_bakeable(vm: *Vm, of_type: *Type) -> (bool, string) {
+    let t = concrete(vm, of_type);
+    switch (t.kind) {
+    case .Int, .Float, .Bool, .Enum:
+        return true, "";
+    case .Array, .Slice:
+        return vm_bakeable(vm, t.elem);
+    case .Struct:
+        if (t.is_tagged) { // only the variant it holds is kept
+            for (fl in t.fields[1].ty.fields) {
+                let ok, why = vm_bakeable(vm, fl.ty);
+                if (!ok)
+                    return false, tformat("its variant `%`: %", fl.name, why);
+            }
+            return true, "";
+        }
+        for (fl in t.fields) {
+            let ok, why = vm_bakeable(vm, fl.ty);
+            if (!ok)
+                return false, tformat("its field `%`: %", fl.name, why);
+        }
+        return true, "";
+    case .Ptr, .Rawptr:
+        return false, "a pointer's address means nothing once the program runs";
+    case .Fn:
+        return false, "a function can't be carried over yet";
+    case .Growable:
+        return false, "a growable array's elements were allocated while compiling; return a slice or an array instead";
+    case .Union:
+        return false, "a union doesn't say which of its fields holds the value";
+    default:
+        return false, tformat("% can't be carried over", type_name(t));
+    }
+}
+
+// The value at `p`, of type `t`, as literals the code generator can write;
+// null if it has a tagged enum whose tag isn't one of its variants (made
+// with `as`), which has no literal
+fn vm_bake(vm: *Vm, of_type: *Type, p: *u8, at: Token) -> *Node {
+    let t = concrete(vm, of_type);
+    let n: *Node = null;
+    switch (t.kind) {
+    case .Int, .Enum, .Bool:
+        let k = kind_of(t);
+        let v = read_int(p, k);
+        let value = if (kind_signed(k)) i128(v as i64) else i128_u(v);
+        if (t.kind == .Bool) {
+            n = new_node(at, .Bool);
+            n.cval = bool_const(v != 0);
+        } else {
+            n = new_node(at, .Number);
+            n.cval = int_const(value);
+        }
+    case .Float:
+        n = new_node(at, .Float);
+        n.cval = float_const(read_float(p, kind_of(t)));
+    case .Slice:
+        let data = read_ptr(p);
+        let len = read_u64(p + 8) as isize;
+        if (t.elem == vm.c.types.u8) { // a string
+            n = new_node(at, .String(quote_string(copy_string(data[0..len] as string))));
+            break;
+        }
+        let items: [..]*Node;
+        let size = vm_size_of(vm, t.elem) as isize;
+        for (i in 0..len) {
+            let item = vm_bake(vm, t.elem, data + i * size, at);
+            if (item == null)
+                return null;
+            array_add(&items, item);
+        }
+        n = new_node(at, .ArrayLiteral(null, items));
+    case .Array:
+        let items: [..]*Node;
+        let size = vm_size_of(vm, t.elem) as isize;
+        for (i in 0..t.len as isize) {
+            let item = vm_bake(vm, t.elem, p + i * size, at);
+            if (item == null)
+                return null;
+            array_add(&items, item);
+        }
+        n = new_node(at, .ArrayLiteral(null, items));
+    default:
+        layout(vm.c, t);
+        if (t.is_tagged) { // the variant its tag names, and that one's value
+            let tag = t.fields[0];
+            let tag_value = vm_bake(vm, tag.ty, p + tag.offset, at);
+            let variant: *Node = null;
+            for (v in enum_variants(t.decl))
+                if (i128_eq(v.cval.i, tag_value.cval.i))
+                    variant = v;
+            if (variant == null)
+                return null;
+            let held: *Node = null;
+            let payload = t.fields[1];
+            for (fl in payload.ty.fields) {
+                if (fl.decl == variant) {
+                    held = vm_bake(vm, fl.ty, p + payload.offset, at);
+                    if (held == null)
+                        return null;
+                }
+            }
+            n = new_node(at, .VariantValue(held));
+            n.decl = variant;
+            break;
+        }
+        let items: [..]*Node; // the fields in order
+        for (fl in t.fields) {
+            let item = vm_bake(vm, fl.ty, p + fl.offset, at);
+            if (item == null)
+                return null;
+            array_add(&items, item);
+        }
+        n = new_node(at, .StructInit(null, items));
+    }
+    n.ty = t;
+    return n;
+}
+
+#scope_file
+
+// a runaway #run (an endless loop) stops with an error instead of hanging
+const MAX_STEPS: u64 = 1000000000;
+const MAX_DEPTH = 100000;
+const STACK_SIZE = 64 << 20;
+
+/* ------------------------------------------------------------------ types */
+
+fn kind_signed(k: VmKind) -> bool { return k == .I8 || k == .I16 || k == .I32 || k == .I64; }
 
 // a scalar at `p` as 64 bits, sign-extended for signed kinds
 fn read_int(p: *u8, k: VmKind) -> u64 {
@@ -241,27 +646,6 @@ fn write_float(p: *u8, k: VmKind, v: f64) {
         (p as *f64).* = v;
 }
 
-// a float's bits as an instruction's immediate
-pub fn float_bits(k: VmKind, v: f64) -> u64 {
-    let bits: u64 = 0;
-    write_float(&bits as *u8, k, v);
-    return bits;
-}
-
-pub fn vm_size_of(vm: *Vm, of_type: *Type) -> u32 {
-    let t = concrete(vm, of_type);
-    if (t.kind == .Void)
-        return 0;
-    layout(vm.c, t);
-    return t.size as u32;
-}
-
-pub fn vm_align_of(vm: *Vm, of_type: *Type) -> u32 {
-    let t = concrete(vm, of_type);
-    layout(vm.c, t);
-    return if (t.align != 0) t.align as u32 else 1;
-}
-
 /* ------------------------------------------------------------------ C */
 
 extern fn vmffi_dlsym(name: *u8) -> *void;
@@ -277,12 +661,6 @@ extern fn dup2(from: i32, to: i32) -> i32;
 extern fn close(fd: i32) -> i32;
 extern fn sabk_errno() -> i32;
 
-pub fn vm_dlsym(name: string) -> *void {
-    let c_name = to_cstring(name);
-    defer free(c_name);
-    return vmffi_dlsym(c_name);
-}
-
 fn ffi_type_for(vm: *Vm, t: *Type) -> *void { return vmffi_type(kind_of(concrete(vm, t)) as i32); }
 
 fn is_scalar(t: *Type) -> bool {
@@ -293,28 +671,6 @@ fn is_scalar(t: *Type) -> bool {
 }
 
 /* ---------------------------------------------- build script functions */
-
-// What build scripts (top-level `#run`, using std/build) set. The compiler
-// starts from these; options given on the command line win.
-// std/build's BoundsChecks, in its order: index and slice checks as
-// written (#no_bounds_check turns a function's off), none, or everywhere
-pub enum BoundsChecks { On, Off, Always }
-
-pub struct BuildOptions {
-    output: string;        // the executable's path
-    release: bool;
-    bounds_checks: BoundsChecks;
-    strict: bool;          // the strict warnings: dropped failures, values
-                           // used before their failure is checked
-    werror: bool;          // warnings fail the build
-    c_flags: [..]string;   // passed to the C compiler as written
-    libraries: [..]string; // -l<name>
-    c_files: [..]string;   // compiled and linked with the program
-    base_dir: string;      // relative paths are relative to this: the
-                           // directory of the program's main file
-    program_args: [..]string; // args() while compiling: the program's
-                              // name, then what follows `--`
-}
 
 // the VM running now: what the host functions below work on
 let running_vm: *Vm;
@@ -389,48 +745,7 @@ fn host_function(name: string) -> *void {
     };
 }
 
-// std/build's functions: the compiler's own, which exist only while
-// compiling
-pub fn is_build_function(name: string) -> bool {
-    return starts_with(name, "sabk_build_") && host_function(name) != null;
-}
-
 /* -------------------------------------------------------------- the VM */
-
-// NUL-terminated, kept forever
-pub fn vm_intern(vm: *Vm, bytes: string) -> *u8 {
-    let p = alloc(bytes.len + 1) as *u8;
-    copy_memory(p, bytes.ptr, bytes.len);
-    p[bytes.len] = 0;
-    return p;
-}
-
-// zeroed, 16-aligned, kept forever
-pub fn vm_keep(vm: *Vm, size: isize) -> *u8 {
-    let rounded = (size + 15) / 16 * 16 + 16;
-    let p = alloc(rounded, 16) as *u8;
-    zero_memory(p, rounded);
-    return p;
-}
-
-pub fn vm_function_for(vm: *Vm, decl: *Node) -> *VmFunction {
-    let known = map_get(&vm.functions, decl) or_else null;
-    if (known != null)
-        return known;
-    let f = new(VmFunction);
-    f.decl = decl;
-    f.name = decl.tok.text;
-    if (decl.kind is .Fn{is_extern: true, body} && body == null) {
-        f.native = true;
-        f.is_abort = f.name == "abort";
-        f.is_exit = f.name == "exit";
-        f.address = host_function(f.name);
-        if (f.address == null)
-            f.address = vm_dlsym(f.name);
-    }
-    map_put(&vm.functions, decl, f);
-    return f;
-}
 
 // false (with the error kept) if it can't be compiled; it starts over if
 // it's needed again
@@ -451,74 +766,6 @@ fn compile(vm: *Vm, f: *VmFunction) -> bool {
     }
     f.compiled = true;
     return true;
-}
-
-// a global's memory, its value in it; null (with the error kept) if it
-// can't have one while compiling
-pub fn vm_global_storage(vm: *Vm, decl: *Node) -> *u8 {
-    let known = map_get(&vm.globals, decl) or_else null;
-    if (known != null)
-        return known;
-    decl_type(vm.c, decl); // its initializer is checked, any #run in it baked
-    if (decl.kind is .Let{is_extern: true}) { // C's own: the compiler's copy of it
-        let address = vm_dlsym(decl.tok.text) as *u8;
-        if (address == null) {
-            let none: Token;
-            vm_fail(vm, none, tformat("the C variable `%` isn't available while compiling", decl.tok.text), false);
-            return null;
-        }
-        map_put(&vm.globals, decl, address);
-        return address;
-    }
-    let t = concrete(vm, decl.ty);
-    let size = vm_size_of(vm, t);
-    let storage = vm_keep(vm, size as isize);
-    map_put(&vm.globals, decl, storage);
-    let value = value_of(decl);
-    if (value != null || has_defaults(vm.c, t)) {
-        // the initializer (or the type's defaults) is a constant: run it
-        // once, like the C's static data
-        let init = new(VmFunction);
-        init.name = "initializer";
-        let l = make_lower(vm, init);
-        l.lasting = true;
-        if (value != null)
-            lower_thunk(&l, value);
-        else
-            lower_default_thunk(&l, t);
-        if (vm.failed)
-            return null;
-        let saved = vm.stack_top;
-        let frame = push_frame(vm, init);
-        if (frame == null || !execute(vm, init, frame))
-            return null;
-        copy_memory(storage, frame + init.ret_offset, size as isize);
-        vm.stack_top = saved;
-    }
-    return storage;
-}
-
-// the compile-time context: the prelude's default_context(), run with an
-// empty context to start
-pub fn vm_context(vm: *Vm) -> *u8 {
-    if (vm.ctx != null)
-        return vm.ctx;
-    let size = vm_size_of(vm, vm.c.context_type);
-    vm.ctx = vm_keep(vm, size as isize);
-    let boot = vm_keep(vm, size as isize);
-    let decl = map_get(&vm.c.res.prelude.scope, ScopeKey.{ .name = "default_context" }) or_else null;
-    let f = vm_function_for(vm, decl);
-    if (!compile(vm, f))
-        return vm.ctx;
-    let saved = vm.stack_top;
-    let frame = push_frame(vm, f);
-    if (frame == null)
-        return vm.ctx;
-    ((frame + f.param_offsets[0] as isize) as **u8).* = boot;
-    if (execute(vm, f, frame))
-        copy_memory(vm.ctx, frame + f.ret_offset, size as isize);
-    vm.stack_top = saved;
-    return vm.ctx;
 }
 
 fn field_named(t: *Type, name: string) -> *Field {
@@ -547,56 +794,8 @@ fn set_text(vm: *Vm, base: *u8, of: *Type, name: string, text: string) {
 }
 
 fn prelude_type(vm: *Vm, name: string) -> *Type {
-    let d = map_get(&vm.c.res.prelude.scope, ScopeKey.{ .name = name }) or_else null;
+    let d = module_decl(vm.c.res.prelude, name);
     return decl_type(vm.c, d);
-}
-
-// a type's TypeInfo (the prelude's), built once: the same data the code
-// generator writes for the program
-pub fn vm_type_info(vm: *Vm, of_type: *Type) -> *u8 {
-    let t = concrete(vm, of_type);
-    let known = map_get(&vm.type_infos, t) or_else null;
-    if (known != null)
-        return known;
-    let info_type = vm.c.type_info_type;
-    let info = vm_keep(vm, vm_size_of(vm, info_type) as isize);
-    map_put(&vm.type_infos, t, info); // first: a type can refer to itself
-    let shape = shape_of(vm.c, t);
-    set_int(info, info_type, "kind", type_kind_value(vm.c, shape.kind) as u64);
-    set_text(vm, info, info_type, "name", type_name(t));
-    set_int(info, info_type, "size", t.size);
-    set_int(info, info_type, "align", t.align);
-    set_int(info, info_type, "is_signed", if (t.kind == .Int && t.is_signed) 1 else 0);
-    if (shape.elem != null)
-        set_int(info, info_type, "elem", vm_type_info(vm, shape.elem) as usize);
-    set_int(info, info_type, "count", shape.count);
-    if (shape.fields.len > 0) {
-        let field_type = prelude_type(vm, "TypeField");
-        let size = vm_size_of(vm, field_type) as isize;
-        let fields = vm_keep(vm, size * shape.fields.len);
-        for (i in 0..shape.fields.len) {
-            let f = fields + i * size;
-            set_text(vm, f, field_type, "name", shape.fields[i].name);
-            set_int(f, field_type, "info", vm_type_info(vm, shape.fields[i].ty) as usize);
-            set_int(f, field_type, "offset", shape.fields[i].offset);
-        }
-        set_slice(info, info_type, "fields", fields, shape.fields.len as u64);
-    }
-    if (shape.variants.len > 0) {
-        let variant_type = prelude_type(vm, "TypeVariant");
-        let size = vm_size_of(vm, variant_type) as isize;
-        let variants = vm_keep(vm, size * shape.variants.len);
-        for (i in 0..shape.variants.len) {
-            let v = variants + i * size;
-            let shaped = shape.variants[i];
-            set_text(vm, v, variant_type, "name", shaped.name);
-            set_int(v, variant_type, "value", shaped.value as u64);
-            if (shaped.payload != null)
-                set_int(v, variant_type, "payload", vm_type_info(vm, shaped.payload) as usize);
-        }
-        set_slice(info, info_type, "variants", variants, shape.variants.len as u64);
-    }
-    return info;
 }
 
 // null (with the error kept) when the stack is full
@@ -616,44 +815,6 @@ fn push_frame(vm: *Vm, f: *VmFunction) -> *u8 {
 fn same_place(a: Token, b: Token) -> bool { return a.text.ptr == b.text.ptr; }
 
 fn has_place(t: Token) -> bool { return t.text.ptr != null; }
-
-// Runs `n`, a checked expression, and returns its value's bytes; on
-// failure reports an error at `at` and returns false.
-pub fn vm_evaluate(vm: *Vm, n: *Node, at: *Node) -> ([]u8, bool) {
-    let saved_top = vm.stack_top;
-    // While #run code runs, what it prints goes to stderr, like the
-    // compiler's own messages: stdout may be carrying --emit-c's output.
-    fflush(null);
-    let saved_stdout = dup(1);
-    dup2(2, 1);
-    if (vm.depth == 0)
-        vm.steps = 0;
-    // a #run inside the code being compiled for another has its own errors
-    let outer_failed, outer_error = vm.failed, vm.error;
-    vm.failed = false;
-
-    let out: []u8;
-    let run = new(VmFunction);
-    run.name = "#run";
-    let l = make_lower(vm, run);
-    l.lasting = true; // baked after this frame is gone
-    lower_thunk(&l, n);
-    if (!vm.failed) {
-        let frame = push_frame(vm, run);
-        if (frame != null && execute(vm, run, frame))
-            out = clone_slice((frame + run.ret_offset)[0..run.ret_size as isize]);
-    }
-
-    fflush(null);
-    dup2(saved_stdout, 1);
-    close(saved_stdout);
-    vm.stack_top = saved_top;
-    let ok = !vm.failed;
-    if (!ok)
-        report_failure(vm, at);
-    vm.failed, vm.error = outer_failed, outer_error;
-    return out, ok;
-}
 
 fn report_failure(vm: *Vm, at: *Node) {
     let e = &vm.error;
@@ -694,31 +855,6 @@ struct ClosureData {
 extern fn closure_entry(cif: *void, ret: *void, args: **void, data: *void) {
     let d = data as *ClosureData;
     call_from_c(d.vm, d.f, ret as *u8, args);
-}
-
-// a function C code can call: a C function, or a closure for an `extern
-// fn` with a body; null if there's none
-pub fn vm_c_address(vm: *Vm, f: *VmFunction) -> *void {
-    if (f.native)
-        return f.address;
-    if (f.closure_code != null)
-        return f.closure_code;
-    let t = f.decl.ty;
-    f.closure_args.len = 0;
-    for (p in t.params) {
-        if (!is_scalar(p))
-            return null;
-        array_add(&f.closure_args, ffi_type_for(vm, p));
-    }
-    if (t.ret.kind != .Void && !is_scalar(t.ret))
-        return null;
-    let ret = if (t.ret.kind == .Void) vmffi_type(-1) else ffi_type_for(vm, t.ret);
-    let cif = vmffi_cif(-1, f.closure_args.len as i32, f.closure_args.ptr, ret);
-    if (cif == null)
-        return null;
-    let data = new(ClosureData.{ .vm = vm, .f = f });
-    f.closure_code = vmffi_closure(cif, closure_entry, data);
-    return f.closure_code;
 }
 
 // C called back into compile-time code. A failure can't unwind through the
@@ -1137,127 +1273,4 @@ fn convert_scalar(i: VmInstr, frame: *u8) {
     } else {
         write_int(slot(frame, i.a), to, read_int(slot(frame, i.b), from));
     }
-}
-
-/* ----------------------------------------------------------------- baking */
-
-// `#run` results that can become part of the program: no pointers; why
-// not, if not
-pub fn vm_bakeable(vm: *Vm, of_type: *Type) -> (bool, string) {
-    let t = concrete(vm, of_type);
-    switch (t.kind) {
-    case .Int, .Float, .Bool, .Enum:
-        return true, "";
-    case .Array, .Slice:
-        return vm_bakeable(vm, t.elem);
-    case .Struct:
-        if (t.is_tagged) { // only the variant it holds is kept
-            for (fl in t.fields[1].ty.fields) {
-                let ok, why = vm_bakeable(vm, fl.ty);
-                if (!ok)
-                    return false, tformat("its variant `%`: %", fl.name, why);
-            }
-            return true, "";
-        }
-        for (fl in t.fields) {
-            let ok, why = vm_bakeable(vm, fl.ty);
-            if (!ok)
-                return false, tformat("its field `%`: %", fl.name, why);
-        }
-        return true, "";
-    case .Ptr, .Rawptr:
-        return false, "a pointer's address means nothing once the program runs";
-    case .Fn:
-        return false, "a function can't be carried over yet";
-    case .Growable:
-        return false, "a growable array's elements were allocated while compiling; return a slice or an array instead";
-    case .Union:
-        return false, "a union doesn't say which of its fields holds the value";
-    default:
-        return false, tformat("% can't be carried over", type_name(t));
-    }
-}
-
-// The value at `p`, of type `t`, as literals the code generator can write;
-// null if it has a tagged enum whose tag isn't one of its variants (made
-// with `as`), which has no literal
-pub fn vm_bake(vm: *Vm, of_type: *Type, p: *u8, at: Token) -> *Node {
-    let t = concrete(vm, of_type);
-    let n: *Node = null;
-    switch (t.kind) {
-    case .Int, .Enum, .Bool:
-        let k = kind_of(t);
-        let v = read_int(p, k);
-        let value = if (kind_signed(k)) i128(v as i64) else i128_u(v);
-        if (t.kind == .Bool) {
-            n = new_node(at, .Bool);
-            n.cval = bool_const(v != 0);
-        } else {
-            n = new_node(at, .Number);
-            n.cval = int_const(value);
-        }
-    case .Float:
-        n = new_node(at, .Float);
-        n.cval = float_const(read_float(p, kind_of(t)));
-    case .Slice:
-        let data = read_ptr(p);
-        let len = read_u64(p + 8) as isize;
-        if (t.elem == vm.c.types.u8) { // a string
-            n = new_node(at, .String(quote_string(copy_string(data[0..len] as string))));
-            break;
-        }
-        let items: [..]*Node;
-        let size = vm_size_of(vm, t.elem) as isize;
-        for (i in 0..len) {
-            let item = vm_bake(vm, t.elem, data + i * size, at);
-            if (item == null)
-                return null;
-            array_add(&items, item);
-        }
-        n = new_node(at, .ArrayLiteral(null, items));
-    case .Array:
-        let items: [..]*Node;
-        let size = vm_size_of(vm, t.elem) as isize;
-        for (i in 0..t.len as isize) {
-            let item = vm_bake(vm, t.elem, p + i * size, at);
-            if (item == null)
-                return null;
-            array_add(&items, item);
-        }
-        n = new_node(at, .ArrayLiteral(null, items));
-    default:
-        layout(vm.c, t);
-        if (t.is_tagged) { // the variant its tag names, and that one's value
-            let tag = t.fields[0];
-            let tag_value = vm_bake(vm, tag.ty, p + tag.offset, at);
-            let variant: *Node = null;
-            for (v in enum_variants(t.decl))
-                if (i128_eq(v.cval.i, tag_value.cval.i))
-                    variant = v;
-            if (variant == null)
-                return null;
-            let held: *Node = null;
-            let payload = t.fields[1];
-            for (fl in payload.ty.fields) {
-                if (fl.decl == variant) {
-                    held = vm_bake(vm, fl.ty, p + payload.offset, at);
-                    if (held == null)
-                        return null;
-                }
-            }
-            n = new_node(at, .VariantValue(held));
-            n.decl = variant;
-            break;
-        }
-        let items: [..]*Node; // the fields in order
-        for (fl in t.fields) {
-            let item = vm_bake(vm, fl.ty, p + fl.offset, at);
-            if (item == null)
-                return null;
-            array_add(&items, item);
-        }
-        n = new_node(at, .StructInit(null, items));
-    }
-    n.ty = t;
-    return n;
 }

@@ -1,6 +1,6 @@
-import "std/io";
-import "std/mem" as m;
-import "lib/util";
+#import "std/io";
+#import "std/mem" as m;
+#import "lib/util";
 
 fn main() -> i32 {
     io.print("hi\n");

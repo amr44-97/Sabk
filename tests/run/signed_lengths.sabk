@@ -1,7 +1,7 @@
 // .len is an isize, and so is an integer `let` without a type: lengths mix
 // with other signed integers without casts, and counting down stops at 0
-import "std/io";
-import "std/str";
+#import "std/io";
+#import "std/str";
 
 extern fn printf(format: *u8, ...) -> i32;
 extern fn memset(memory: *void, value: i32, size: usize) -> *void;

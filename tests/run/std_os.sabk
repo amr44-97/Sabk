@@ -1,5 +1,5 @@
-import "std/io";
-import "std/os";
+#import "std/io";
+#import "std/os";
 
 fn main() {
     let unset, found = get_env("THE_COMPILER_SURELY_UNSET");
