@@ -52,6 +52,12 @@ struct Module {
 
 fn prelude_source() -> string { return PRELUDE; }
 
+// how many bits C's long has on the target: 32 on Windows and 32-bit
+// targets, 64 elsewhere. The prelude's long and the C check agree on it.
+fn c_long_bits() -> isize {
+    return if (OS == .Windows || POINTER_SIZE == 4) 32 else 64;
+}
+
 // what C's perror says about a file that couldn't be read
 fn system_error_text(err: IoError) -> string {
     return switch (err) {
@@ -79,7 +85,10 @@ fn prelude_text() -> string {
         panic(tformat("can't read src/prelude.sabk (build from the repository's top): %",
                       io_error_message(err)));
     let with_os = replace_all(text, "@OS@", tformat("%", OS));
-    return replace_all(with_os, "@ARCH@", tformat("%", ARCH));
+    let with_arch = replace_all(with_os, "@ARCH@", tformat("%", ARCH));
+    let bits = c_long_bits();
+    let with_long = replace_all(with_arch, "@C_LONG@", tformat("i%", bits));
+    return replace_all(with_long, "@C_ULONG@", tformat("u%", bits));
 }
 
 fn replace_all(s: string, what: string, with: string) -> string {

@@ -251,6 +251,7 @@ fn generate(g: *CodeGen) -> string {
         return "";
     let source: [..]u8;
     append_string(&source, C_PRELUDE);
+    append_string(&source, c_type_checks());
     append_string(&source, "\n/* types */\n");
     append_string(&source, g.fwd as string);
     append_string(&source, "\n");
@@ -275,6 +276,27 @@ fn generate(g: *CodeGen) -> string {
 
 const C_PRELUDE = #run read_text("src/runtime_start.c");
 const C_RUNTIME = #run read_text("src/runtime_new.c");
+
+// The prelude's C types (int, long, ...) have the sizes the checker gave
+// them; these stop the build if the C compiler disagrees. Always written:
+// simpler than tracking which ones the program uses, and free.
+fn c_type_checks() -> string {
+    let out: [..]u8;
+    append_string(&out, "\n/* the prelude's C types */\n");
+    c_size_check(&out, "short", "short", 2);
+    c_size_check(&out, "int", "int", 4);
+    c_size_check(&out, "long", "long", c_long_bits() / 8);
+    c_size_check(&out, "longlong", "long long", 8);
+    c_size_check(&out, "float", "float", 4);
+    c_size_check(&out, "double", "double", 8);
+    c_size_check(&out, "size_t", "size_t", POINTER_SIZE);
+    return out as string;
+}
+
+fn c_size_check(out: *[..]u8, name: string, c: string, size: isize) {
+    append_string(out, tformat("_Static_assert(sizeof(%) == %, \"Sabk's % is % bytes, but this C compiler's % isn't\");\n",
+                               c, size, name, size, c));
+}
 
 fn read_text(path: string) -> string {
     let text, err = read_file(path);

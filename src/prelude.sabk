@@ -96,6 +96,28 @@ const OS = OperatingSystem.@OS@;
 const ARCH = Architecture.@ARCH@;
 const POINTER_SIZE = sizeof(*void);
 
+// ---- C's types, for C interop: aliases of Sabk's own, which std and
+// Sabk code keep using. long is the one that differs by target (Windows
+// and 32-bit targets make it 32 bits), filled in like OS and ARCH.
+const char = u8;
+const uchar = u8;
+const schar = i8;
+const short = i16;
+const ushort = u16;
+const int = i32;
+const uint = u32;
+const long = @C_LONG@;
+const ulong = @C_ULONG@;
+const longlong = i64;
+const ulonglong = u64;
+const float = f32;
+const double = f64;
+const size_t = usize;
+const ssize_t = isize;
+const ptrdiff_t = isize;
+const intptr_t = isize;
+const uintptr_t = usize;
+
 // ---- Error: one type every error enum converts to
 //
 // An error enum, `enum IoError: Error { NotFound, ... }`, has Error's None

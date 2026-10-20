@@ -1,0 +1,10 @@
+sizes: 1 2 4 8 8 8 8
+signed: 1 8
+mixed: 5 5 5 7
+long: 42
+abs: 42
+strlen: 5
+own float: 3.14
+double: 2.5
+local int: not a type
+[exit 0]

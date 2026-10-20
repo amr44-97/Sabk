@@ -2,8 +2,8 @@ tests/errors/run_panic.sabk:6:15: panic: negative
 [error]: `#run` failed: it called abort() (a panic?) at [tests/errors/run_panic.sabk:10:11]
     10 | const X = #run check(-1);
        |           ^
-[note]: here at [<prelude>:174:5]
-   174 |     abort();
+[note]: here at [<prelude>:196:5]
+   196 |     abort();
        |     ^
 [note]: called from here at [std/os.sabk:57:52]
     57 |     handler.procedure(handler.data, what, message, location);

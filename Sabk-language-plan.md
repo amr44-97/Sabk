@@ -29,7 +29,7 @@ switch to them at the bootstrap.
 - [x] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 - [ ] **C interop:** `#library`, `#system_library`, `#foreign`, `#c_call` and C function types; `extern` goes (section 8)
-- [ ] **C types** in the prelude: `int`, `long`, `char`, `size_t`, ... (section 8)
+- [x] **C types** in the prelude: `int`, `long`, `char`, `size_t`, ... (section 8)
 - [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8). Built: everything but `is` and `#distinct`
 - [ ] **Layout:** `#packed` and `#align(n)` on structs (section 8)
 
@@ -1051,6 +1051,8 @@ the prelude, `const` for types, `type` as the type of types, `==` and `is`
 on types, and `#distinct` later. The rest is proposed, and the open points
 are at the end.
 
+How to build each step (files, functions, tests, checks): Sabk-section8-guide.md.
+
 Most projects in Sabk-projects.md bind a C library, and `extern` leaves
 four gaps:
 
@@ -1114,7 +1116,7 @@ and `.len` stays an `isize`.
 | `size_t`, `ssize_t` | `usize`, `isize` | same | same |
 | `ptrdiff_t`, `intptr_t`, `uintptr_t` | `isize`, `isize`, `usize` | same | same |
 
-- **Sizes come from the target's data model** (LP64, LLP64, ILP32), chosen by `#if` on `OS` and `POINTER_SIZE`: the checker needs them before there's any C. The generated C checks each C type the program uses (`_Static_assert(sizeof(long) == 8, ...)`), so a C compiler that disagrees stops the build.
+- **Sizes come from the target's data model** (LP64, LLP64, ILP32): the checker needs them before there's any C. Only `long` differs, and the prelude gets it as it gets `OS` and `ARCH`: `prelude_text()` fills in `@C_LONG@` while the compiler is built (a top-level `#if` in the prelude isn't decided, since the prelude isn't one of the program's modules). The generated C checks the sizes that could differ (`_Static_assert(sizeof(long) == 8, ...)`), always rather than only for the C types the program uses, so a C compiler that disagrees stops the build.
 - **`char` is `u8` everywhere**, so C strings stay `*u8`, as std makes them. C's `char` is signed on x86 and unsigned on ARM; the size is the same, so only arithmetic above 127 differs.
 - **Left out:** `long double` (Sabk has no type for it), stdint's names (`int32_t` is `i32`), and `wchar_t` until a binding needs it.
 - With `char` taken, a UTF-8 character type will need another name (`rune`, as in Go and Odin).
@@ -1207,6 +1209,19 @@ dropped: it would break Sabk callbacks passed through C's `void *`.)
 9. **The prelude isn't one of the program's modules**, so a top-level `#if` there isn't decided: step 2 (C types per target) needs that.
 10. **The old spellings are errors** that show the new one: `$T: Type` ("written `$T: type`") and `type X = T;` ("a name for a type is a constant: `const X = ...;`"). `type` anywhere else as a type says it only exists while compiling.
 11. **The seed was refreshed twice**: once with both spellings accepted, so std and the compiler could move, then after they had.
+
+### Built, step 2 (Oct 20, 2026): C types in the prelude
+
+#### Edge cases met building it (to review)
+
+1. **`long` is filled in, not chosen by `#if`:** `prelude_text()` replaces `@C_LONG@` and `@C_ULONG@`, from `c_long_bits()` in src/module.sabk (32 on Windows or a 32-bit target, else 64), which the C check uses too. The bullet under "C types" says so now.
+2. **The C checks are always written**, seven of them (`short`, `int`, `long`, `long long`, `float`, `double`, `size_t`), after the C prelude: simpler than tracking use, and free. `cc -m32` on the generated C stops at the `long` and `size_t` ones, as it should.
+3. **Messages write the Sabk type:** `let n: int = xs.len;` says "expected `i32`, found `isize`", and `type_info(long).name` is `i64`. Aliases have no name of their own.
+4. **A module's own `int` wins**, as a local's does (`let int = "..."`, a parameter or field called `float`, a `struct float`). So does an **imported** one: a module that exports `const int = i64;` changes `int` for every module that imports it plainly, since imports outrank the prelude. `#scope_file` keeps it to the module. Worth a look when bindings start declaring their own C types.
+5. **`const int = 5;`** in a program is allowed (its own name), and then `let x: int` says "`int` is a constant whose value isn't a type".
+6. **`fn f(x: int)` next to `fn f(x: i32)`** is "declared twice with the same parameters", as expected for an alias; the message writes both as `i32`.
+7. **The narrowing error doesn't teach the fix** (no "write `xs.len as int`"). It's the same message as for Sabk's own types, so it isn't step 2's; noted for when `int` habits show up in the projects.
+8. **Prelude line numbers moved** by 22, which changed four error and dump tests that point into the prelude.
 
 ## 9. How it lands
 

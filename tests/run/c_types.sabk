@@ -1,0 +1,39 @@
+// C's type names come from the prelude, as aliases of Sabk's own types.
+#import "std/io";
+
+extern fn abs(x: int) -> int;
+extern fn strlen(s: *char) -> size_t;
+
+// a program's own name wins over the prelude's
+struct float { whole: i64; frac: i64; }
+
+fn twice(x: long) -> long { return x * 2; }
+
+fn main() {
+    println("sizes: % % % % % % %", sizeof(char), sizeof(short), sizeof(int),
+            sizeof(long), sizeof(longlong), sizeof(double), sizeof(size_t));
+    println("signed: % %", sizeof(schar), sizeof(ptrdiff_t));
+
+    // aliases mix freely with the types they name
+    let a: int = 5;
+    let b: i32 = a;
+    let c: i64 = b;
+    let u: uint = 7;
+    let v: u32 = u;
+    println("mixed: % % % %", a, b, c, v);
+    println("long: %", twice(21));
+
+    // C calls with C types
+    println("abs: %", abs(-42));
+    println("strlen: %", strlen("hello"));
+
+    let f: float = .{ .whole = 3, .frac = 14 };
+    println("own float: %.%", f.whole, f.frac);
+    let d: double = 2.5;
+    let e: f64 = d;
+    println("double: %", e);
+
+    // and so do locals
+    let int = "not a type";
+    println("local int: %", int);
+}

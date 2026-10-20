@@ -1,0 +1,10 @@
+// C's int is 32 bits, and .len is an isize: mixing them is a narrowing error.
+fn count(xs: []i64) -> int {
+    let n: int = xs.len;
+    return n;
+}
+
+fn main() {
+    let xs: [3]i64;
+    count(xs[..]);
+}

@@ -97,6 +97,7 @@ matter day to day, each with its section:
 | C | Sabk | |
 |---|---|---|
 | `int x = 5;` | `let x: i32 = 5;` or `let x = 5;` (an `isize`) | [Declarations](#declarations) |
+| `long`, `size_t` in a header | the same names, for C bindings: `fn labs(x: long) -> long` | [C interop](#compiling-and-running) |
 | `int f(int a)` | `fn f(a: i32) -> i32` | [Declarations](#declarations) |
 | `*p`, `p->x` | `p.*`, `p.x` (`.` follows pointers) | [Types](#types) |
 | `#include`, headers | `#import "std/io";`, one file is a module (or `#load` makes one of several) | [Files and modules](#files-and-modules) |
@@ -3074,6 +3075,30 @@ first parameter. `extern` functions use the plain C calling convention:
 
 **C interop details:**
 - Struct layout matches C, so structs can be passed to C as they are.
+- C's type names are in the prelude, for declaring C's functions as their
+  headers do. They're aliases of Sabk's types, so they mix freely with
+  them, and messages write the Sabk type (an error about a `long` says
+  `i64`). Sabk code keeps Sabk's types: `.len` is an `isize`, and
+  `let n: int = xs.len;` is a narrowing error.
+
+  | Name | 64-bit Linux, macOS, BSD | 64-bit Windows | 32-bit |
+  |---|---|---|---|
+  | `char`, `uchar`, `schar` | `u8`, `u8`, `i8` | same | same |
+  | `short`, `ushort` | `i16`, `u16` | same | same |
+  | `int`, `uint` | `i32`, `u32` | same | same |
+  | `long`, `ulong` | `i64`, `u64` | `i32`, `u32` | `i32`, `u32` |
+  | `longlong`, `ulonglong` | `i64`, `u64` | same | same |
+  | `float`, `double` | `f32`, `f64` | same | same |
+  | `size_t`, `ssize_t` | `usize`, `isize` | same | same |
+  | `ptrdiff_t`, `intptr_t`, `uintptr_t` | `isize`, `isize`, `usize` | same | same |
+
+  `char` is `u8` everywhere, so C strings are `*u8` as std makes them (C's
+  `char` is signed on x86, so only arithmetic above 127 differs). The
+  generated C checks the sizes with `_Static_assert`, so a C compiler
+  that disagrees stops the build. They aren't keywords: a program's own
+  `int` (a local, or a declaration in the module or one it imports) wins
+  over the prelude's. `long double`, stdint's names (`int32_t` is `i32`)
+  and `wchar_t` are left out.
 - `f32` arguments to C variadic functions are passed as `f64`, as C requires.
 
 ## Overloading
@@ -3821,7 +3846,9 @@ A few things to know:
   `const word: type = i64;`.
 - Names that aren't keywords but are always there: the built-in types
   (`i32`, `string`, ...), `Code` (for macros), and
-  the prelude's `Any`, `TypeInfo`, `Error`, `Option`, `Allocator`, `Context`
-  and the target constants `OS`, `ARCH` and `POINTER_SIZE`.
+  the prelude's `Any`, `TypeInfo`, `Error`, `Option`, `Allocator`, `Context`,
+  the target constants `OS`, `ARCH` and `POINTER_SIZE`, and C's type names
+  (`int`, `long`, `char`, `size_t`, ...: see
+  [C interop details](#compiling-and-running)).
 - The lexer also produces `:=`, `::`, `~=` and `@`, which the grammar
   doesn't use yet.
