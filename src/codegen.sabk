@@ -385,7 +385,11 @@ fn global_name(g: *CodeGen, decl: *Node) -> string {
         return decl.tok.text; // C's own, under its own name
     let prefix = map_get(&g.module_prefix, decl.owner) or_else "";
     let name = if (prefix.len == 0) decl.tok.text else cat(prefix, "__", decl.tok.text);
-    // a generic instance is named after its types: max__i32, List__u8
+    // a generic instance is named after its types: max__i32, List__u8;
+    // one of a function sharing its name, apart from a non-generic one
+    // with those parameters: show__generic__i64, not show__i64
+    if (decl.generic != null && map_has(&g.res.overloaded, decl.generic))
+        name = cat(name, "__generic");
     for (arg in decl.instance_args)
         name = cat(name, "__", type_ident(g, arg));
     // a function sharing its name, after its parameters: area__Circle

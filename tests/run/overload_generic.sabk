@@ -1,0 +1,30 @@
+// generic functions in an overload set: they take what the others don't,
+// ranked after every other kind of fit
+#import "std/io";
+#import "std/fmt";
+
+struct List($T) { items: []T; }
+
+fn show(x: i64) -> string { return "an i64"; }
+fn show(s: string) -> string { return "a string"; }
+fn show(x: $T) -> string { return tformat("something else: %", x); }
+
+fn first(xs: []$T) -> T { return xs[0]; }
+fn first(l: List($T)) -> T { return l.items[0]; }
+fn first(s: string) -> u8 { return s[0]; }
+
+fn count(x: $T) -> isize { return 1; }
+fn count(xs: []$T) -> isize { return xs.len; }   // more specific than a bare $T
+
+fn main() {
+    println(show(5 as i64));         // exact: the i64 one
+    println(show("hi"));             // exact: the string one
+    println(show(2.5));              // only the generic one fits
+    println(show(true));
+    let small: i32 = 3;
+    println(show(small));            // i32 -> i64 converts (rank 5): beats generic (6)
+    let xs = i64.[7, 8];
+    let l = List(f64).{ .items = f64.[1.5] };
+    println("% % %", first(xs[..]), first(l), first("abc"));
+    println("% %", count(4), count(xs[..]));
+}

@@ -3069,7 +3069,24 @@ parameter, best first:
 3. an integer constant for an `i64`;
 4. a constant for another type it fits (`5` for an `i32` or an `f64`);
 5. an implicit conversion (`i32` to `i64`, `[N]T` to `[]T`, a value to
-   `?T`, to `Any`).
+   `?T`, to `Any`);
+6. a generic function's parameter that takes it by its shape: `[]$T` a
+   slice or array, `*$T` a pointer, `List($T)` a `List`;
+7. a bare `$T`, which takes anything.
+
+So a generic function takes what the others don't:
+
+```
+fn show(x: i64) -> string { ... }
+fn show(x: $T) -> string { ... }
+
+show(5 as i64);   // the i64 one: the same type
+show(small);      // small: i32, the i64 one: a conversion beats a generic
+show(2.5);        // the generic one, with T = f64
+```
+
+When a generic one is picked, the call works out its types as any
+generic call does.
 
 The pick is better or equal on every argument than each other candidate,
 and better on at least one. So `f(5)` picks `f(x: isize)`, then
@@ -3085,7 +3102,7 @@ pick(a, b);   // a, b: i32, with pick(i32, i64) and pick(i64, i32)
   they return are an error at the second, and so are two with the same
   parameters.
 - **A function value** needs a type to pick one: `let f = area;` is an
-  error that lists them.
+  error that lists them. A generic one isn't picked as a value.
 - **Not for `extern` functions**, since C has one function per name, and
   not for `#expand` functions.
 - A variadic candidate (`..T`) takes each extra argument as a `T`, or a

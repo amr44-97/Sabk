@@ -1378,7 +1378,8 @@ fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
         // `.Red` and `[...]` wait for the instance to say what they are (a
         // `[...]` decides itself when nothing else does)
         for (i in 0..args.len)
-            if (!is_type_arg(fun, i) && !is_contextual(args[i]) && !is_open_literal(args[i]))
+            if (!is_type_arg(fun, i) && !is_contextual(args[i]) && !is_open_literal(args[i]) &&
+                (!picked || args[i].ty == null)) // checked to pick the function
                 check_expr(c, args[i], null);
         if (!check_arg_count(c, n, fun, fn_params(fun).len, false))
             return c.types.error;

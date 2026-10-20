@@ -1,0 +1,27 @@
+[error]: no `first` takes these arguments: (an integer constant) at [tests/errors/overload_generic_misuse.sabk:9:5]
+     9 |     first(5);                                // neither fits: the list says why
+       |     ^
+[note]: `first(xs: []$T) -> T`: the 1st argument is an integer constant, which isn't a `[]$T` at [tests/errors/overload_generic_misuse.sabk:2:4]
+     2 | fn first(xs: []$T) -> T { return xs[0]; }
+       |    ^
+[note]: `first(s: string) -> u8`: the 1st argument is an integer constant, not a `string` at [tests/errors/overload_generic_misuse.sabk:3:4]
+     3 | fn first(s: string) -> u8 { return s[0]; }
+       |    ^
+[error]: `both` is ambiguous here: 2 of them fit these arguments, (an integer constant), equally well; convert an argument with `as` to pick one at [tests/errors/overload_generic_misuse.sabk:10:5]
+    10 |     both(1);                                 // equally generic
+       |     ^
+[note]: `both(x: $T) -> isize` fits at [tests/errors/overload_generic_misuse.sabk:5:4]
+     5 | fn both(x: $T) -> isize { return 1; }
+       |    ^
+[note]: `both(y: $U) -> isize` fits at [tests/errors/overload_generic_misuse.sabk:6:4]
+     6 | fn both(y: $U) -> isize { return 2; }        // two bare type parameters
+       |    ^
+[error]: no `first` has the type `fn([]i64) -> i64` at [tests/errors/overload_generic_misuse.sabk:11:31]
+    11 |     let f: fn([]i64) -> i64 = first;         // a generic one isn't picked as a value
+       |                               ^
+[note]: `first(s: string) -> u8` is one at [tests/errors/overload_generic_misuse.sabk:3:4]
+     3 | fn first(s: string) -> u8 { return s[0]; }
+       |    ^
+[note]: a generic `first` isn't one to pick as a value: its types come from a call at [tests/errors/overload_generic_misuse.sabk:11:31]
+    11 |     let f: fn([]i64) -> i64 = first;         // a generic one isn't picked as a value
+       |                               ^

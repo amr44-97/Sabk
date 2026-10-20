@@ -707,12 +707,8 @@ fn merged_set(r: *Resolver, m: *Module, name: string, parts: []*Node) -> *Node {
     return set;
 }
 
-// a function that can share its name: not a macro, not generic (yet)
-fn overloadable(d: *Node) -> bool {
-    if (d.kind is .Fn{is_macro: false, type_params})
-        return type_params.len == 0;
-    return false;
-}
+// a function that can share its name: not a macro (a generic one can)
+fn overloadable(d: *Node) -> bool { return d.kind is .Fn{is_macro: false}; }
 
 fn is_extern_fn(d: *Node) -> bool { return d.kind is .Fn{is_extern: true}; }
 

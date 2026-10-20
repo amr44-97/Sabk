@@ -871,6 +871,33 @@ generic candidates and operators come next.
 4. **The merged set is made once per module and name**, so every use of
    the name sees the same one.
 
+### Built, step 3 (Oct 20, 2026): generic candidates
+
+#### Edge cases met building it (to review)
+
+1. **A generic candidate is ranked by shape, not by inference**: a
+   parameter its type parameters appear in takes an argument whose type
+   has that shape (`[]$T` a slice or array, `*$T` a pointer, `List($T)` a
+   List instance, `$T` anything); the other parameters rank as usual.
+   When it's picked, the generic call infers the types as before, with
+   its usual errors (`max(1, 2.5)` with `$T` twice still says T can't be
+   both).
+2. **A bare `$T` ranks below a shaped one** (7 and 6), so `count(x: $T)`
+   and `count(xs: []$T)` give a slice to the second instead of being
+   ambiguous. Not in the plan: added to avoid that ambiguity.
+3. **A conversion beats a generic parameter** (5 before 6), as the plan's
+   order says: `show(small)` with an `i32` picks `show(x: i64)` over
+   `show(x: $T)`. Worth checking against Jai, which may prefer the
+   polymorphic one there.
+4. **C names**: an instance of a generic function in a set gets
+   `__generic` (`show__generic__i64`), so it doesn't clash with a
+   non-generic `show(x: i64)` (`show__i64`).
+5. **A generic one isn't picked as a function value** (its types come
+   from a call); the error says so.
+6. **Messages print a generic candidate as written**: `first(xs: []$T) ->
+   T`, and why it doesn't fit ("the 1st argument is an integer constant,
+   which isn't a `[]$T`").
+
 ### Operators
 
 ```

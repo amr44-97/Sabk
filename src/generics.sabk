@@ -685,6 +685,27 @@ fn check_cast(c: *Checker, n: *Node) -> *Type {
     return to;
 }
 
+// a plain `T`: a name of a type parameter
+fn names_type_param(p: *Node) -> bool {
+    return (p.kind.tag == .TypeName || p.kind.tag == .TypeMember) && p.decl != null &&
+           p.decl.kind.tag == .TypeParam;
+}
+
+// the type parameters a type written in a generic function's signature
+// uses: T, for []T or *List(T)
+fn type_params_in(n: *Node, out: *[..]*Node) {
+    if (n == null)
+        return;
+    if (n.kind.tag == .TypeParam) {
+        array_add(out, n);
+        return;
+    }
+    if (names_type_param(n))
+        array_add(out, n.decl);
+    for (child in children(n))
+        type_params_in(child, out);
+}
+
 #scope_file
 
 /* --------------------------------------------------------------- generics */
@@ -713,12 +734,6 @@ fn type_args(n: *Node) -> []*Node {
     case .TypeMember{args}: return args;
     default: return .[];
     }
-}
-
-// a plain `T`: a name of a type parameter
-fn names_type_param(p: *Node) -> bool {
-    return (p.kind.tag == .TypeName || p.kind.tag == .TypeMember) && p.decl != null &&
-           p.decl.kind.tag == .TypeParam;
 }
 
 // Matches a parameter's type against an argument's type and records what
@@ -852,21 +867,6 @@ fn choose_type(c: *Checker, tp: *Node, found: *Candidates, from_context: *Candid
         };
     }
     return null;
-}
-
-// the type parameters a type written in a generic function's signature
-// uses: T, for []T or *List(T)
-fn type_params_in(n: *Node, out: *[..]*Node) {
-    if (n == null)
-        return;
-    if (n.kind.tag == .TypeParam) {
-        array_add(out, n);
-        return;
-    }
-    if (names_type_param(n))
-        array_add(out, n.decl);
-    for (child in children(n))
-        type_params_in(child, out);
 }
 
 fn decided(found: *Candidates, tp: *Node) -> bool { return candidates_of(found, tp).len > 0; }

@@ -1,0 +1,12 @@
+// mistakes with generic functions in an overload set
+fn first(xs: []$T) -> T { return xs[0]; }
+fn first(s: string) -> u8 { return s[0]; }
+
+fn both(x: $T) -> isize { return 1; }
+fn both(y: $U) -> isize { return 2; }        // two bare type parameters
+
+fn main() {
+    first(5);                                // neither fits: the list says why
+    both(1);                                 // equally generic
+    let f: fn([]i64) -> i64 = first;         // a generic one isn't picked as a value
+}
