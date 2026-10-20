@@ -10,7 +10,7 @@ ROOT `#`
     rhs: BLOCK
       EXPR_STMT `print`
         lhs: CALL `(`
-          lhs: IDENTIFIER `print` -> FUN_DECL `print` tests/resolve/imports.sabk:8:4
+          lhs: IDENTIFIER `print` -> OVERLOADS `print` tests/resolve/imports.sabk:8:4
       EXPR_STMT `io`
         lhs: CALL `(`
           lhs: MEMBER `print` -> FUN_DECL `print` tests/resolve/std/io.sabk:2:4

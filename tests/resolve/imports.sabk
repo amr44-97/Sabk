@@ -5,7 +5,7 @@
 // `as`: only through the name
 #import "std/mem" as m;
 
-fn print() {}                 // our own declaration wins over io.print
+fn print() {}                 // joins io.print; print() fits only ours
 
 fn main() {
     print();                  // ours

@@ -853,6 +853,24 @@ generic candidates and operators come next.
    shortest form that reads back); numbers of an ordinary size are now
    written out (fixed separately, 3fa281a).
 
+### Built, step 2 (Oct 20, 2026): across plain imports
+
+#### Edge cases met building it (to review)
+
+1. **Your functions join the imports' instead of hiding them**: before,
+   your `print()` hid std's `print`; now they're one set, and `print()`
+   still calls yours since std's needs a format. Your types and
+   constants still hide imported names, and a function in one import
+   with a struct in another is still ambiguous where it's used.
+2. **Yours hides an imported one with the same parameters** ("your names
+   win" where it matters); two imports with the same parameters are
+   ambiguous only at a call, with a hint to name the module.
+3. **`extern` functions never join a set**: a test declared its own
+   `extern fn printf` next to std/io's, and as a set C's `...` didn't fit;
+   yours hides theirs, as before.
+4. **The merged set is made once per module and name**, so every use of
+   the name sees the same one.
+
 ### Operators
 
 ```

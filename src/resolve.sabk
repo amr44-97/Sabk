@@ -46,6 +46,7 @@ struct Resolver {
     // get their parameters' types
     overloaded: Map(*Node, bool);
     overload_sets: [..]*Node;
+    merged: Map(string, *Node);  // "module:name": its functions and its imports', as one set
     builtins: Map(string, *Node); // i32, u8, bool, ...
     error_count: isize;
 
@@ -677,6 +678,35 @@ fn declare_or_overload(r: *Resolver, m: *Module, scope: *Map(ScopeKey, *Node), n
     map_put(scope, key, set);
 }
 
+// a function that can join others of its name, or a set of them
+fn is_function_set(d: *Node) -> bool {
+    return d.kind.tag == .Overloads || (overloadable(d) && !is_extern_fn(d)); // C: one per name
+}
+
+// one set of the functions in `parts` (functions, or sets), the same set
+// each time module `m` names them
+fn merged_set(r: *Resolver, m: *Module, name: string, parts: []*Node) -> *Node {
+    let key = tformat("%:%", m.path, name);
+    let known = map_get(&r.merged, key) or_else null;
+    if (known != null)
+        return known;
+    let fns: [..]*Node;
+    for (p in parts) {
+        let members: []*Node = if (p.kind is .Overloads{fns: list}) list else .[p];
+        for (f in members) {
+            let seen = false;
+            for (have in fns)
+                seen = seen || have == f;
+            if (!seen)
+                array_add(&fns, f);
+        }
+    }
+    let set = new_node(parts[0].tok, .Overloads(fns));
+    set.owner = m;
+    map_put(&r.merged, copy_string(key), set);
+    return set;
+}
+
 // a function that can share its name: not a macro, not generic (yet)
 fn overloadable(d: *Node) -> bool {
     if (d.kind is .Fn{is_macro: false, type_params})
@@ -880,8 +910,10 @@ fn lookup(r: *Resolver, name: string, color: i32, from: *u8 = null) -> *Node {
         if (mine != null)
             return mine;
     }
+    // the module's own: a type or a constant hides the imports' names; its
+    // functions join theirs (below)
     let own = scope_get(&m.scope, name, 0);
-    if (own != null)
+    if (own != null && !is_function_set(own))
         return own;
 
     let matches: [..]Ambiguous; // (declaration, import)
@@ -898,6 +930,24 @@ fn lookup(r: *Resolver, name: string, color: i32, from: *u8 = null) -> *Node {
         if (!seen)
             array_add(&matches, Ambiguous.{ .decl = found, .via = imp });
     }
+    // functions of one name, the module's and its plain imports', are one
+    // overload set: a call picks among them
+    let fns: [..]*Node;
+    if (own != null)
+        array_add(&fns, own);
+    let all_functions = true;
+    for (match in matches) {
+        if (is_function_set(match.decl))
+            array_add(&fns, match.decl);
+        else
+            all_functions = false;
+    }
+    if (own != null && fns.len == 1)
+        return own;
+    if (fns.len > 1 && (own != null || all_functions))
+        return merged_set(r, m, name, fns);
+    if (own != null)
+        return own; // the imports' non-functions are hidden by it
     if (matches.len == 1)
         return matches[0].decl;
     if (matches.len > 1) {

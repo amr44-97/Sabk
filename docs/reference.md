@@ -149,10 +149,14 @@ scope_dir   = "#scope_export" | "#scope_module" | "#scope_file" ;
   - The qualified name is the last path segment. If that isn't a valid
     identifier (`my-lib`), a plain import gives only the bare names.
   - **Your names win:** your own top-level declarations take priority over
-    imported names.
+    imported names. Functions are the exception: yours and the imports'
+    of one name are one overload set (see [Overloading](#overloading)),
+    and yours hides an imported one only when the parameters are the same.
   - **Clashes are reported where they're used.** A name that two plain imports
     both provide is an error only where you use it bare. The error suggests
-    the qualified forms (`left.shared` or `right.shared`).
+    the qualified forms (`left.Shape` or `right.Shape`). Two imports'
+    functions are one set instead, and only a call that fits both equally
+    is ambiguous.
   - **Imports don't pass through:** importing `std/str` doesn't give you the
     names `str` itself imports.
 - **`#load "file.sabk";` makes one module of several files**, as in Jai.
@@ -3088,6 +3092,13 @@ pick(a, b);   // a, b: i32, with pick(i32, i64) and pick(i64, i32)
   `..xs` slice whole.
 - In C, each one's name gets its parameters' types: `area__Circle`,
   `area__Rect`.
+- **Across modules:** your functions and your plain imports' functions of
+  one name are one set, so you can add a `describe(s: Shape)` next to a
+  library's `describe`. Yours hides an imported one with the same
+  parameters; two imports with the same parameters make a call that
+  fits both ambiguous, and the error says to name the module
+  (`left.shared`). A qualified call, `io.print(...)`, only sees that
+  module's. `extern` functions don't join sets: yours hides theirs.
 
 ## Generics
 

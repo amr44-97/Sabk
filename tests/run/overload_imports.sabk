@@ -1,0 +1,11 @@
+// functions of one name across plain imports are one set
+#import "std/io";
+#import "lib/describing";
+
+fn describe(s: string) -> string { return s; }         // joins the library's two
+fn label(x: i64) -> string { return "my label"; }      // the same parameters: ours hides theirs
+
+fn main() {
+    println("%, %, %", describe(5), describe(true), describe("text"));
+    println("% / %", label(1), describing.label(1));
+}

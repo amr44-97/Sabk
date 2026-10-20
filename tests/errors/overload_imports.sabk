@@ -1,0 +1,9 @@
+// functions of one name from two plain imports: one set, so only a call
+// that fits both equally is ambiguous
+#import "lib/left";
+#import "lib/right";
+
+fn main() {
+    shared();                 // both have `fn shared()`
+    left.shared();            // fine: qualified
+}

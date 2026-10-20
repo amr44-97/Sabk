@@ -23,6 +23,7 @@
 #import "std/array";
 #import "std/fmt";
 #import "std/map";
+#import "std/path";
 #import "std/str";
 #import "ast";
 #import "module";
@@ -76,8 +77,9 @@ fn pick_overload(c: *Checker, n: *Node, callee: *Node, fns: []*Node) -> *Node {
         if (best)
             return fitting[i];
     }
-    error(c, callee.tok, tformat("`%` is ambiguous here: % of them fit these arguments, (%), equally well%",
-                                 name, fitting.len, arg_types(c, args), ambiguity_hint(args)));
+    let these = if (args.len == 0) "a call with no arguments" else tformat("these arguments, (%),", arg_types(c, args));
+    error(c, callee.tok, tformat("`%` is ambiguous here: % of them fit % equally well%",
+                                 name, fitting.len, these, ambiguity_hint(c, fitting, args)));
     for (f in fitting)
         note(c, f.tok, tformat("`%` fits", describe_fn(c, f)));
     return null;
@@ -165,7 +167,24 @@ fn visible_candidates(c: *Checker, at: Token, fns: []*Node) -> [..]*Node {
     for (f in fns)
         if (caller == null || caller.inserted_by != null || f.owner == caller || exported(f))
             array_add(&out, f);
-    return out;
+    // a function of the caller's own module hides an imported one with the
+    // same parameters: your names win
+    let kept: [..]*Node;
+    kept.allocator = context.temp_allocator;
+    for (f in out) {
+        let hidden = false;
+        if (caller != null && f.owner != caller) {
+            for (g in out) {
+                if (g.owner != caller)
+                    continue;
+                let a, b = decl_type(c, f), decl_type(c, g);
+                hidden = hidden || (a.kind == .Fn && b.kind == .Fn && same_params(a, b));
+            }
+        }
+        if (!hidden)
+            array_add(&kept, f);
+    }
+    return kept;
 }
 
 // each argument's rank against `f`'s parameters, and whether they all fit
@@ -353,7 +372,18 @@ fn why_not(c: *Checker, f: *Node, args: []*Node) -> string {
     return "it doesn't fit";
 }
 
-fn ambiguity_hint(args: []*Node) -> string {
+fn ambiguity_hint(c: *Checker, fitting: []*Node, args: []*Node) -> string {
+    // the same parameters, from different modules: only the module tells
+    let same = true;
+    for (f in fitting[1..])
+        same = same && f.owner != fitting[0].owner && same_params(decl_type(c, f), decl_type(c, fitting[0]));
+    if (same) {
+        let out: [..]u8;
+        out.allocator = context.temp_allocator;
+        for (i in 0..fitting.len)
+            print_to(&out, "%`%.%`", if (i == 0) "" else " or ", path_stem(fitting[i].owner.path), fitting[i].tok.text);
+        return tformat("; they take the same arguments: write the module, %", out as string);
+    }
     for (a in args)
         if (is_contextual(a) || is_open_literal(a))
             return "; give a literal its type to pick one (`Circle.{ ... }`, `Color.Red`)";

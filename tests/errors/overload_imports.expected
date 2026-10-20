@@ -1,0 +1,9 @@
+[error]: `shared` is ambiguous here: 2 of them fit a call with no arguments equally well; they take the same arguments: write the module, `left.shared` or `right.shared` at [tests/errors/overload_imports.sabk:7:5]
+     7 |     shared();                 // both have `fn shared()`
+       |     ^
+[note]: `shared()` fits at [tests/errors/lib/left.sabk:1:4]
+     1 | fn shared() {}
+       |    ^
+[note]: `shared()` fits at [tests/errors/lib/right.sabk:3:4]
+     3 | fn shared() {}
+       |    ^

@@ -1,0 +1,6 @@
+// a library's functions of one name: callers' own ones join them
+#import "std/fmt";
+
+fn describe(x: i64) -> string { return tformat("the number %", x); }
+fn describe(b: bool) -> string { return if (b) "yes" else "no"; }
+fn label(x: i64) -> string { return "the library's label"; }
