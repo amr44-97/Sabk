@@ -1,0 +1,11 @@
+// what #scope_file and #scope_module keep from importers
+#import "lib/regions";
+#import "lib/regions" as r;
+#import "lib/mixed";
+
+fn main() {
+    let a = shown();       // fine: exported
+    let b = hidden();      // unknown here: #scope_file
+    let c = r.hidden();    // private
+    let d = r.SECRET;      // private
+}

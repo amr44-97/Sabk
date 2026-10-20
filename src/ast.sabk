@@ -53,11 +53,18 @@ pub enum UnaryOp {
     PointerType,        // *T written where an expression goes: make(*Node)
 }
 
+// who can name a top-level declaration: whoever imports its module, its
+// module's files, or its own file
+pub enum Visibility { Export, Module, File }
+
 pub enum NodeKind {
     Root(decls: []*Node),
 
     // ---- declarations; tok is the name unless said otherwise
     Import(alias: *Node, module: *Module = null), // tok: the path, a string token
+    // #scope_export, #scope_module, #scope_file: who sees the declarations
+    // after it, up to the next one; tok: the directive
+    ScopeRegion(visibility: Visibility),
     Fn(params: []*Node, result: *Node, body: *Node, is_pub: bool,
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
        nodiscard: bool, no_bounds_check: bool,
@@ -220,6 +227,7 @@ pub fn old_shape(n: *Node) -> OldShape {
     switch (n.kind) {
     case .Root{decls}: s.tag = "ROOT"; s.list = decls;
     case .Import{alias}: s.tag = "IMPORT"; s.rhs = alias;
+    case .ScopeRegion: s.tag = "SCOPE_REGION";
     case .Fn(f):
         s.tag = if (f.is_macro) "MACRO_DECL" else "FUN_DECL";
         s.generic = f.type_params.len > 0 && n.generic == null;

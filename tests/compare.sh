@@ -27,6 +27,9 @@ known=" tests/resolve/macro_labels.sabk
   tests/run/main_error.sabk
   std/fs.sabk std/path.sabk
   tests/warnings/strict.sabk tests/run/hash_import.sabk
+  tests/errors/lib/mixed.sabk tests/errors/lib/regions.sabk tests/run/lib/regions.sabk
+  tests/errors/parse_scope_unknown.sabk tests/errors/scope_regions_misuse.sabk
+  tests/run/scope_regions.sabk
   tests/errors/format_check.sabk tests/errors/format_directives.sabk
   tests/errors/log_format.sabk tests/run/format_directives.sabk
   tests/run/is_not.sabk tests/errors/is_not_bindings.sabk

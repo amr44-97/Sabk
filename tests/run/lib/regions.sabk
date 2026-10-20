@@ -1,0 +1,16 @@
+// a module with #scope_ directives instead of `pub`: exported unless a
+// directive says otherwise
+#import "std/fmt";
+fn greet(name: string) -> string { return join_words("hello", name); }
+const ANSWER = 42;
+
+#scope_file
+fn join_words(a: string, b: string) -> string { return tformat("% %", a, b); }
+fn hidden() -> i64 { return 1; }
+
+#scope_export
+struct Point { x: i64; y: i64; }
+fn origin() -> Point { return .{ .x = hidden() - 1, .y = 0 }; }
+
+#scope_module
+const SECRET = 7;

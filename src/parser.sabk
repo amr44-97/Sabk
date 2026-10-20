@@ -35,8 +35,24 @@ pub fn parse_file(src: *Source, tokens: []Token) -> (*Node, isize) {
     let p = Parser.{ .src = src, .tokens = tokens };
     let start = peek(&p);
     let decls: [..]*Node;
-    while (!at(&p, .Eof))
+    while (!at(&p, .Eof)) {
+        // #scope_export, #scope_module, #scope_file: from here to the next
+        if (at(&p, .Hash) && starts_with(peek(&p, 1).text, "scope_")) {
+            let t = directive(&p);
+            let v = Visibility.Export;
+            switch (t.text) {
+            case "#scope_export": v = .Export;
+            case "#scope_module": v = .Module;
+            case "#scope_file":   v = .File;
+            default:
+                fail(&p, t, tformat("unknown directive `%`; who sees a declaration is set by `#scope_export`, `#scope_module` or `#scope_file`",
+                                   t.text));
+            }
+            array_add(&decls, new_node(t, .ScopeRegion(v)));
+            continue;
+        }
         array_add(&decls, top_decl(&p));
+    }
     return new_node(start, .Root(decls)), p.error_count;
 }
 

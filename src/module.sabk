@@ -36,6 +36,15 @@ pub struct Module {
     // code made by `#insert` (its declarations belong to the module with
     // the #insert): the #insert
     inserted_by: *Node;
+
+    // visibility: the declarations after a `#scope_module` or `#scope_file`,
+    // with that directive (the rest are exported); a module that still
+    // writes `pub` (uses_pub) keeps the rule from before: what isn't `pub`
+    // is private
+    regions: Map(*Node, *Node);
+    uses_pub: bool;
+    first_pub: *Node;
+    first_region: *Node;
 }
 
 // The prelude's text, with the target's names in it: the compiler builds

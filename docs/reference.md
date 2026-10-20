@@ -130,10 +130,12 @@ And what C leaves open, Sabk decides:
 ```
 file        = { top_decl } EOF ;
 top_decl    = import_decl
+            | scope_dir                   // who sees what follows
             | [ "pub" ] decl
             | "#insert" expr ";"          // declarations made by code
             | "#run" expr ";" ;           // a build step
 import_decl = "#import" STRING [ "as" IDENT ] ";" ;
+scope_dir   = "#scope_export" | "#scope_module" | "#scope_file" ;
 ```
 
 - Each file is a module. Imports work like Jai's:
@@ -164,7 +166,31 @@ import_decl = "#import" STRING [ "as" IDENT ] ";" ;
   imports are allowed.
 - Members of a module are reached with `.` (`mem.Allocator`, `io.print(...)`),
   the same syntax as struct members. The resolver tells them apart.
-- Top-level declarations are private to their file unless marked `pub`.
+- **Who sees a declaration** is set by regions, as in Jai: a directive
+  covers every declaration after it, up to the next one. A file starts
+  exported.
+
+  ```
+  fn greet(name: string) -> string { ... }      // exported: importers see it
+
+  #scope_file                                   // this file only
+  fn join_words(a: string, b: string) -> string { ... }
+
+  #scope_export                                 // exported again
+  struct Point { x: i64; y: i64; }
+
+  #scope_module                                 // this module's files only
+  const SECRET = 7;
+  ```
+
+  - `#scope_export`: whoever imports the module (the default at the top).
+  - `#scope_module`: the module's own files, not importers.
+  - `#scope_file`: this file only. Until a module can have several files,
+    it's the same as `#scope_module`.
+  - Naming a private one says where it's made private: "`hidden` is
+    private to file `lib/regions.sabk`", with a note at the `#scope_file`.
+  - **While code moves over**, a file that writes `pub` keeps the rule
+    from before: what isn't `pub` is private. A file can't use both.
 - Top-level order doesn't matter: a declaration can be used before it appears
   in the file.
 

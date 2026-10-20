@@ -1,0 +1,3 @@
+[error]: unknown directive `#scope_private`; who sees a declaration is set by `#scope_export`, `#scope_module` or `#scope_file` at [tests/errors/parse_scope_unknown.sabk:1:1]
+     1 | #scope_private
+       | ^

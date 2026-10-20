@@ -62,6 +62,10 @@ pub struct Resolver {
     builtins: Map(string, *Node); // i32, u8, bool, ...
     error_count: isize;
 
+    // the `#scope_module` or `#scope_file` the declarations being
+    // collected are under; null: exported
+    region: *Node;
+
     // where it is: a module, and in it a function
     mod: *Module;
     scopes: [..]Map(ScopeKey, *Node); // innermost last
@@ -124,6 +128,7 @@ pub fn resolve_program(r: *Resolver, root_path: string) -> bool {
                 continue;
             }
             r.mod = m;
+            r.region = map_get(&m.regions, d) or_else null;
             let made = if (d.kind.tag == .StaticIf) taken_decls(r, d) else inserted_decls(r, d);
             splice(decls, j, made); // and look at what was made: it may insert more
         }
@@ -402,10 +407,21 @@ fn collect_decls(r: *Resolver, m: *Module) {
     }
 
     r.mod = m;
+    r.region = null; // a file starts exported
     for (n in root_decls(m).*) {
         switch (n.kind) {
+        case .ScopeRegion{visibility}:
+            if (m.first_region == null) {
+                m.first_region = n;
+                if (m.uses_pub)
+                    mixed_visibility(r, m, m.first_pub);
+            }
+            r.region = if (visibility == .Export) null else n;
         case .InsertString, .StaticIf:
-            // run or decided once every module is loaded
+            // run or decided once every module is loaded, under the region
+            // they're written in
+            if (r.region != null)
+                map_put(&m.regions, n, r.region);
         case .Run:
             n.owner = m; // a build step: it declares nothing
         case .Import{alias, module}:
@@ -436,6 +452,35 @@ fn collect_decls(r: *Resolver, m: *Module) {
 fn collect_decl(r: *Resolver, m: *Module, n: *Node) {
     prepare_decl(r, m, n);
     declare(r, &m.scope, n.tok.text, n, "this module");
+    if (r.region != null)
+        map_put(&m.regions, n, r.region);
+    if (is_pub(n) && !m.uses_pub) {
+        m.uses_pub = true;
+        m.first_pub = n;
+        if (m.first_region != null)
+            mixed_visibility(r, m, n);
+    }
+}
+
+// `pub` (the rule from before) and `#scope_...` in one module
+fn mixed_visibility(r: *Resolver, m: *Module, written_pub: *Node) {
+    error(r, m.first_region.tok, tformat("this module writes `pub` too: with `%` and the other `#scope_` directives, a declaration is exported unless a directive says otherwise, so `pub` goes",
+                                         m.first_region.tok.text));
+    note(r, written_pub.tok, tformat("`%` is `pub` here", written_pub.tok.text));
+}
+
+// can the modules that import `d`'s module name it? A module that writes
+// `pub` keeps the rule from before (what isn't `pub` is private); others
+// export what no `#scope_module` or `#scope_file` covers
+fn exported(d: *Node) -> bool {
+    switch (d.kind.tag) {
+    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
+    default: return false; // import bindings are never exported
+    }
+    let m = d.owner;
+    if (m == null || m.uses_pub)
+        return is_pub(d);
+    return !map_has(&m.regions, d);
 }
 
 // every `$T` inside a type, in source order: a function type's parameters
@@ -535,6 +580,8 @@ fn set_aside(r: *Resolver, branch: *Node, in_if: *Node) {
             // never run
         default:
             prepare_decl(r, r.mod, d);
+            if (r.region != null)
+                map_put(&r.mod.regions, d, r.region);
             d.untaken_if = in_if;
             if (!map_has(&r.mod.untaken_scope, d.tok.text))
                 map_put(&r.mod.untaken_scope, d.tok.text, d);
@@ -640,7 +687,7 @@ fn lookup(r: *Resolver, name: string, color: i32) -> *Node {
         if (other == null)
             continue;
         let found = scope_get(&other.scope, name, 0);
-        if (found == null || !is_pub(found))
+        if (found == null || !exported(found))
             continue;
         let seen = false;
         for (match in matches)
@@ -657,7 +704,7 @@ fn lookup(r: *Resolver, name: string, color: i32) -> *Node {
 
     // the prelude's private helpers stay private
     let in_prelude = scope_get(&r.prelude.scope, name, 0);
-    if (in_prelude != null && is_pub(in_prelude))
+    if (in_prelude != null && exported(in_prelude))
         return in_prelude;
     let builtin = map_get(&r.builtins, name) or_else null;
     if (builtin != null)
@@ -673,7 +720,7 @@ fn lookup(r: *Resolver, name: string, color: i32) -> *Node {
         if (other == null)
             continue;
         let found = map_get(&other.untaken_scope, name) or_else null;
-        if (found != null && is_pub(found))
+        if (found != null && exported(found))
             return found;
     }
     return null;
@@ -730,9 +777,21 @@ fn qualified_hint(r: *Resolver, name: string, color: i32) -> string {
     for (n in root_decls(m).*) {
         if (n.kind is .Import{alias, module} && alias != null && module != null) {
             let found = scope_get(&module.scope, name, 0);
-            if (found != null && is_pub(found) && found.kind.tag != .Import)
+            if (found != null && exported(found))
                 return tformat("; did you mean `%.%`?", alias.tok.text, name);
         }
+    }
+    // a plain import has it, but keeps it to itself
+    for (imp in m.flat_imports) {
+        let other = imported_module(imp);
+        if (other == null)
+            continue;
+        let found = scope_get(&other.scope, name, 0);
+        if (found == null || found.kind.tag == .Import || exported(found))
+            continue;
+        let region = map_get(&other.regions, found) or_else null;
+        let why = if (region != null) tformat("`%` at line %", region.tok.text, region.tok.line) else "not `pub`";
+        return tformat("; `%` has one, but it's private to it (%)", other.path, why);
     }
     return "";
 }
@@ -742,7 +801,7 @@ fn module_member(r: *Resolver, m: *Module, name: Token) -> *Node {
     let found = scope_get(&m.scope, s, 0);
     if (found == null) { // set aside by a top-level #if (see lookup)
         let untaken = map_get(&m.untaken_scope, s) or_else null;
-        if (untaken != null && is_pub(untaken))
+        if (untaken != null && exported(untaken))
             return untaken;
     }
     // import bindings are never exported
@@ -750,9 +809,16 @@ fn module_member(r: *Resolver, m: *Module, name: Token) -> *Node {
         error(r, name, tformat("module `%` has no member `%`", m.path, s));
         return null;
     }
-    if (!is_pub(found)) {
-        error(r, name, tformat("`%` is private to module `%`", s, m.path));
-        note(r, found.tok, "declared here, add `pub` to export it");
+    if (!exported(found)) {
+        let region = map_get(&m.regions, found) or_else null;
+        let whose = if (region != null && region.tok.text == "#scope_file") "file" else "module";
+        error(r, name, tformat("`%` is private to % `%`", s, whose, m.path));
+        if (m.uses_pub || region == null)
+            note(r, found.tok, "declared here, add `pub` to export it");
+        else
+            note(r, region.tok, tformat("`%` keeps what follows it inside %; to export `%`, put it before, or after a `#scope_export`",
+                                        region.tok.text,
+                                        if (region.tok.text == "#scope_file") "its file" else "its module", s));
         return null;
     }
     return found;

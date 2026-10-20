@@ -1,0 +1,9 @@
+// #scope_export, #scope_module and #scope_file: what an importer sees
+#import "std/io";
+#import "lib/regions";
+
+fn main() {
+    println("% %", greet("you"), ANSWER);
+    let p = origin();
+    println("% %", p.x, regions.origin().y);
+}

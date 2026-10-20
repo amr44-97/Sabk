@@ -1,0 +1,7 @@
+fn shown() -> i64 { return hidden(); }
+
+#scope_file
+fn hidden() -> i64 { return 1; }
+
+#scope_module
+const SECRET = 7;
