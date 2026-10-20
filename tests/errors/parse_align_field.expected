@@ -1,0 +1,3 @@
+[error]: `#align` goes on the struct, after its name: `struct S #align(16) { ... }`; a field takes its type's alignment (to align one, give it a struct type with `#align`) at [tests/errors/parse_align_field.sabk:1:19]
+     1 | struct S { x: u32 #align(16); }
+       |                   ^

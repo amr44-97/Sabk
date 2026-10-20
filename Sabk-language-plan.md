@@ -31,7 +31,7 @@ switch to them at the bootstrap.
 - [x] **C interop:** `#library`, `#system_library`, `#foreign`, `#c_call` and C function types; `extern` goes (section 8); `std/c` exports libc and libm
 - [x] **C types** in the prelude: `int`, `long`, `char`, `size_t`, ... (section 8)
 - [ ] **Types as constants:** `const X = T;`, `type` as the type of types, `==` and `is` on types; `#distinct` later (section 8). Built: everything but `is` and `#distinct`
-- [ ] **Layout:** `#packed` and `#align(n)` on structs (section 8)
+- [x] **Layout:** `#packed` and `#align(n)` on structs (section 8)
 
 ## 1. Formatting
 
@@ -1198,7 +1198,7 @@ dropped: it would break Sabk callbacks passed through C's `void *`.)
 - **Decided Oct 20, 2026** (see above): Jai's spelling for libraries (the file's name with its prefix, `"libm"`), `,link_always`, asm labels for C names declared twice, and `#foreign` with no library for the program's own C (the runtime, `add_c_file`), "linked another way". Confirmed from the user's notes on Jai (jai_language_exploration.pdf, Oct 20), which added: no rpath, as Jai doesn't (a shared library goes next to the program or in the loader's path; `sabk --run` sets `LD_LIBRARY_PATH` itself), and `add_library_dir(dir)` in std/build for libraries outside the default paths (`-L`, and `--run`'s path). `,no_dll` and `,no_static_library` wait for a project that needs them; Jai opens a library while compiling as soon as it's declared, Sabk at the first `#run` call into it.
 - **Names every program has:** a plain import's names outrank the prelude's, so a module exporting `int` or `fn double` changed those for its importers. Decided, after reading how Jai does it: the built-in types and C's names are reserved, as Jai's primitive types are keywords, so nothing can declare them; the prelude's other names (`Error`, `OS`, `TypeKind`) can be declared again and hidden by a module's own or its imports', as Jai's Preload names are. (An error for an exported one, once imported plainly, was built and dropped: its only hit was the compiler's own `TypeKind`, which means to replace the prelude's.)
 - **`Code`:** does it follow `type` as `code`, or stay?
-- **`#align` on fields** as well as structs?
+- **`#align` on fields:** decided Oct 20, 2026: structs only; on a field it's an error that says to give the field a struct type with `#align`.
 
 ### Built, step 1 (Oct 20, 2026): `const` names types, `type`, `==` on types
 
@@ -1280,6 +1280,21 @@ Decided with the user before building: two rounds; `std/c` exports `libc` and `l
 11. **`extern` stays a keyword, only for its error**, which reads the whole declaration first to show the right spelling: `fn %(...) #c_call { ... }` for one with a body, `fn %(...) #foreign libc;` for one without, `let %: T #foreign libc;` for a variable.
 12. **Dumps say what a declaration is**: `[foreign libc]`, `[foreign]` or `[c_call]` replace `[extern]`, and a library has no type (it showed `<error>` in `--types`). `is_extern` keeps its name in the compiler, with a comment: C's calling convention.
 13. **Tests named after `extern` were renamed** (`overload_foreign`, `c_call_value`, ...), and two that became word for word step 3's parse tests were removed.
+
+### Built, step 5 (Oct 20, 2026): `#packed` and `#align`
+
+Decided with the user: `#align` acts on the whole struct only (documented so), and an alignment below what the fields need is an error, since C can't lower it either.
+
+#### Edge cases met building it (to review)
+
+1. **Unions take them too**, since `struct` and `union` share their syntax; a packed union is as big as its largest field, aligned to 1.
+2. **`#packed` and `#align` together** pack the fields, then align the whole (`#packed #align(4)` around a `u8` and a `u32` is 8 bytes), as GCC's `packed, aligned(4)` does.
+3. **`#align(n)` checks:** a constant integer (a variable or a string is an error), a power of two from 1 to 2³⁰, at least the fields' alignment. It's evaluated per generic instance, so it can use `$T`: `#align(2 * sizeof(T))`.
+4. **The address of a packed field** was not in the plan: such a pointer may be misaligned, which C makes undefined (GCC warns, and Sabk passes `-w`). So `&p.b`, slicing `p.words[..]` and the implicit view of `p.words` as a slice are errors that show the fix (`let b = p.b;`), through fields and array elements held by value, and through `(&p).b`. Reading, writing and copying fields is fine, and so is the address of a field with alignment 1.
+5. **Over-alignment had to be honored everywhere**, or `#align(64)` would only be true in C's static data: the heap gave 16 (calloc), so it now uses `posix_memalign` past 16 (and a resize past 16 copies, since realloc keeps only 16); growable arrays passed alignment 16 always and now pass the element's; and `#run`'s frames and globals were 16-aligned (a 64-aligned local was off by 48), so frames now align to their most aligned slot. The arenas already aligned addresses. `tests/run/layout.sabk` checks a local, a global, the heap and a grown array, in the program and in `#run`.
+6. **GCC prints a note** when a struct aligned to 64 is passed by value ("the ABI ... has changed in GCC 4.6"), which `-w` doesn't silence; `-Wno-psabi` does, for GCC and clang.
+7. **The C has a `_Static_assert`** of each such struct's size and alignment, as the C types got in step 2, so a C compiler that lays it out differently stops the build.
+8. **Linux's epoll** checks the layout against a real ABI: the kernel hands back the `u64` in a packed `EpollEvent` intact (on x86-64, where glibc packs it).
 
 ## 9. How it lands
 

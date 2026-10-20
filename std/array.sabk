@@ -44,7 +44,8 @@ fn array_reserve(xs: *[..]$T, capacity: isize) {
         return;
     if (xs.allocator.procedure == null)
         xs.allocator = context.allocator; // a zero array
-    let memory = resize(xs.ptr, xs.cap * sizeof(T), capacity * sizeof(T), 16, xs.allocator);
+    let align = type_info(T).align; // past 16 for an #align-ed struct
+    let memory = resize(xs.ptr, xs.cap * sizeof(T), capacity * sizeof(T), if (align > 16) align else 16, xs.allocator);
     if (memory == null)
         panic("out of memory");
     xs.ptr = memory as *T;

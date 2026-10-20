@@ -5,8 +5,8 @@ std/reflect.sabk:61:15: panic: values_equal can't work with the union `Bits`: wh
 [note]: in `values_equal` with T = Holder, used here at [tests/errors/reflect_union.sabk:10:16]
     10 |     let same = values_equal(h, h);
        |                ^
-[note]: here at [<prelude>:201:5]
-   201 |     abort();
+[note]: here at [<prelude>:202:5]
+   202 |     abort();
        |     ^
 [note]: called from here at [std/os.sabk:58:52]
     58 |     handler.procedure(handler.data, what, message, location);

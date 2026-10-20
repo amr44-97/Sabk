@@ -255,8 +255,9 @@ param       = IDENT ":" type [ "=" expr ]
             | IDENT ":" ".." type                     // any number: a []type
             | "$" IDENT ":" "type" ;                  // takes a type: generics
 
-struct_decl = "struct" IDENT [ type_params ] "{" { field } "}" ;
-union_decl  = "union"  IDENT [ type_params ] "{" { field } "}" ;
+struct_decl = "struct" IDENT [ type_params ] { layout } "{" { field } "}" ;
+union_decl  = "union"  IDENT [ type_params ] { layout } "{" { field } "}" ;
+layout      = "#packed" | "#align" "(" expr ")" ;      // in either order
 type_params = "(" "$" IDENT { "," "$" IDENT } ")" ;   // generic: List($T)
 field       = IDENT ":" type [ "=" expr ] ";" ;
 
@@ -336,6 +337,52 @@ values      = expr { "," expr } ;
   let b = Bits.{ .f = 1.0 };
   println("%", b.u);              // 1065353216: the float's bits
   ```
+
+- **A struct's layout is C's** (each field at the next offset its type's
+  alignment allows, the size rounded up to the struct's alignment, the
+  largest of its fields'), and two directives after its name change it,
+  for C's structs that do the same. They act on the whole struct (or
+  union), never on one field:
+
+  ```
+  struct EpollEvent #packed { events: u32; data: u64; }  // glibc's, on x86-64: 12 bytes
+  struct Vec4 #align(16) { x: f32; y: f32; z: f32; w: f32; }
+  struct Vec3 #align(16) { x: f32; y: f32; z: f32; }      // 12 bytes of fields, 16 in all
+  struct Both #packed #align(4) { a: u8; b: u32; }        // tight inside, 8 bytes
+  ```
+
+  - **`#packed`** puts each field right after the one before, with no
+    padding, and makes the struct's alignment 1: `struct P #packed { a:
+    u8; b: u32; }` is 5 bytes, `b` at offset 1. A struct holding a packed
+    one places it at any offset, since its alignment is 1. A packed
+    union is as big as its largest field, aligned to 1.
+  - **`#align(n)`** sets the struct's alignment to `n`, and its size
+    rounds up to a multiple of it. `n` is a constant power of two, at
+    least the alignment the fields need: an alignment can only be raised,
+    as in C (`#align(4)` on a struct holding an `i64` is an error that
+    says it needs 8). `#packed` and `#align` together pack the fields
+    and then align the whole. `n` can use a generic struct's types,
+    decided per instance: `struct Cell($T) #align(2 * sizeof(T)) { value: T; }`.
+  - **On a field**, `#align` is an error: a field takes its type's
+    alignment, so to align one field, give it a struct type with
+    `#align`.
+  - **The address of a packed struct's field** may not be aligned, and C
+    can't use such a pointer, so taking one is an error, with the fix:
+    `&p.b`, slicing `p.words[..]`, and passing `p.words` where a slice
+    goes (a view of an array is a pointer to it), through any fields and
+    array elements held by value inside the packed struct (`&p.inner.x`).
+    Reading, writing and copying the field itself is fine (`p.b += 1`,
+    `let b = p.b;`), and so is the address of a field that needs no
+    alignment (`&p.a` for a `u8`). Through a pointer to the packed struct,
+    `&(&p).b` is the same error: the field is still in it.
+  - **Everywhere a value lives is aligned as its type asks**: locals,
+    globals, `new` (the heap gives memory aligned past 16 bytes through
+    `posix_memalign`), growable arrays, the arenas, and `#run` code's
+    memory, so `#run` hands C the same layout the program does.
+  - In C they're `__attribute__((packed))` and `__attribute__((aligned(n)))`,
+    with a `_Static_assert` that the C compiler lays the struct out as
+    Sabk did. `sizeof`, `type_info(T).align` and the fields' offsets in
+    `type_info` give Sabk's layout, at compile time too.
 
 - **A constant whose value is a type** is another name for it, as C's
   `typedef` is: the two are the same type and mix freely.
@@ -3264,7 +3311,7 @@ Edge cases:
   ... }`".
 
 **C interop details:**
-- Struct layout matches C, so structs can be passed to C as they are.
+- Struct layout matches C, so structs can be passed to C as they are; `#packed` and `#align(n)` match C's packed and over-aligned structs (see [Declarations](#declarations)).
 - C's type names are in the prelude, for declaring C's functions as their
   headers do. They're aliases of Sabk's types, so they mix freely with
   them, and messages write the Sabk type (an error about a `long` says

@@ -525,9 +525,29 @@ fn type_params(p: *Parser) -> [..]*Node {
 }
 
 fn aggregate(p: *Parser, is_union: bool) -> *Node {
-    next(p); // struct / union
+    let keyword = next(p); // struct / union
     let name = expect(p, .Identifier, "a name");
     let params = type_params(p); // a generic struct: struct List($T) { ... }
+    // struct EpollEvent #packed { ... }, struct Vec4 #align(16) { ... }:
+    // the struct's own layout, in either order
+    let packed = false;
+    let align: *Node = null;
+    while (at(p, .Hash)) {
+        let t = directive(p);
+        if (t.text == "#packed") {
+            if (packed)
+                fail(p, t, "`#packed` is here twice");
+            packed = true;
+        } else if (t.text == "#align") {
+            if (align != null)
+                fail(p, t, "`#align` is here twice");
+            expect(p, .LParen, "`(` and the alignment after `#align`, like `#align(16)`");
+            align = expr(p);
+            expect(p, .RParen, "`)` after the alignment");
+        } else {
+            fail(p, t, tformat("unknown directive `%` on a %; its layout takes `#packed` and `#align(n)`", t.text, keyword.text));
+        }
+    }
     expect(p, .LBrace, "`{` to start the fields");
     let fields: [..]*Node;
     while (!at(p, .RBrace)) {
@@ -537,12 +557,24 @@ fn aggregate(p: *Parser, is_union: bool) -> *Node {
         let value: *Node = null;
         if (eat(p, .Equal))
             value = expr(p);
+        if (at_directive(p, "align") || at_directive(p, "packed"))
+            fail(p, peek(p), tformat("`%` goes on the %, after its name: `% % %{} { ... }`; a field takes its type's alignment (to align one, give it a struct type with `#align`)",
+                                     directive_text(p), keyword.text, keyword.text, name.text,
+                                     if (at_directive(p, "align")) "#align(16)" else "#packed"));
         expect(p, .Semicolon, "`;` after the field");
         array_add(&fields, new_node(field, .Field(declared, value)));
     }
     next(p); // }
-    return new_node(name, .Struct(fields, params, is_union));
+    let n = new_node(name, .Struct(fields, params, is_union));
+    if (n.kind is .Struct{packed: &pk, align: &al}) {
+        pk.* = packed;
+        al.* = align;
+    }
+    return n;
 }
+
+// `#align` at the parser's position, as written, without taking it
+fn directive_text(p: *Parser) -> string { return tformat("#%", peek(p, 1).text); }
 
 fn enum_decl(p: *Parser) -> *Node {
     next(p); // enum

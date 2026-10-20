@@ -70,6 +70,8 @@ struct Type {
     // Error (the Enum, or a tagged one's Struct)
     is_error_enum: bool;
     fields: [..]Field;      // Struct, Union
+    is_packed: bool;        // #packed: no padding between fields, alignment 1
+    align_wanted: u64;      // #align(n): the alignment asked for, or 0
 
     // layout, computed by the checker on demand
     layout_state: i32;      // 0: not computed, 1: in progress, 2: done

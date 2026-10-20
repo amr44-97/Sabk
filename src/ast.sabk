@@ -82,7 +82,9 @@ enum NodeKind {
        foreign: *Node = null,                // #foreign lib: the library's name, or null
        link_name: string = ""),              // #foreign lib "name": its C name ("": ours)
     Param(declared: *Node, value: *Node, is_type: bool, variadic: bool),
-    Struct(fields: []*Node, type_params: []*Node, is_union: bool),
+    Struct(fields: []*Node, type_params: []*Node, is_union: bool,
+           packed: bool = false,             // #packed: no padding, alignment 1
+           align: *Node = null),             // #align(n): the struct's alignment
     Field(declared: *Node, value: *Node),
     Enum(backing: *Node, variants: []*Node, type_params: []*Node),
     // Number(i64) has a payload type; Binary(op: Op, ...) fields, a Struct
@@ -247,6 +249,7 @@ struct OldShape {
     dropped: bool;
     variadic: bool;
     c_call: bool;       // a C function type
+    packed: bool;       // a #packed struct
     type_param: bool;
     generic: bool;
 }
@@ -282,6 +285,8 @@ fn old_shape(n: *Node) -> OldShape {
         s.list = st.fields;
         s.type_params = st.type_params;
         s.generic = st.type_params.len > 0 && n.generic == null;
+        s.packed = st.packed;
+        s.extra = st.align;
     case .Field{declared, value}:
         s.tag = "STRUCT_FIELD"; s.declared = declared; s.lhs = value;
     case .Enum(e):
@@ -598,6 +603,7 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
     if (s.dropped) append_string(out, " [dropped]");
     if (s.variadic) append_string(out, " [variadic]");
     if (s.c_call) append_string(out, " [c_call]");
+    if (s.packed) append_string(out, " [packed]");
     if (s.type_param) append_string(out, " [type param]");
     if (s.generic) append_string(out, " [generic]");
     if (n.decl != null)

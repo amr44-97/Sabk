@@ -8,5 +8,5 @@
 [] len 0
 2401 64
 two one
-std/array.sabk:80:15: panic: array_pop on an empty array
+std/array.sabk:81:15: panic: array_pop on an empty array
 [exit 134]

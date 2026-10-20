@@ -371,6 +371,9 @@ fn check_slice(c: *Checker, n: *Node) -> *Type {
             error(c, n.tok, tformat("can't slice this array: %", why));
             return c.types.error;
         }
+        if (!constant && reports_packed(c, object, t.elem, n.tok, tformat("slicing `%`", place_text(object)))) {
+            return c.types.error;
+        }
         elem = t.elem;
         len = t.len as i64;
     case .Ptr:

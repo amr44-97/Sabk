@@ -535,6 +535,30 @@ fn check_struct(c: *Checker, d: *Node) {
             }
         }
     }
+
+    // its own layout, which `layout` follows: #packed, #align(n)
+    if (d.kind is .Struct{packed, align}) {
+        t.is_packed = packed;
+        if (align != null)
+            t.align_wanted = struct_alignment(c, align);
+    }
+}
+
+// the n of `#align(n)`: a constant power of two; 0 (reported) if it isn't
+fn struct_alignment(c: *Checker, n: *Node) -> u64 {
+    let t = check_expr(c, n, null);
+    if (t.kind == .Error)
+        return 0;
+    if (n.cval.kind != .Int || !is_int_like(t)) {
+        error(c, n.tok, "`#align` takes a constant integer, known while compiling: `#align(16)`");
+        return 0;
+    }
+    let v = n.cval.i;
+    if (i128_lt(v, i128(1)) || i128_lt(i128(1 << 30), v) || (i128_to_i64(v) & (i128_to_i64(v) - 1)) != 0) {
+        error(c, n.tok, tformat("`#align(%)`: an alignment is a power of two, like 4, 8, 16 or 64", i128_to_string(v)));
+        return 0;
+    }
+    return i128_to_i64(v) as u64;
 }
 
 // `Option.None`: which Option isn't known
@@ -1017,14 +1041,31 @@ fn layout(c: *Checker, t: *Type) {
         for (i in 0..t.fields.len) {
             let f = &t.fields[i];
             layout(c, f.ty);
-            if (f.ty.align > align)
-                align = f.ty.align;
+            // #packed: each field right after the last, as C's packed does
+            let field_align = if (t.is_packed) 1 else f.ty.align;
+            if (field_align > align)
+                align = field_align;
             if (t.kind == .Struct) {
-                f.offset = align_up(size, f.ty.align);
+                f.offset = align_up(size, field_align);
                 size = f.offset + f.ty.size;
             } else if (f.ty.size > size) {
                 size = f.ty.size;
             }
+        }
+        // #align(n) raises the alignment, and the size rounds up to it; C
+        // can't lower it below what the fields need, and neither can Sabk
+        if (t.align_wanted != 0 && t.align_wanted < align) {
+            let saved = c.mod;
+            c.mod = t.decl.owner;
+            let align_node: *Node = null;
+            if (t.decl.kind is .Struct{align: a})
+                align_node = a;
+            error(c, if (align_node != null) align_node.tok else t.decl.tok,
+                  tformat("`#align(%)` is less than what % needs, %: an alignment can only be raised (`#packed` lowers it to 1)",
+                          t.align_wanted, q(t.name), align));
+            c.mod = saved;
+        } else if (t.align_wanted != 0) {
+            align = t.align_wanted;
         }
         t.size = align_up(size, align);
         t.align = align;

@@ -1,0 +1,26 @@
+// #align takes a constant power of two, at least what the fields need; a
+// pointer into a #packed struct may not be aligned
+let runtime_value: i64 = 16;
+
+struct Three #align(3) { x: i32; }
+struct Zero #align(0) { x: i32; }
+struct Variable #align(runtime_value) { x: i32; }
+struct Text #align("16") { x: i32; }
+struct TooSmall #align(4) { x: i64; }                  // i64 needs 8
+
+struct Packed #packed { a: u8; b: u32; bytes: [4]u8; words: [2]u32; inner: Inner; }
+struct Inner { x: u32; }
+
+fn takes(words: []u32) {}
+
+fn main() {
+    let p: Packed;
+    let to_b = &p.b;                    // a u32 at offset 1
+    let to_a = &p.a;                    // a u8 is always aligned: fine
+    let bytes = p.bytes[..];            // u8s: fine
+    let words = p.words[..];
+    takes(p.words);                     // a view is a pointer too
+    let deep = &p.inner.x;
+    let through = &(&p).b;              // through a pointer to it: still inside
+    let copy = p.b;                     // a copy: fine
+}

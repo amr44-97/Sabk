@@ -1,0 +1,30 @@
+[error]: `#align(3)`: an alignment is a power of two, like 4, 8, 16 or 64 at [tests/errors/layout.sabk:5:21]
+     5 | struct Three #align(3) { x: i32; }
+       |                     ^
+[error]: `#align(0)`: an alignment is a power of two, like 4, 8, 16 or 64 at [tests/errors/layout.sabk:6:20]
+     6 | struct Zero #align(0) { x: i32; }
+       |                    ^
+[error]: `#align` takes a constant integer, known while compiling: `#align(16)` at [tests/errors/layout.sabk:7:24]
+     7 | struct Variable #align(runtime_value) { x: i32; }
+       |                        ^
+[error]: `#align` takes a constant integer, known while compiling: `#align(16)` at [tests/errors/layout.sabk:8:20]
+     8 | struct Text #align("16") { x: i32; }
+       |                    ^
+[error]: `#align(4)` is less than what `TooSmall` needs, 8: an alignment can only be raised (`#packed` lowers it to 1) at [tests/errors/layout.sabk:9:24]
+     9 | struct TooSmall #align(4) { x: i64; }                  // i64 needs 8
+       |                        ^
+[error]: `&p.b` would point at a `u32` in `Packed`, which is `#packed`, so it may not be aligned, and C can't use such a pointer; copy the value out first: `let b = p.b;` at [tests/errors/layout.sabk:18:16]
+    18 |     let to_b = &p.b;                    // a u32 at offset 1
+       |                ^
+[error]: slicing `p.words` would point at a `u32` in `Packed`, which is `#packed`, so it may not be aligned, and C can't use such a pointer; copy the value out first: `let words = p.words;` at [tests/errors/layout.sabk:21:24]
+    21 |     let words = p.words[..];
+       |                        ^
+[error]: viewing `p.words` as a slice would point at a `u32` in `Packed`, which is `#packed`, so it may not be aligned, and C can't use such a pointer; copy the value out first: `let words = p.words;` at [tests/errors/layout.sabk:22:13]
+    22 |     takes(p.words);                     // a view is a pointer too
+       |             ^
+[error]: `&p.inner.x` would point at a `u32` in `Packed`, which is `#packed`, so it may not be aligned, and C can't use such a pointer; copy the value out first: `let x = p.inner.x;` at [tests/errors/layout.sabk:23:16]
+    23 |     let deep = &p.inner.x;
+       |                ^
+[error]: `&(&p).b` would point at a `u32` in `Packed`, which is `#packed`, so it may not be aligned, and C can't use such a pointer; copy the value out first: `let b = (&p).b;` at [tests/errors/layout.sabk:24:19]
+    24 |     let through = &(&p).b;              // through a pointer to it: still inside
+       |                   ^

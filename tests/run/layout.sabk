@@ -1,0 +1,78 @@
+// #packed and #align(n): a struct's own layout, for C's
+#import "std/io";
+#import "std/array";
+#import "std/c";
+#import "std/mem";
+
+struct Packed #packed { a: u8; b: u32; }              // b at 1: 5 bytes
+struct Vec4 #align(16) { x: f32; y: f32; z: f32; w: f32; }
+struct Vec3 #align(16) { x: f32; y: f32; z: f32; }   // 12 bytes, rounded up to 16
+struct Both #packed #align(4) { a: u8; b: u32; }      // tight inside, 8 outside
+union Overlay #packed { byte: u8; word: u64; }
+struct Holder { tag: u8; inner: Packed; tail: u8; }   // Packed aligns to 1
+struct Cell($T) #align(2 * sizeof(T)) { value: T; }   // its own type decides
+
+// glibc's struct epoll_event is packed on x86-64; the kernel fills it in
+struct EpollEvent #packed { events: u32; data: u64; }
+fn epoll_create1(flags: int) -> int #foreign libc;
+fn epoll_ctl(epoll: int, op: int, fd: int, event: *EpollEvent) -> int #foreign libc;
+fn epoll_wait(epoll: int, events: *EpollEvent, count: int, timeout: int) -> int #foreign libc;
+fn pipe(fds: *[2]int) -> int #foreign libc;
+fn write(fd: int, data: *void, size: size_t) -> ssize_t #foreign libc;
+
+// an #align(64) struct is 64-aligned wherever it lives: a local, a global,
+// the heap and a growable array (posix_memalign past 16), here and in #run
+struct Line #align(64) { first: u8; }
+let GLOBAL_LINE: Line;
+
+fn misalignments() -> [4]isize {
+    let local: Line;
+    let heap = new(Line);
+    let lines: [..]Line;
+    for (i in 0..50) array_add(&lines, Line.{ .first = i as u8 });
+    let grown: usize = 0;
+    for (i in 0..lines.len) grown |= (&lines[i] as usize) % 64;
+    let out: [4]isize = .[((&local as usize) % 64) as isize, ((&GLOBAL_LINE as usize) % 64) as isize,
+                          ((heap as usize) % 64) as isize, grown as isize];
+    free(heap);
+    array_free(&lines);
+    return out;
+}
+
+fn offset_of_b() -> isize { return type_info(Packed).fields[1].offset; }
+fn sum(p: Packed) -> u32 { return p.a as u32 + p.b; }
+
+const B_OFFSET = #run offset_of_b();
+const SUM = #run sum(.{ .a = 2, .b = 40 });
+const EPOLL_SIZE = #run sizeof(EpollEvent);
+const MISALIGNED = #run misalignments();
+
+fn main() {
+    println("sizes: % % % % % % %", sizeof(Packed), sizeof(Vec4), sizeof(Vec3), sizeof(Both),
+            sizeof(Overlay), sizeof(Holder), sizeof(EpollEvent));
+    println("aligns: % % % %", type_info(Packed).align, type_info(Vec4).align, type_info(Both).align,
+            type_info(Holder).align);
+    println("cells: % % %", sizeof(Cell(u8)), sizeof(Cell(u32)), type_info(Cell(f64)).align);
+
+    let p: Packed = .{ .a = 7, .b = 123456789 };
+    p.b += 1;                                           // the field itself: fine
+    let h: Holder = .{ .tag = 1, .inner = p, .tail = 9 };
+    println("fields: % % % %", p.a, p.b, h.inner.b, h.tail);
+    println("#run: % % %", B_OFFSET, SUM, EPOLL_SIZE);
+    println("64-aligned (all 0): % %", misalignments(), MISALIGNED);
+
+    #if (OS == .Linux && ARCH == .X64) {
+        let fds: [2]int;
+        let epoll = epoll_create1(0);
+        let wanted: EpollEvent = .{ .events = 1, .data = 0x1122334455667788 }; // EPOLLIN
+        _ = pipe(&fds);
+        _ = epoll_ctl(epoll, 1, fds[0], &wanted);                           // EPOLL_CTL_ADD
+        let byte: u8 = 1;
+        _ = write(fds[1], &byte, 1);
+        let got: [2]EpollEvent;
+        let n = epoll_wait(epoll, &got[0], 2, 1000);
+        println("epoll: % % %x", n, got[0].events & 1, got[0].data);
+    } else {
+        println("epoll: 1 1 1122334455667788");
+    }
+}

@@ -156,6 +156,10 @@ fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
         } else if (to.is_failure) {
             widen_to_error(c, e);
         } else if (from != to) {
+            // a view of an array is a pointer to it
+            if (from.kind == .Array && to.kind == .Slice &&
+                reports_packed(c, e, from.elem, e.tok, tformat("viewing `%` as a slice", place_text(e))))
+                return false;
             e.conv = to; // the code generator writes the conversion out
         }
         return true;
@@ -205,6 +209,59 @@ fn coerce(c: *Checker, e: *Node, to: *Type) -> bool {
         explain_pointer_index(c, e);
     }
     return false;
+}
+
+// A pointer to a field of a #packed struct (or to something in one) may not
+// be aligned, and C can't use such a pointer; reading and writing the
+// field itself is fine, since C knows it's packed. The #packed struct `e`
+// is in, through fields and array elements held by value; else null.
+fn packed_container(c: *Checker, e: *Node) -> *Type {
+    switch (e.kind) {
+    case .Grouped{inner}:
+        return packed_container(c, inner);
+    case .Member{object}:
+        if (object.ty == null || e.decl != null)
+            return null; // a module's member, an enum variant
+        let held = if (object.ty.kind == .Ptr) object.ty.elem else object.ty;
+        if ((held.kind == .Struct || held.kind == .Union) && held.is_packed)
+            return held;
+        // through a pointer, the struct pointed at is aligned
+        return if (object.ty.kind == .Ptr) null else packed_container(c, object);
+    case .Index{object}:
+        if (object.ty == null || object.ty.kind != .Array)
+            return null; // a slice's or a pointer's elements are aligned
+        return packed_container(c, object);
+    default:
+        return null;
+    }
+}
+
+// reports `what` (taking the address of `e`, of type `t`) when `e` is in a
+// #packed struct and `t` needs alignment; true if it did
+fn reports_packed(c: *Checker, e: *Node, t: *Type, at: Token, what: string) -> bool {
+    let packed = packed_container(c, e);
+    if (packed == null)
+        return false;
+    layout(c, t);
+    if (t.align <= 1)
+        return false;
+    let name = if (e.kind.tag == .Member) e.tok.text else "x";
+    error(c, at, tformat("% would point at a % in %, which is `#packed`, so it may not be aligned, and C can't use such a pointer; copy the value out first: `let % = %;`",
+                         what, qt(t), q(packed.name), name, place_text(e)));
+    return true;
+}
+
+// a place as written, `p.inner.x`, `(&p).b`, `p.words[i]`, for messages
+fn place_text(e: *Node) -> string {
+    switch (e.kind) {
+    case .Identifier: return e.tok.text;
+    case .Member{object}: return tformat("%.%", place_text(object), e.tok.text);
+    case .Index{object, index}: return tformat("%[%]", place_text(object), place_text(index));
+    case .Grouped{inner}: return tformat("(%)", place_text(inner));
+    case .Unary{op: .AddressOf, operand}: return tformat("&%", place_text(operand));
+    case .Deref{pointer}: return tformat("%.*", place_text(pointer));
+    default: return text_of(e);
+    }
 }
 
 // `abs` for a function's name, else "this function"
@@ -1367,6 +1424,8 @@ fn check_unary(c: *Checker, n: *Node) -> *Type {
             error(c, n.tok, tformat("can't take the address of this: %", why));
             return c.types.error;
         }
+        if (reports_packed(c, operand, t, n.tok, tformat("`&%`", place_text(operand))))
+            return c.types.error;
         return ptr_to(&c.types, t);
 
     default:

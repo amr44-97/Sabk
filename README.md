@@ -128,7 +128,7 @@ $ ./sabk --run example.sabk
   for your own), linked when used and callable from `#run`; `#c_call`
   functions for C to call and C function pointer types (`fn(*void, *void)
   -> int #c_call`); C's type names (`int`, `long`, `size_t`, ...) in every
-  program.
+  program; `#packed` and `#align(n)` structs for C's layouts.
 
 The full language reference is [docs/reference.md](docs/reference.md).
 It starts with a section for C programmers, and covers

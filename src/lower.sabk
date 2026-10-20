@@ -221,6 +221,8 @@ fn failed(l: *Lower) -> bool { return l.vm.failed; }
 
 fn alloc_slot(l: *Lower, size: u32, align: u32) -> u32 {
     let a = if (align == 0) 1 else align;
+    if (a > l.f.frame_align)
+        l.f.frame_align = a;
     l.f.frame_size = (l.f.frame_size + a - 1) / a * a;
     let slot = l.f.frame_size;
     l.f.frame_size += if (size != 0) size else 1;

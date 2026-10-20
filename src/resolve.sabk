@@ -1237,6 +1237,8 @@ fn resolve_decl(r: *Resolver, n: *Node) {
         push_scope(r);
         for (param in s.type_params)
             declare(r, top_scope(r), param.tok.text, param);
+        if (s.align != null) // #align(n), which can use them: #align(sizeof(T))
+            resolve_expr(r, s.align);
         let fields: Map(ScopeKey, *Node);
         for (field in s.fields) {
             declare(r, &fields, field.tok.text, field, if (s.is_union) "this union" else "this struct");

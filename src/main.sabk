@@ -155,7 +155,8 @@ fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
     if (cc.len == 0)
         cc = "cc";
     // -fwrapv: signed overflow wraps; -w: the generated code isn't the
-    // user's to fix. A release build is optimized, and the linker drops
+    // user's to fix (-Wno-psabi: nor GCC's note on passing an #align(64)
+    // struct, which -w leaves). A release build is optimized, and the linker drops
     // every function and piece of data nothing uses.
     let flags: [..]u8;
     append_string(&flags, if (release) "-O2 -ffunction-sections -fdata-sections -Wl,--gc-sections" else "-g");
@@ -166,7 +167,7 @@ fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
     for (extra in build.c_flags)
         print_to(&flags, " %", extra);
     let command: [..]u8;
-    print_to(&command, "% -std=c11 -fwrapv -fno-strict-aliasing -w % -o % %", cc, flags as string,
+    print_to(&command, "% -std=c11 -fwrapv -fno-strict-aliasing -w -Wno-psabi % -o % %", cc, flags as string,
              shell_quote(exe_path), shell_quote(c_path));
     for (file in build.c_files)
         print_to(&command, " %", shell_quote(file));

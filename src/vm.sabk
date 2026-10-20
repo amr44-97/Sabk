@@ -110,6 +110,7 @@ struct VmFunction {
     locs: [..]Token;
     messages: [..]string;   // for Fail
     frame_size: u32;
+    frame_align: u32;       // its most aligned slot's alignment (#align)
     param_offsets: [..]u32; // the context pointer first, for Sabk code
     ret_offset: u32;
     ret_size: u32;
@@ -439,11 +440,18 @@ fn vm_intern(vm: *Vm, bytes: string) -> *u8 {
 }
 
 // zeroed, 16-aligned, kept forever
-fn vm_keep(vm: *Vm, size: isize) -> *u8 {
+fn vm_keep(vm: *Vm, size: isize, align: isize = 16) -> *u8 {
     let rounded = (size + 15) / 16 * 16 + 16;
-    let p = alloc(rounded, 16) as *u8;
-    zero_memory(p, rounded);
-    return p;
+    if (align <= 16) {
+        let p = alloc(rounded, 16) as *u8;
+        zero_memory(p, rounded);
+        return p;
+    }
+    // kept forever, so the bytes before the aligned start are just unused
+    let p = alloc(rounded + align, 16) as *u8;
+    zero_memory(p, rounded + align);
+    let start = ((p as isize) + align - 1) / align * align;
+    return start as *u8;
 }
 
 fn vm_function_for(vm: *Vm, decl: *Node) -> *VmFunction {
@@ -487,7 +495,7 @@ fn vm_global_storage(vm: *Vm, decl: *Node) -> *u8 {
     }
     let t = concrete(vm, decl.ty);
     let size = vm_size_of(vm, t);
-    let storage = vm_keep(vm, size as isize);
+    let storage = vm_keep(vm, size as isize, vm_align_of(vm, t) as isize);
     map_put(&vm.globals, decl, storage);
     let value = value_of(decl);
     if (value != null || has_defaults(vm.c, t)) {
@@ -983,7 +991,11 @@ fn prelude_type(vm: *Vm, name: string) -> *Type {
 
 // null (with the error kept) when the stack is full
 fn push_frame(vm: *Vm, f: *VmFunction) -> *u8 {
-    vm.stack_top = (vm.stack_top + 15) / 16 * 16;
+    // the frame's address is as aligned as its most aligned slot, so an
+    // #align(64) local is where C would put it
+    let align: isize = if (f.frame_align > 16) f.frame_align as isize else 16;
+    let base = vm.stack.ptr as isize;
+    vm.stack_top = (base + vm.stack_top + align - 1) / align * align - base;
     if (vm.stack_top + (f.frame_size as isize) + 16 > vm.stack.len) {
         let none: Token;
         vm_fail(vm, none, "the compile-time stack overflowed (recursion too deep?)", false);

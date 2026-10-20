@@ -610,7 +610,21 @@ fn define_type(g: *CodeGen, of_type: *Type) {
         print_to(&g.defs, "% % {\n", if (t.kind == .Struct) "struct" else "union", name);
         for (f in t.fields)
             print_to(&g.defs, "  % %;\n", c_type(g, f.ty), local_name(f.name));
-        append_string(&g.defs, "};\n\n");
+        // #packed and #align, which C has too (as GNU C), and a check that
+        // the C compiler lays it out as Sabk did
+        let attributes: [..]string;
+        if (t.is_packed)
+            array_add(&attributes, "packed");
+        if (t.align_wanted != 0)
+            array_add(&attributes, tformat("aligned(%)", t.align_wanted));
+        if (attributes.len == 0) {
+            append_string(&g.defs, "};\n\n");
+        } else {
+            layout(g.c, t);
+            print_to(&g.defs, "} __attribute__((%));\n", join(attributes, ", "));
+            print_to(&g.defs, "_Static_assert(sizeof(%) == % && _Alignof(%) == %, \"Sabk lays out % in % bytes, aligned to %\");\n\n",
+                     name, t.size, name, t.align, type_name(t), t.size, t.align);
+        }
     case .Array:
         by_value(g, t.elem);
         // C has no zero-length arrays; keep at least one element

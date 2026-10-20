@@ -159,6 +159,7 @@ const libc = #system_library "libc";
 
 fn calloc(count: usize, size: usize) -> *void #foreign libc;
 fn realloc(memory: *void, size: usize) -> *void #foreign libc;
+fn posix_memalign(memory: **void, align: usize, size: usize) -> i32 #foreign libc;
 fn free(memory: *void) #foreign libc;
 fn memset(memory: *void, value: i32, size: usize) -> *void #foreign libc;
 fn memcpy(dst: *void, src: *void, size: usize) -> *void #foreign libc;
@@ -201,16 +202,28 @@ fn print_and_abort(data: *void, what: string, message: string, location: string)
     abort();
 }
 
-// ---- the heap: C's allocator, which aligns everything to 16 bytes
+// ---- the heap: C's allocator, which aligns everything to 16 bytes; a
+// struct `#align`ed past that comes from posix_memalign, which free takes
+// back too
 
 fn heap_proc(data: *void, mode: AllocatorMode, size: isize, align: isize, old: *void, old_size: isize) -> *void {
     switch (mode) {
     case AllocatorMode.Alloc:
+        if (align > 16)
+            return aligned_alloc_zeroed(size, align);
         return calloc(1, size as usize);
     case AllocatorMode.Free:
         free(old);
         return null;
     case AllocatorMode.Resize:
+        if (align > 16) { // realloc keeps only 16
+            let memory = aligned_alloc_zeroed(size, align);
+            if (memory != null && old != null) {
+                memcpy(memory, old, (if (old_size < size) old_size else size) as usize);
+                free(old);
+            }
+            return memory;
+        }
         let memory = realloc(old, size as usize);
         if (memory != null && size > old_size) {
             let added = (memory as *u8)[old_size..size];
@@ -220,6 +233,14 @@ fn heap_proc(data: *void, mode: AllocatorMode, size: isize, align: isize, old: *
     default:
         return null; // FreeAll: the heap can't
     }
+}
+
+fn aligned_alloc_zeroed(size: isize, align: isize) -> *void {
+    let memory: *void = null;
+    if (posix_memalign(&memory, align as usize, (if (size > 0) size else 1) as usize) != 0)
+        return null;
+    memset(memory, 0, size as usize);
+    return memory;
 }
 
 // ---- the temp allocator: one arena per program, freed all at once
