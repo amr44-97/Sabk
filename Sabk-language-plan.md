@@ -22,7 +22,7 @@ switch to them at the bootstrap.
 - [x] **Result defaults and taking results:** `-> (i64, ParseError = .None)`, results taken from the left, a call's first value in an expression (section 5)
 - [x] **Logged failures:** std's I/O, path and process functions log why; `context.log_level` (section 5)
 - [x] **Parse failures logged** as warnings (section 5)
-- [ ] **`or_return .Replacement`** (section 5)
+- [ ] **`or_return .Replacement`** (section 5): deferred Oct 20, 2026 ("not solving a real problem" yet); the open points are in section 5
 - [x] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
 - [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
@@ -499,6 +499,11 @@ default:                    exit(1);              // the log already said why
 
 - `or_return .Variant` puts the failure inside the variant when the
   variant holds its type, and replaces it otherwise.
+- **Deferred** (Oct 20, 2026): not solving a real problem yet. Open
+  points for when it's picked up: `read_file(p) or_return .len` already
+  means the value's `.len` (the replacement would need `(... or_return).len`
+  for a field); whether `or_return .BadLine(i)` builds a variant from
+  other values; and the error for a variant holding another type.
 
 ### Warnings: `--strict` and `--werror`
 
