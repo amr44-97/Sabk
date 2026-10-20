@@ -1,0 +1,6 @@
+[error]: `#run` failed: can't call `add`: library `../../build/test_libs/libsabk_static_only` is a static archive (libsabk_static_only.a), which only the program links: `#run` can only call into a shared one (.so) at [tests/errors/foreign_run.sabk:7:11]
+     7 | const A = #run add(1, 2);
+       |           ^
+[note]: here at [tests/errors/foreign_run.sabk:7:23]
+     7 | const A = #run add(1, 2);
+       |                       ^

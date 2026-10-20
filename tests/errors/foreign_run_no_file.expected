@@ -1,0 +1,6 @@
+[error]: `#run` failed: can't call `nothing`: can't find library `no/such/libnothing` (looked for tests/errors/no/such/libnothing, tests/errors/no/such/libnothing.so) at [tests/errors/foreign_run_no_file.sabk:8:11]
+     8 | const A = #run nothing();
+       |           ^
+[note]: here at [tests/errors/foreign_run_no_file.sabk:8:23]
+     8 | const A = #run nothing();
+       |                       ^

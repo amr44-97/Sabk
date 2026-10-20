@@ -75,7 +75,9 @@ enum NodeKind {
        type_params: []*Node = .[],           // the $Ts in params' types
        result_defaults: []*Node = .[],       // -> (i64, ParseError = .None): one per
                                              // written result, null where there's none
-       symmetric: bool = false),             // #symmetric: two parameters, either order
+       symmetric: bool = false,              // #symmetric: two parameters, either order
+       foreign: *Node = null,                // #foreign lib: the library's name, or null
+       link_name: string = ""),              // #foreign lib "name": its C name ("": ours)
     Param(declared: *Node, value: *Node, is_type: bool, variadic: bool),
     Struct(fields: []*Node, type_params: []*Node, is_union: bool),
     Field(declared: *Node, value: *Node),
@@ -83,7 +85,12 @@ enum NodeKind {
     // Number(i64) has a payload type; Binary(op: Op, ...) fields, a Struct
     Variant(payload: *Node, fields: *Node, value: *Node),
     TypeAlias(aliased: *Node),
-    Let(declared: *Node, value: *Node, is_extern: bool, uninit: bool),
+    Let(declared: *Node, value: *Node, is_extern: bool, uninit: bool,
+        foreign: *Node = null, link_name: string = ""), // as Fn's
+    // const raylib = #library "vendor/libraylib"; #system_library "libm":
+    // a library foreign declarations name; `dir`: where `path` is relative
+    // to (the resolver's)
+    Library(path: Token, system: bool, link_always: bool, dir: string = ""),
     LetValues(names: []*Node, values: *Node), // let a, b = ...; names are Lets
     Const(declared: *Node, value: *Node),
     Run(value: *Node),                       // #run value; tok: `#run`
@@ -182,6 +189,38 @@ fn new_node(tok: Token, kind: NodeKind) -> *Node {
     return new(Node.{ .tok = tok, .kind = kind });
 }
 
+// the name C knows a C function or variable by: its #foreign "name", or
+// its own
+fn c_symbol(d: *Node) -> string {
+    switch (d.kind) {
+    case .Fn{link_name}: if (link_name.len > 0) return link_name;
+    case .Let{link_name}: if (link_name.len > 0) return link_name;
+    default:
+    }
+    return d.tok.text;
+}
+
+// a C function or variable declared here and defined elsewhere: `extern
+// fn` without a body, `extern let`, or `#foreign`
+fn is_foreign(d: *Node) -> bool {
+    switch (d.kind) {
+    case .Fn{is_extern, body}: return is_extern && body == null;
+    case .Let{is_extern}: return is_extern;
+    default: return false;
+    }
+}
+
+// a foreign declaration's library, or null
+fn foreign_library(d: *Node) -> *Node {
+    let lib: *Node = null;
+    switch (d.kind) {
+    case .Fn{foreign}: lib = foreign;
+    case .Let{foreign}: lib = foreign;
+    default:
+    }
+    return if (lib != null) lib.decl else null;
+}
+
 // ---- the C++ compiler's dump
 
 // a node as the C++ Node held it: its tag, and its parts in lhs, rhs,
@@ -195,6 +234,9 @@ struct OldShape {
     list: []*Node;
     type_params: []*Node;
     is_extern: bool;
+    foreign: *Node;     // #foreign's library
+    link_name: string;
+    library: string;    // a Library's directive and path
     uninit: bool;
     no_bounds_check: bool;
     nodiscard: bool;
@@ -219,6 +261,8 @@ fn old_shape(n: *Node) -> OldShape {
         s.rhs = f.body;
         s.list = f.params;
         s.is_extern = f.is_extern;
+        s.foreign = f.foreign;
+        s.link_name = f.link_name;
         s.variadic = f.variadic;
         s.nodiscard = f.nodiscard;
         s.no_bounds_check = f.no_bounds_check;
@@ -249,10 +293,16 @@ fn old_shape(n: *Node) -> OldShape {
         s.declared = l.declared;
         s.lhs = l.value;
         s.is_extern = l.is_extern;
+        s.foreign = l.foreign;
+        s.link_name = l.link_name;
         s.uninit = l.uninit;
     case .LetValues{names, values}: s.tag = "LET_VALUES"; s.lhs = values; s.list = names;
     case .Const(c):
         s.tag = "CONST_DECL"; s.declared = c.declared; s.lhs = c.value;
+    case .Library(l):
+        s.tag = "LIBRARY";
+        s.library = tformat("%{}library%", if (l.system) "#system_" else "#",
+                            if (l.link_always) ",link_always" else "");
     case .Run{value}: s.tag = "RUN"; s.lhs = value;
     case .InsertString{value}: s.tag = "INSERT_STRING"; s.lhs = value;
 
@@ -525,6 +575,12 @@ fn dump_into(out: *[..]u8, n: *Node, indent: isize, label: string) {
     if (n.color != 0) print_to(out, " [macro %]", n.color);
     if (n.kind is .MacroExpansion{expansion}) print_to(out, " [expansion %]", expansion);
     if (s.is_extern) append_string(out, " [extern]");
+    if (s.foreign != null) {
+        let module = if (s.foreign.kind is .Member{object}) tformat("%.", object.tok.text) else "";
+        print_to(out, " [foreign %{}%]", module, s.foreign.tok.text);
+    }
+    if (s.link_name.len > 0) print_to(out, " [C name %]", s.link_name);
+    if (n.kind is .Library{path}) print_to(out, " [% %]", s.library, path.text);
     if (s.uninit) append_string(out, " [uninit]");
     if (s.no_bounds_check) append_string(out, " [no_bounds_check]");
     if (s.nodiscard) append_string(out, " [nodiscard]");

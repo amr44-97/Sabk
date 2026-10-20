@@ -1,0 +1,14 @@
+// linking follows use: the library of each foreign function the program
+// calls has to be found then
+const missing = #library "no/such/libnothing";
+const unprefixed = #system_library "m";
+const unused = #library "no/such/libunused";   // never used: never looked for
+
+fn nothing() #foreign missing;
+fn cosine(x: f64) -> f64 #foreign unprefixed "cos";
+fn not_called() #foreign unused;
+
+fn main() {
+    nothing();
+    let c = cosine(0.0);
+}

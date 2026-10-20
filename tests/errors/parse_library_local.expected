@@ -1,0 +1,3 @@
+[error]: a library is declared at the top level, where C functions can name it: move `const local_lib = ...;` out of the function at [tests/errors/parse_library_local.sabk:2:11]
+     2 |     const local_lib = #system_library "libc";
+       |           ^

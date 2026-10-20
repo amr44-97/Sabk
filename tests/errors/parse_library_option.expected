@@ -1,0 +1,3 @@
+[error]: `#system_library` has no option `link_never`; the only one is `link_always` (linked even when nothing uses the library) at [tests/errors/parse_library_option.sabk:1:28]
+     1 | const gl = #system_library,link_never "libGL";
+       |                            ^

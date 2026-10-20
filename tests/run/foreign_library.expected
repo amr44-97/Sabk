@@ -1,0 +1,4 @@
+the program's: static 42 5 41
+#run's: shared 5 15
+triple: 21 24
+[exit 0]

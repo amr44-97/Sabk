@@ -1,0 +1,3 @@
+[error]: `extern` and `#foreign` both say the function is C's: leave out `extern` at [tests/errors/parse_extern_foreign.sabk:2:15]
+     2 | extern fn f() #foreign libc;
+       |               ^

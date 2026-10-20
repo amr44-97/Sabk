@@ -1,0 +1,33 @@
+[error]: `not_a_library` isn't a library: one is declared `const name = #system_library "libname";` at [tests/errors/foreign.sabk:7:17]
+     7 | fn f() #foreign not_a_library;
+       |                 ^
+[note]: `not_a_library` is declared here at [tests/errors/foreign.sabk:5:7]
+     5 | const not_a_library = 5;
+       |       ^
+[error]: unknown library `nowhere`; declare it: `const nowhere = #system_library "libnowhere";`, or `#library "path/libnowhere"` for a file of your own at [tests/errors/foreign.sabk:8:17]
+     8 | fn g() #foreign nowhere;
+       |                 ^
+[error]: a C function (`extern` or `#foreign`) can't be generic at [tests/errors/foreign.sabk:9:4]
+     9 | fn h($T: type, x: T) #foreign libc;
+       |    ^
+[error]: `not_a_library` isn't a library: one is declared `const name = #system_library "libname";` at [tests/errors/foreign.sabk:10:31]
+    10 | let stdin_ptr: *void #foreign not_a_library "stdin";
+       |                               ^
+[note]: `not_a_library` is declared here at [tests/errors/foreign.sabk:5:7]
+     5 | const not_a_library = 5;
+       |       ^
+[error]: `libc_private` is private to file `tests/errors/lib/clibs.sabk` at [tests/errors/foreign.sabk:13:33]
+    13 | fn private_one() #foreign clibs.libc_private;
+       |                                 ^
+[note]: `#scope_file` keeps what follows it inside its file; to export `libc_private`, put it before, or after a `#scope_export` at [tests/errors/lib/clibs.sabk:3:1]
+     3 | #scope_file
+       | ^
+[error]: `clibs.cos` isn't a library at [tests/errors/foreign.sabk:14:29]
+    14 | fn not_one() #foreign clibs.cos;
+       |                             ^
+[error]: `nomodule` isn't a module imported with `as`, so `nomodule.libm` can't name a library at [tests/errors/foreign.sabk:15:25]
+    15 | fn no_module() #foreign nomodule.libm;
+       |                         ^
+[error]: `libc` is a library, not a value: C functions name it, `fn f() #foreign libc;` at [tests/errors/foreign.sabk:18:13]
+    18 |     let x = libc;
+       |             ^

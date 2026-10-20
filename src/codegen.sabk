@@ -90,6 +90,13 @@ struct CodeGen {
     // only what the program can reach from main is written out: functions
     // and globals that something reachable uses
     reachable: Map(*Node, bool);
+    linked: Map(*Node, bool);    // the libraries linked, from use
+    // foreign declarations' C names (see name_foreign): the symbol, or
+    // ours with an asm label (`labeled`) when the symbol is taken by a
+    // declaration of another C signature
+    foreign_names: Map(*Node, string);
+    labeled: Map(*Node, bool);
+    c_symbols: Map(string, bool);  // the C symbols named as they are: locals can't be
     to_scan: [..]*Node;
     scanning: *Node;                 // the function or global being scanned
     reached_from: Map(*Node, Reached); // where each was first reached
@@ -179,7 +186,7 @@ fn generate(g: *CodeGen) -> string {
             let native = false;
             if (d.kind is .Fn{is_extern: true, body} && body == null)
                 native = true;
-            if (!native || !map_has(&g.reachable, d) || !is_build_function(d.tok.text))
+            if (!native || !map_has(&g.reachable, d) || !is_build_function(c_symbol(d)))
                 continue;
             // blame the use outside the module that wraps it:
             // link_library(), not the declaration in std/build
@@ -196,6 +203,10 @@ fn generate(g: *CodeGen) -> string {
             return "";
         }
     }
+    link_libraries(g, all);
+    if (g.error_count > 0)
+        return "";
+    name_foreign(g, all);
     let functions: [..]*Node;
     for (m in all) {
         for (d in root_list(m)) {
@@ -424,8 +435,13 @@ fn operator_word(name: string) -> string {
 /* ------------------------------------------------------------------ names */
 
 fn global_name(g: *CodeGen, decl: *Node) -> string {
-    if ((decl.kind.tag == .Fn || decl.kind.tag == .Let) && is_extern_decl(decl))
-        return decl.tok.text; // C's own, under its own name
+    // an `extern fn` with a body is C's to call, under its own name; a
+    // foreign function or variable has the name name_foreign gave it
+    if (decl.kind.tag == .Fn && is_extern_decl(decl) && !is_foreign(decl))
+        return decl.tok.text;
+    let foreign = map_get(&g.foreign_names, decl) or_else "";
+    if (foreign.len > 0)
+        return foreign;
     let prefix = map_get(&g.module_prefix, decl.owner) or_else "";
     let base = operator_word(decl.tok.text); // `operator +`: operator_add
     let name = if (prefix.len == 0) base else cat(prefix, "__", base);
@@ -461,6 +477,11 @@ fn local_name(name: string) -> string {
 // expansion's color, so a macro's `tmp` and its caller's `tmp` stay apart
 fn var_name(g: *CodeGen, d: *Node) -> string {
     let name = local_name(d.tok.text);
+    // `let time = time(null);`: in C a local's scope starts at its own
+    // declarator, so a local named like a C function the program calls
+    // would hide it
+    if (map_has(&g.c_symbols, name))
+        name = cat(name, "_");
     let color = if (d.caller) g.res.expansions[d.color].parent else d.color;
     return if (color != 0) cat(name, "__m", num(color)) else name;
 }
@@ -662,7 +683,105 @@ fn fn_signature(g: *CodeGen, fun: *Node) -> string {
 
 fn emit_fn_prototype(g: *CodeGen, fun: *Node) {
     // extern functions with a body are exported for C to call
-    print_to(&g.protos, "%{}%;\n", if (is_extern_decl(fun)) "" else "static ", fn_signature(g, fun));
+    print_to(&g.protos, "%{}%{}%;\n", if (is_extern_decl(fun)) "" else "static ", fn_signature(g, fun),
+             asm_label(g, fun));
+}
+
+// The C names of the foreign declarations the program reaches. Each is
+// called by its C symbol (`strlen`, so the C compiler knows its builtins:
+// `sqrt` is an instruction, `memcpy` of 16 bytes two moves), and so are
+// later ones with the same C signature. One declaring another signature
+// for a symbol already taken (`-> i32` where another module said `->
+// usize`) gets a name of ours, bound to the symbol by an asm label, so
+// the two never clash in the C, as they wouldn't in Jai.
+fn name_foreign(g: *CodeGen, modules: []*Module) {
+    let shapes: Map(string, string); // symbol -> the first one's C signature
+    for (m in modules) {
+        for (d in root_list(m)) {
+            if (!is_foreign(d) || !map_has(&g.reachable, d))
+                continue;
+            let symbol = c_symbol(d);
+            let shape = c_shape(g, d);
+            let first, seen = map_get(&shapes, symbol);
+            if (!seen) {
+                map_put(&shapes, symbol, shape);
+                map_put(&g.foreign_names, d, symbol);
+                map_put(&g.c_symbols, symbol, true);
+            } else if (first == shape) {
+                map_put(&g.foreign_names, d, symbol);
+            } else {
+                map_put(&g.labeled, d, true); // global_name's own name for it
+            }
+        }
+    }
+}
+
+// a foreign declaration's C type, without its name: what two of one
+// symbol must agree on to share it
+fn c_shape(g: *CodeGen, d: *Node) -> string {
+    if (d.kind.tag != .Fn)
+        return c_type(g, d.ty);
+    let out: [..]u8;
+    print_to(&out, "%(", ret_type(g, d.ty.ret));
+    for (p in d.ty.params)
+        print_to(&out, "%, ", c_type(g, p));
+    if (d.kind is .Fn{variadic: true})
+        append_string(&out, "...");
+    append_string(&out, ")");
+    return out as string;
+}
+
+// ` __asm__("strlen")`, for a foreign declaration named by us (see
+// name_foreign)
+fn asm_label(g: *CodeGen, d: *Node) -> string {
+    if (!map_has(&g.labeled, d))
+        return "";
+    return tformat(" __asm__(\"%{}%\")", if (OS == .MacOS) "_" else "", c_symbol(d));
+}
+
+// Linking follows use: the library of each foreign declaration the
+// program reaches, and every `,link_always` one
+fn link_libraries(g: *CodeGen, modules: []*Module) {
+    for (m in modules) {
+        for (d in root_list(m)) {
+            if (d.kind is .Library{link_always: true})
+                link_library_of(g, d);
+            if (!is_foreign(d) || !map_has(&g.reachable, d))
+                continue;
+            let lib = foreign_library(d);
+            if (lib != null)
+                link_library_of(g, lib);
+        }
+    }
+}
+
+fn link_library_of(g: *CodeGen, lib: *Node) {
+    if (map_has(&g.linked, lib))
+        return;
+    map_put(&g.linked, lib, true);
+    let build = &g.c.build;
+    let path_tok: Token;
+    if (lib.kind is .Library{path})
+        path_tok = path;
+    if (lib.kind is .Library{system: true}) {
+        let name = system_link_name(lib);
+        if (name.len == 0) {
+            gen_error(g, path_tok, tformat("a system library is named by its file, `lib` included: `#system_library \"lib%\"`",
+                                           library_text(lib)));
+            return;
+        }
+        for (have in build.libraries)
+            if (have == name)
+                return;
+        array_add(&build.libraries, name);
+        return;
+    }
+    let file, shared, tried = library_file(lib, false);
+    if (file.len == 0) {
+        gen_error(g, path_tok, tformat("can't find library `%` (looked for %)", library_text(lib), join(tried, ", ")));
+        return;
+    }
+    array_add(if (shared) &build.shared_libraries else &build.library_files, file);
 }
 
 fn emit_fn_body(g: *CodeGen, fun: *Node) {
@@ -703,7 +822,7 @@ fn emit_global(g: *CodeGen, d: *Node) {
     if (d.kind.tag == .Const && d.cval.kind != .None)
         return; // every use is replaced by the value
     if (is_extern_decl(d)) { // C defines it
-        print_to(&g.globals, "extern % %;\n", c_type(g, d.ty), global_name(g, d));
+        print_to(&g.globals, "extern % %{}%;\n", c_type(g, d.ty), global_name(g, d), asm_label(g, d));
         return;
     }
     // a constant isn't `const` in C: an array constant can be viewed as a
@@ -1940,11 +2059,13 @@ fn call(g: *CodeGen, n: *Node) -> string {
     if (fun == null)
         array_add(&parts, callee);
     let to_double: [..]bool; // C variadics take doubles, not floats
+    let k = 0; // value arguments: t.params has no type parameters
     for (i in 0..args.len) {
         if (fun != null && i < params.len && is_type_param(params[i]))
             continue; // a type argument
         array_add(&parts, args[i]);
-        array_add(&to_double, i >= t.params.len && args[i].ty == ts(g).f32);
+        array_add(&to_double, k >= t.params.len && args[i].ty == ts(g).f32);
+        k++;
     }
     if (fun != null) {
         for (i in args.len..params.len) {
@@ -2035,7 +2156,7 @@ fn error_table(g: *CodeGen, report: bool) -> string {
         return out as string;
     // "error: IoError.NotFound", or IoError(7) for a value no variant has
     append_string(&out, cat("static void rt_report_error(u64 e) {\n",
-                            "  ", info, " *t = sabk_error_type((u32)(e >> 32));\n",
+                            "  ", info, " *t = ", global_name(g, decl), "((u32)(e >> 32));\n",
                             "  i64 v = (i64)(u32)e;\n",
                             "  fflush(NULL);\n",
                             "  if (!t) {\n",

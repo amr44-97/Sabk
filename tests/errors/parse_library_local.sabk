@@ -1,0 +1,3 @@
+fn f() {
+    const local_lib = #system_library "libc";
+}

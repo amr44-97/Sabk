@@ -1,0 +1,19 @@
+// #foreign needs a library, and a library is only for #foreign
+#import "lib/clibs" as clibs;
+
+const libc = #system_library "libc";
+const not_a_library = 5;
+
+fn f() #foreign not_a_library;
+fn g() #foreign nowhere;
+fn h($T: type, x: T) #foreign libc;
+let stdin_ptr: *void #foreign not_a_library "stdin";
+
+// another module's library: exported, and a library
+fn private_one() #foreign clibs.libc_private;
+fn not_one() #foreign clibs.cos;
+fn no_module() #foreign nomodule.libm;
+
+fn main() {
+    let x = libc;
+}

@@ -1,0 +1,9 @@
+// #run opens a library's shared object: a static archive only the program
+// can link (tests/run.sh builds it)
+const static_only = #library "../../build/test_libs/libsabk_static_only";
+
+fn add(a: i32, b: i32) -> i32 #foreign static_only "sabk_both_add";
+
+const A = #run add(1, 2);
+
+fn main() {}

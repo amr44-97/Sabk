@@ -182,7 +182,7 @@ fn ensure_resolved(r: *Resolver, d: *Node) -> bool {
     if (d.owner == null || d.generic != null)
         return true; // locals; instances are resolved copies
     switch (d.kind.tag) {
-    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
+    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const, .Library:
     default: return true;
     }
     let state = map_get(&r.resolve_state, d) or_else 0;
@@ -326,7 +326,7 @@ fn module_decl(m: *Module, name: string) -> *Node {
 // `#scope_module` or `#scope_file` covers it
 fn exported(d: *Node) -> bool {
     switch (d.kind) {
-    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const:
+    case .Fn, .Struct, .Enum, .TypeAlias, .Let, .Const, .Library:
     case .Overloads{fns}: // when one of them is
         for (f in fns)
             if (exported(f))
@@ -721,9 +721,14 @@ fn declare_or_overload(r: *Resolver, m: *Module, scope: *Map(ScopeKey, *Node), n
         declare(r, scope, n.tok.text, n, where);
         return;
     }
-    for (f in .[n, if (prev.kind.tag == .Fn) prev else null]) {
-        if (f != null && is_extern_fn(f)) {
-            error(r, f.tok, tformat("`%` is an `extern` function, and C has one function per name: it can't share its name", f.tok.text));
+    // C's functions overload like any others, by their Sabk names; two of
+    // one set can't be the same C function, which has one signature
+    let members: []*Node = if (prev.kind is .Overloads{fns}) fns else .[prev];
+    for (other in members) {
+        if (is_extern_fn(n) && is_extern_fn(other) && c_symbol(n) == c_symbol(other)) {
+            error(r, n.tok, tformat("this `%` and the one before are both C's `%`, and C has one function per name: give one of them its C name (`#foreign lib \"name\"`)",
+                                    n.tok.text, c_symbol(n)));
+            note(r, other.tok, "the other is here");
             return;
         }
     }
@@ -782,7 +787,7 @@ fn operator_fns(r: *Resolver, n: *Node, name: string) -> *Node {
 
 // a function that can join others of its name, or a set of them
 fn is_function_set(d: *Node) -> bool {
-    return d.kind.tag == .Overloads || (overloadable(d) && !is_extern_fn(d)); // C: one per name
+    return d.kind.tag == .Overloads || overloadable(d);
 }
 
 // one set of the functions in `parts` (functions, or sets), the same set
@@ -1195,6 +1200,9 @@ fn check_value(r: *Resolver, n: *Node) {
         error(r, n.tok, tformat("`%` is a type, not a value", n.tok.text));
     else if (d.kind.tag == .Import)
         error(r, n.tok, tformat("`%` is a module, not a value", n.tok.text));
+    else if (d.kind.tag == .Library)
+        error(r, n.tok, tformat("`%` is a library, not a value: C functions name it, `fn f() #foreign %;`",
+                                n.tok.text, n.tok.text));
 }
 
 fn push_scope(r: *Resolver) {
@@ -1281,11 +1289,18 @@ fn resolve_decl(r: *Resolver, n: *Node) {
     case .TypeAlias{aliased}:
         resolve_type(r, aliased);
 
-    case .Let{declared, value}:
+    case .Let{declared, value, foreign}:
         if (declared != null)
             resolve_type(r, declared);
         if (value != null)
             resolve_expr(r, value);
+        if (foreign != null)
+            resolve_library(r, foreign);
+
+    case .Library{dir: &dir}:
+        // a #library's path is relative to the file it's written in
+        let file = module_of(r, n.tok.text.ptr);
+        dir.* = path_dir(if (file != null) file.path else r.mod.path);
 
     case .Const{declared, value}:
         if (declared != null)
@@ -1296,6 +1311,46 @@ fn resolve_decl(r: *Resolver, n: *Node) {
     default:
         error(r, n.tok, tformat("unexpected top-level %", old_shape(n).tag));
     }
+}
+
+// `#foreign libc` (or `rl.raylib`, another module's): it must name a
+// library
+fn resolve_library(r: *Resolver, name: *Node) {
+    if (name.kind is .Member{object}) {
+        let imp = lookup(r, object.tok.text, color_of(r, object), object.tok.text.ptr);
+        if (imp == null || !(imp.kind is .Import)) {
+            error(r, object.tok, tformat("`%` isn't a module imported with `as`, so `%.%` can't name a library",
+                                         object.tok.text, object.tok.text, name.tok.text));
+            return;
+        }
+        let module: *Module = null;
+        if (imp.kind is .Import{module: m})
+            module = m;
+        if (module == null)
+            return; // reported when the import failed
+        let member = module_member(r, module, name.tok);
+        if (member == null)
+            return;
+        if (!(member.kind is .Library)) {
+            error(r, name.tok, tformat("`%.%` isn't a library", object.tok.text, name.tok.text));
+            return;
+        }
+        name.decl = member;
+        return;
+    }
+    let found = lookup(r, name.tok.text, color_of(r, name), name.tok.text.ptr);
+    if (found == null) {
+        if (!report_ambiguous(r, name.tok))
+            error(r, name.tok, tformat("unknown library `%`; declare it: `const % = #system_library \"lib%\";`, or `#library \"path/lib%\"` for a file of your own",
+                                       name.tok.text, name.tok.text, name.tok.text, name.tok.text));
+        return;
+    }
+    if (!(found.kind is .Library)) {
+        error(r, name.tok, tformat("`%` isn't a library: one is declared `const name = #system_library \"libname\";`", name.tok.text));
+        note(r, binding_token(found), tformat("`%` is declared here", name.tok.text));
+        return;
+    }
+    name.decl = found;
 }
 
 fn struct_fields(n: *Node) -> []*Node {
@@ -1329,7 +1384,9 @@ fn resolve_fn(r: *Resolver, n: *Node) {
     // generic: every `$T` in a parameter's type declares T for the whole
     // function, so a parameter can use T before the one that says `$T`
     if (f.type_params.len > 0 && f.is_extern)
-        error(r, n.tok, "an `extern` function can't be generic");
+        error(r, n.tok, "a C function (`extern` or `#foreign`) can't be generic");
+    if (n.kind is .Fn{foreign} && foreign != null)
+        resolve_library(r, foreign);
     for (param in f.type_params)
         declare(r, top_scope(r), param.tok.text, param);
 

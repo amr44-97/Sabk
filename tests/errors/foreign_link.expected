@@ -1,0 +1,6 @@
+[error]: can't find library `no/such/libnothing` (looked for tests/errors/no/such/libnothing, tests/errors/no/such/libnothing.a, tests/errors/no/such/libnothing.so) at [tests/errors/foreign_link.sabk:3:26]
+     3 | const missing = #library "no/such/libnothing";
+       |                          ^
+[error]: a system library is named by its file, `lib` included: `#system_library "libm"` at [tests/errors/foreign_link.sabk:4:36]
+     4 | const unprefixed = #system_library "m";
+       |                                    ^

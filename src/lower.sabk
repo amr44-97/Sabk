@@ -1646,9 +1646,13 @@ fn name(l: *Lower, n: *Node, d: *Node) -> u32 {
 
 // an `extern let` used at `n` must exist in the compiler, to be read
 fn c_variable(l: *Lower, n: *Node, d: *Node) -> bool {
-    if (d.kind is .Let{is_extern: true} && vm_dlsym(d.tok.text) == null) {
-        fail(l, n.tok, tformat("the C variable `%` isn't available while compiling, so `#run` code can't use it",
-                               d.tok.text));
+    if (!(d.kind is .Let{is_extern: true}))
+        return true;
+    let address, why = vm_foreign_address(d);
+    if (address == null) {
+        fail(l, n.tok, if (why.len > 0) tformat("`#run` code can't use the C variable `%`: %", d.tok.text, why)
+                       else tformat("the C variable `%` isn't available while compiling, so `#run` code can't use it",
+                                    d.tok.text));
         return false;
     }
     return true;
@@ -1929,11 +1933,13 @@ fn call(l: *Lower, n: *Node) -> u32 {
     let variadic: [..]bool;
     if (fun == null)
         array_add(&parts, callee);
+    let k = 0; // value arguments: t.params has no type parameters
     for (i in 0..args.len) {
         if (fun != null && i < params.len && is_type_param(params[i]))
             continue; // a type argument
         array_add(&parts, args[i]);
-        array_add(&variadic, i >= t.params.len);
+        array_add(&variadic, k >= t.params.len);
+        k++;
     }
     if (fun != null) {
         for (i in args.len..params.len) {

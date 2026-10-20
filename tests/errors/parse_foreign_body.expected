@@ -1,0 +1,3 @@
+[error]: a `#foreign` function is C's, defined in its library, so it has no body: end it with `;` at [tests/errors/parse_foreign_body.sabk:2:29]
+     2 | fn f() -> i32 #foreign libc { return 0; }
+       |                             ^

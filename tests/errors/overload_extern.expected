@@ -1,3 +1,6 @@
-[error]: `puts` is an `extern` function, and C has one function per name: it can't share its name at [tests/errors/overload_extern.sabk:2:11]
-     2 | extern fn puts(s: *u8) -> i32;
+[error]: this `puts` and the one before are both C's `puts`, and C has one function per name: give one of them its C name (`#foreign lib "name"`) at [tests/errors/overload_extern.sabk:6:4]
+     6 | fn puts(s: string) -> i32 #foreign libc;
+       |    ^
+[note]: the other is here at [tests/errors/overload_extern.sabk:5:11]
+     5 | extern fn puts(s: *u8) -> i32;
        |           ^

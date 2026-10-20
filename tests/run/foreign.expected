@@ -1,0 +1,9 @@
+strlen: 5 2
+other module's: 4 6
+snprintf: 4 42-x
+sin: 0.479425538604203 0.47942555
+C's puts
+ours: a string
+environ: true
+compile time: 7 0.479425538604203 true
+[exit 0]

@@ -1,0 +1,3 @@
+[error]: a library has no type: `const libc = #system_library "...";` at [tests/errors/parse_library_typed.sabk:1:13]
+     1 | const libc: i32 = #system_library "libc";
+       |             ^

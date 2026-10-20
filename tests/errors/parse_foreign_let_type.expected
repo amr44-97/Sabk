@@ -1,0 +1,3 @@
+[error]: a `#foreign` variable needs its type: `let errno_value: T #foreign lib;` at [tests/errors/parse_foreign_let_type.sabk:2:5]
+     2 | let errno_value #foreign libc;
+       |     ^

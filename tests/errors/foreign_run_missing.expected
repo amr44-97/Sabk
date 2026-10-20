@@ -1,0 +1,6 @@
+[error]: `#run` failed: can't call `absent`: can't open library `libsabk_not_installed` for `#run`: libsabk_not_installed.so: cannot open shared object file: No such file or directory at [tests/errors/foreign_run_missing.sabk:8:11]
+     8 | const A = #run absent();
+       |           ^
+[note]: here at [tests/errors/foreign_run_missing.sabk:8:22]
+     8 | const A = #run absent();
+       |                      ^

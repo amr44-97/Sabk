@@ -1,0 +1,7 @@
+// declares C's strlen with another signature than foreign.sabk's: two
+// declarations of one C function never clash (as in Jai), each is trusted
+const libc = #system_library "libc";
+
+fn strlen(s: *u8) -> i32 #foreign libc;
+
+fn length_as_i32(s: *u8) -> i32 { return strlen(s); }

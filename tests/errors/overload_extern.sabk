@@ -1,5 +1,8 @@
-// C has one function per name
+// C's functions overload like any others, but two of one set can't be the
+// same C function: C has one function per name
+const libc = #system_library "libc";
+
 extern fn puts(s: *u8) -> i32;
-fn puts(s: string) -> i32 { return 0; }
+fn puts(s: string) -> i32 #foreign libc;
 
 fn main() {}

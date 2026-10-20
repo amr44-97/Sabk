@@ -267,6 +267,8 @@ fn top_decl(p: *Parser) -> *Node {
         decl = let_decl(p);
         if (decl.kind is .LetValues{names})
             fail(p, names[1].tok, tformat("a global variable is declared one at a time: `let % = ...;`", decl.tok.text));
+        if (at_directive(p, "foreign"))
+            foreign_let(p, decl);
         expect(p, .Semicolon, "`;` after the declaration");
     default:
         let t = peek(p);
@@ -297,13 +299,12 @@ fn fn_decl(p: *Parser) -> *Node {
     let name = if (at_operator_name(p)) operator_name(p) else expect(p, .Identifier, "a function name");
     let params: [..]*Node;
     let variadic = false;
+    let dots: Token;
 
     expect(p, .LParen, "`(` to start the parameter list");
     while (!at(p, .RParen)) {
         if (at(p, .Ellipsis3)) {
-            let dots = next(p);
-            if (!is_extern)
-                fail(p, dots, "only `extern` functions can be variadic");
+            dots = next(p); // C's: checked once #foreign can have said so
             variadic = true;
             break;
         }
@@ -357,8 +358,18 @@ fn fn_decl(p: *Parser) -> *Node {
     // These come in any order, before `#expand`.
     let format, nodiscard, no_bounds_check, symmetric = false, false, false, false;
     let no_checks: Token;
+    // fn strlen(s: *u8) -> usize #foreign libc: C's, from a library
+    let foreign: Token;
+    let library: *Node = null;
+    let link_name = "";
     while (true) {
-        if (at_directive(p, "symmetric")) {
+        if (at_directive(p, "foreign")) {
+            foreign = directive(p);
+            if (is_extern)
+                fail(p, foreign, "`extern` and `#foreign` both say the function is C's: leave out `extern`");
+            library, link_name = foreign_spec(p);
+            is_extern = true; // C's calling convention
+        } else if (at_directive(p, "symmetric")) {
             // fn operator *(v: Vec2, k: f64) #symmetric: also k * v
             let hash = next(p);
             next(p);
@@ -385,6 +396,9 @@ fn fn_decl(p: *Parser) -> *Node {
         }
     }
 
+    if (variadic && !is_extern)
+        fail(p, dots, tformat("only C functions can be variadic: `fn %(...) #foreign lib;`", name.text));
+
     let is_macro = false;
     if (at_directive(p, "expand")) {
         let hash = next(p);
@@ -392,7 +406,7 @@ fn fn_decl(p: *Parser) -> *Node {
         if (no_bounds_check)
             fail(p, no_checks, "a macro's code runs in its caller, so it's checked as its caller is; `#no_bounds_check` goes on the caller");
         if (is_extern)
-            fail(p, hash, "an `extern` function can't be `#expand`");
+            fail(p, hash, "a C function (`extern` or `#foreign`) can't be `#expand`");
         let last_variadic = params.len > 0 && params[params.len - 1].kind is .Param{variadic: true};
         if (variadic || last_variadic)
             fail(p, hash, "an `#expand` function can't be variadic");
@@ -402,25 +416,30 @@ fn fn_decl(p: *Parser) -> *Node {
     }
 
     let body: *Node = null;
-    if (at(p, .LBrace)) {
+    if (at(p, .LBrace) && foreign.text.len > 0) {
+        fail(p, peek(p), "a `#foreign` function is C's, defined in its library, so it has no body: end it with `;`");
+    } else if (at(p, .LBrace)) {
         body = block(p);
     } else if (is_extern) {
         if (no_bounds_check)
             fail(p, no_checks, "`#no_bounds_check` is for a function with a body; C's own code isn't checked");
         expect(p, .Semicolon, "a function body or `;`");
     } else {
-        fail(p, peek(p), tformat("expected a function body `{`, found % (only `extern` functions can omit the body)", describe(peek(p))));
+        fail(p, peek(p), tformat("expected a function body `{`, found % (only C's functions, `#foreign`, have none)", describe(peek(p))));
     }
     let fun = new_node(name, .Fn(params, result, body, is_extern, is_macro,
                                  variadic, format, nodiscard, no_bounds_check));
-    if (symmetric && fun.kind is .Fn{symmetric: &s})
-        s.* = true;
+    if (fun.kind is .Fn{symmetric: &s, foreign: &lib, link_name: &c_name}) {
+        s.* = symmetric;
+        lib.* = library;
+        c_name.* = link_name;
+    }
     for (d in defaults) {
         if (d == null)
             continue;
         if (is_extern || is_macro)
             fail(p, d.tok, tformat("a result's default is for a function with a body that returns; % can't have one",
-                                   if (is_extern) "an `extern` function" else "an `#expand` function"));
+                                   if (is_extern) "a C function" else "an `#expand` function"));
         if (fun.kind is .Fn{result_defaults: &list})
             list.* = defaults;
         break;
@@ -591,9 +610,73 @@ fn const_decl(p: *Parser) -> *Node {
     if (eat(p, .Colon))
         declared = type_(p);
     expect(p, .Equal, "`=` and a value (a constant needs a value)");
+    if (at_directive(p, "library") || at_directive(p, "system_library")) {
+        let t = directive(p);
+        if (declared != null)
+            fail(p, declared.tok, tformat("a library has no type: `const % = %{} \"...\";`", name.text, t.text));
+        let lib = library_decl(p, name, t);
+        expect(p, .Semicolon, "`;` after the library");
+        return lib;
+    }
     let value = expr(p);
     expect(p, .Semicolon, "`;` after the constant");
     return new_node(name, .Const(declared, value));
+}
+
+// what follows `#library` or `#system_library`: options after commas
+// (`,link_always`), then the file's name without its extension
+fn library_decl(p: *Parser, name: Token, directive: Token) -> *Node {
+    let link_always = false;
+    while (eat(p, .Comma)) {
+        let option = expect(p, .Identifier, tformat("an option after `%{},`", directive.text));
+        if (option.text != "link_always")
+            fail(p, option, tformat("`%{}` has no option `%`; the only one is `link_always` (linked even when nothing uses the library)",
+                                    directive.text, option.text));
+        link_always = true;
+    }
+    let example = if (directive.text == "#library") "\"vendor/libraylib\"" else "\"libm\"";
+    let path = expect(p, .String, tformat("the library's file after `%`, without its extension: `% %`",
+                                          directive.text, directive.text, example));
+    if (path.text.len <= 2)
+        fail(p, path, tformat("a library needs its file's name: `% %`", directive.text, example));
+    return new_node(name, .Library(path, directive.text == "#system_library", link_always));
+}
+
+// after `#foreign`: the library's name and the C name, both optional
+// (`#foreign`, `#foreign libc`, `#foreign libm "sinf"`); the library can
+// be another module's (`#foreign rl.raylib`)
+fn foreign_spec(p: *Parser) -> (*Node, string) {
+    let library: *Node = null;
+    if (at(p, .Identifier)) {
+        library = new_node(next(p), .Identifier);
+        if (at(p, .Period) && at(p, .Identifier, 1)) {
+            next(p);
+            library = new_node(next(p), .Member(library));
+        }
+    }
+    let link_name = "";
+    if (at(p, .String)) {
+        let t = next(p);
+        link_name = t.text[1..t.text.len - 1];
+        if (link_name.len == 0)
+            fail(p, t, "the C name is empty: leave it out to use the Sabk name");
+    }
+    return library, link_name;
+}
+
+// `let environ: **char #foreign libc;`: a variable C defines
+fn foreign_let(p: *Parser, decl: *Node) {
+    let t = directive(p);
+    let library, link_name = foreign_spec(p);
+    if (decl.kind is .Let{declared, value, is_extern: &e, foreign: &lib, link_name: &c_name, uninit}) {
+        if (declared == null)
+            fail(p, t, tformat("a `#foreign` variable needs its type: `let %: T #foreign lib;`", decl.tok.text));
+        if (value != null || uninit)
+            fail(p, if (value != null) value.tok else t, "a `#foreign` variable has no value here: C defines it");
+        e.* = true;
+        lib.* = library;
+        c_name.* = link_name;
+    }
 }
 
 // `let ...` without its `;`
@@ -640,6 +723,8 @@ fn let_decl(p: *Parser) -> *Node {
             value = values(p);
         }
     }
+    if (declared == null && value == null && !uninit && at_directive(p, "foreign"))
+        fail(p, name, tformat("a `#foreign` variable needs its type: `let %: T #foreign lib;`", name.text));
     if (declared == null && value == null && !uninit)
         fail(p, name, "`let` needs a type, an initializer, or both");
     return new_node(name, .Let(declared, value, false, uninit));
@@ -704,7 +789,11 @@ fn stmt(p: *Parser) -> *Node {
         return n;
 
     case .Const:
-        return const_decl(p);
+        let c = const_decl(p);
+        if (c.kind.tag == .Library)
+            fail(p, c.tok, tformat("a library is declared at the top level, where C functions can name it: move `const % = ...;` out of the function",
+                                   c.tok.text));
+        return c;
 
     case .If:
         next(p);

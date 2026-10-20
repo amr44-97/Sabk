@@ -31,6 +31,9 @@ for arg in "$@"; do
 done
 
 make -s sabk || exit 1
+# the C libraries tests bind (#library): built first, since #run calls into
+# them while compiling
+tests/run/lib/clib/build.sh build/test_libs || exit 1
 
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT

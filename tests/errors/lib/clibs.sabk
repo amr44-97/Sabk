@@ -1,0 +1,4 @@
+const libm = #system_library "libm";
+fn cos(x: f64) -> f64 #foreign libm;
+#scope_file
+const libc_private = #system_library "libc";

@@ -1,0 +1,8 @@
+const libc = #system_library "libc";
+const gl = #system_library,link_always "libGL";
+const raylib = #library "vendor/libraylib";
+fn strlen(s: *u8) -> usize #foreign libc;
+fn sin(x: f32) -> f32 #foreign libm "sinf";
+fn printf(format: *u8, ...) -> i32 #foreign libc;
+fn runtime_hook() #foreign;
+let environ: **u8 #foreign libc;

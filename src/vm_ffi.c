@@ -10,6 +10,15 @@
 // a function or variable the compiler itself can reach, or null
 void *vmffi_dlsym(const char *name) { return dlsym(RTLD_DEFAULT, name); }
 
+// a library opened for #run (a #library's or #system_library's shared
+// object), or null; then vmffi_dlerror() says why
+void *vmffi_dlopen(const char *path) { return dlopen(path, RTLD_NOW | RTLD_GLOBAL); }
+void *vmffi_dlsym_in(void *library, const char *name) { return dlsym(library, name); }
+const char *vmffi_dlerror(void) {
+  const char *e = dlerror();
+  return e ? e : "unknown error";
+}
+
 // the libffi type of a VM kind (vm.sabk's VmKind, in its order); -1: void
 void *vmffi_type(int kind) {
   switch (kind) {

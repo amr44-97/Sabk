@@ -1,0 +1,20 @@
+// One C function declared in several modules (each binding declaring what
+// it uses) is one function; declarations that disagree stay overloads.
+#import "std/io";
+#import "lib/c_printf_alone";   // this order was ambiguous once
+#import "lib/c_printf_in_set";
+#import "lib/c_strlen_u8";
+#import "lib/c_strlen_void";
+
+const libc = #system_library "libc";
+fn time(t: *i64) -> i64 #foreign libc;
+
+fn main() {
+    printf("C's printf: %d\n", 1);                       // one function, from both modules
+    println("ours: %", printf("a Sabk string"));         // a literal fits `string` best
+    let text: *u8 = "four";
+    let raw: *void = text;
+    println("strlen: % %", strlen(text), strlen(raw));   // each picks its own
+    let time = time(null);                               // the local doesn't hide C's `time`
+    println("time: %", time > 0);
+}

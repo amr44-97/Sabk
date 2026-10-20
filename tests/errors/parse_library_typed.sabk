@@ -1,0 +1,1 @@
+const libc: i32 = #system_library "libc";

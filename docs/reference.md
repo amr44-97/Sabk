@@ -229,7 +229,8 @@ decl        = fn_decl
             | enum_decl
             | const_decl
             | let_decl
-            | "extern" "let" IDENT ":" type ";"     // a variable C defines
+            | "let" IDENT ":" type foreign ";"      // a variable C defines
+            | "extern" "let" IDENT ":" type ";"     // the same, the old way
             | top_if ;
 
 top_if      = "#if" "(" expr ")" "{" { decl } "}"     // see Compile-time #if
@@ -241,7 +242,10 @@ fn_decl     = [ "extern" ] "fn" IDENT "(" [ params ] ")"
               [ "#expand" ] ( block | ";" ) ;        // #expand: a macro
 fn_directive = "#format"                             // its format is checked
              | "#nodiscard"                          // its result must be used
-             | "#no_bounds_check" ;                  // its indexing isn't checked
+             | "#no_bounds_check"                    // its indexing isn't checked
+             | foreign ;                             // C's: no body, `;`
+foreign     = "#foreign" [ IDENT [ "." IDENT ] ] [ STRING ] ;
+                                                     // its library, its C name
 params      = param { "," param } [ "," "..." ]
             | "..." ;
 results     = result | "(" result { "," result } ")" ; // several: (i64, bool)
@@ -263,7 +267,9 @@ payload     = type                                // Number(i64)
                                                   // Binary(op: Op, lhs: *Expr)
 
 const_decl  = "const" IDENT [ ":" type ] "=" expr ";"
-            | "const" IDENT ":" "type" "=" type ";" ;   // a name for a type
+            | "const" IDENT ":" "type" "=" type ";"     // a name for a type
+            | "const" IDENT "=" library ";" ;            // at the top level
+library     = ( "#library" | "#system_library" ) [ "," "link_always" ] STRING ;
 let_decl    = let_binding ";" ;
 let_binding = "let" IDENT [ ":" type ] [ "=" expr ]
             | "let" IDENT ":" type "=" "---"           // a local, left uninitialized
@@ -288,16 +294,13 @@ values      = expr { "," expr } ;
 - A default value on a parameter (`= expr`) is evaluated at the call site. It
   may use `context`, which is how library functions default to the context
   allocator.
-- `extern fn name(...);` with no body declares a C function. `extern fn` with a
-  body defines a function with the C ABI. Only `extern` functions may be
-  variadic (`...`). See [Context](#context) for how `extern` changes calling.
-- `extern let name: T;` at the top level declares a variable C defines,
-  such as `stdout`, `environ` or a library's globals, under its C name. It
-  needs its type, which must match C's (as with `extern fn`, that's yours to
-  get right), and can't have a value. The program reads and writes C's
-  variable. `#run` code uses the compiler's own copy of it, which must exist
-  in the compiler (`stdout` does; a library the compiler doesn't link
-  doesn't).
+- `fn name(...) #foreign lib;` declares a C function from a library, and
+  `let name: T #foreign lib;` a C variable: see
+  [C interop](#c-interop-libraries-and-foreign). The older `extern fn
+  name(...);` and `extern let name: T;` declare them too, from no library
+  in particular. `extern fn` with a body defines a function with the C ABI.
+  Only C's functions may be variadic (`...`). See [Context](#context) for
+  how C's calling convention differs.
 - **Field defaults** (`= expr`) apply wherever a value of the struct is
   made without saying what it is:
 
@@ -3080,6 +3083,59 @@ first parameter. `extern` functions use the plain C calling convention:
   callbacks such as `qsort`). It can't become one of our `fn(...)` types,
   because those expect the hidden context parameter.
 
+### C interop: libraries and `#foreign`
+
+As in Jai, a library is a constant, and a C function or variable says
+which library defines it, after its signature:
+
+```
+const libc   = #system_library "libc";
+const libm   = #system_library "libm";
+const raylib = #library "vendor/libraylib";     // vendor/libraylib.a or .so, next to this file
+
+fn InitWindow(width: int, height: int, title: *char) #foreign raylib;
+fn close_window() #foreign raylib "CloseWindow";  // the C name, when ours differs
+fn sin(x: f32) -> f32 #foreign libm "sinf";       // foreign functions overload
+fn sin(x: f64) -> f64 #foreign libm;
+fn printf(format: *char, ...) -> int #foreign libc;
+let environ: **char #foreign libc;                // a C variable
+fn sabk_arg(i: i32) -> *u8 #foreign;              // no library: linked another way
+fn draw(w: *Window) #foreign rl.raylib;           // another module's library
+```
+
+- **A library names its file without the extension**, `lib` included, as
+  in Jai. `#library "path"` is relative to the file it's written in; the
+  program links `path.a` when there is one and `path.so` (`.dylib` on
+  macOS) when not, and a path that names a file names it exactly.
+  `#system_library "libm"` is found where the linker looks (`-lm`). A
+  library is declared at the top level.
+- **Linking follows use:** a library is linked when the program uses one
+  of its declarations, so a module of bindings links what it binds and
+  nothing it doesn't. `,link_always` links one anyway: what a static
+  archive needs, which nothing of yours names (`const libgl =
+  #system_library,link_always "libGL";`). `link_library` in a build script
+  links anything else.
+- **No rpath**, as in Jai: a program linked to a shared library finds it
+  where the system's loader looks, or next to itself if a build script
+  adds `-Wl,-rpath,$ORIGIN`. `sabk --run` tells the loader where the
+  libraries it linked are. `add_library_dir(dir)` in a build script adds a
+  directory the linker (and `--run`) searches, for a system library
+  installed elsewhere.
+- **`#run` opens the library**, the first time compile-time code calls
+  into it, so `#run` can call raylib or sqlite. It opens the shared object;
+  a library that's only a static archive can't be, and calling into it is
+  an error naming it. A system library's names are looked for among the
+  compiler's own first (libc's are there).
+- **Foreign functions overload** like any others, by their Sabk names: a C
+  function and one of ours can share a name. Two of one name in a module
+  can't both be the same C function: give one its C name.
+- **One C function declared in several modules** with the same
+  parameters (each binding declaring the `printf` it uses) is one function.
+  Declarations that disagree are overloads like any others: a call picks
+  the one its arguments fit. They don't clash in the generated C either
+  (the later one gets an asm label); each is trusted, as one declaration
+  is.
+
 **C interop details:**
 - Struct layout matches C, so structs can be passed to C as they are.
 - C's type names are in the prelude, for declaring C's functions as their
@@ -3579,6 +3635,9 @@ fn configure() {
   - `add_c_flags(flags)`: passed to the C compiler as written
   - `link_library(name)`: `-l<name>`; each library once
   - `add_c_file(path)`: a C file compiled and linked with the program
+  - `add_library_dir(dir)`: a directory searched for libraries, when
+    linking (`-L`) and by `sabk --run`'s program; not by `#run`, which runs
+    before build steps
 - **Paths** are relative to the directory of the program's main file.
 - **The command line wins:** `-o` overrides `set_output`, `--bounds-checks`
   overrides `set_bounds_checks`, and a script can't turn `--release` off (it

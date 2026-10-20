@@ -7,6 +7,7 @@
 //       set_output("bin/game");         the executable's path
 //       link_library("m");              -lm
 //       add_c_file("vendor/stb.c");     compiled and linked along
+//       add_library_dir("/opt/foo/lib");  searched for libraries (-L)
 //       add_c_flags("-march=native");   passed to the C compiler as written
 //       set_bounds_checks(.Off);        no index or slice checks at all
 //       set_strict(true);               the strict warnings (--strict)
@@ -55,6 +56,11 @@ fn link_library(name: string) { sabk_build_link_library(name.ptr, name.len); }
 
 fn add_c_file(path: string) { sabk_build_add_c_file(path.ptr, path.len); }
 
+// A directory the linker searches for libraries (`#system_library` ones
+// installed outside the usual places), and `sabk --run`'s loader too. The
+// program built gets no rpath: where it runs, the loader has to find them.
+fn add_library_dir(dir: string) { sabk_build_add_library_dir(dir.ptr, dir.len); }
+
 #scope_file
 
 // ---- inside: the compiler provides these
@@ -68,3 +74,4 @@ extern fn sabk_build_set_werror(on: bool);
 extern fn sabk_build_add_c_flags(flags: *u8, len: isize);
 extern fn sabk_build_link_library(name: *u8, len: isize);
 extern fn sabk_build_add_c_file(path: *u8, len: isize);
+extern fn sabk_build_add_library_dir(dir: *u8, len: isize);

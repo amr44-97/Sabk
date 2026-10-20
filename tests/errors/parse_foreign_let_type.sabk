@@ -1,0 +1,2 @@
+const libc = #system_library "libc";
+let errno_value #foreign libc;

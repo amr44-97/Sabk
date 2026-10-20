@@ -566,9 +566,9 @@ only.
 | Step | What | State |
 |---|---|---|
 | 1 | `const` names types, `type`, `==` on types | done, 965c228 |
-| 2 | C types in the prelude | done (uncommitted) |
-| 3 | `#library`, `#system_library`, `#foreign` | next |
-| 4 | `#c_call`, C function types; `extern` goes | |
+| 2 | C types in the prelude | done, 02fe18b; reserved names b48ab84 |
+| 3 | `#library`, `#system_library`, `#foreign` | done (uncommitted) |
+| 4 | `#c_call`, C function types; `extern` goes | next |
 | 5 | `#packed`, `#align` | |
 | 6 | `is` on types | |
 | 7 | layer 1, `#assert` first | |

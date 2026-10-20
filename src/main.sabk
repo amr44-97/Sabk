@@ -169,6 +169,20 @@ fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
              shell_quote(exe_path), shell_quote(c_path));
     for (file in build.c_files)
         print_to(&command, " %", shell_quote(file));
+    // libraries after what uses them, and system ones last, since a static
+    // archive can need them. A shared object is linked by its name, so the
+    // program looks for it where the loader looks, not here (as in Jai).
+    for (file in build.library_files)
+        print_to(&command, " %", shell_quote(file));
+    for (dir in build.library_dirs)
+        print_to(&command, " %", shell_quote(tformat("-L%", dir)));
+    for (file in build.shared_libraries) {
+        if (OS == .MacOS) // ld64 has no -l:file; a .dylib names itself (its install name)
+            print_to(&command, " %", shell_quote(file));
+        else
+            print_to(&command, " % %", shell_quote(tformat("-L%", path_dir(file))),
+                     shell_quote(tformat("-l:%", path_base(file))));
+    }
     for (library in build.libraries)
         print_to(&command, " %", shell_quote(tformat("-l%", library)));
     phase_start = now_ns();
@@ -181,6 +195,22 @@ fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
     _ = delete_file(c_path); // cleaning up: a failure here changes nothing
     _ = remove_dir(dir);
     return true;
+}
+
+// the directories `--run` adds to the loader's: add_library_dir's and
+// those of the shared `#library` files, then what the environment had
+fn run_library_path(build: *BuildOptions) -> string {
+    let dirs: [..]string;
+    for (dir in build.library_dirs)
+        array_add(&dirs, dir);
+    for (file in build.shared_libraries)
+        array_add(&dirs, path_dir(file));
+    if (dirs.len == 0)
+        return "";
+    let had = get_env(if (OS == .MacOS) "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH") or_else "";
+    if (had.len > 0)
+        array_add(&dirs, had);
+    return join(dirs, ":");
 }
 
 /* ---------------------------------------------------------------- the CLI */
@@ -393,6 +423,12 @@ fn main() -> i32 {
         let program = tformat("%/program", dir);
         let ok = compile_c(c_source, program, build);
         let command: [..]u8;
+        // the shared libraries it links aren't where the loader looks, so
+        // `--run` (the compiler running it) says where
+        let search = run_library_path(build);
+        if (search.len > 0)
+            print_to(&command, "%=% ", if (OS == .MacOS) "DYLD_LIBRARY_PATH" else "LD_LIBRARY_PATH",
+                     shell_quote(search));
         append_string(&command, shell_quote(program));
         for (arg in program_args)
             print_to(&command, " %", shell_quote(arg));

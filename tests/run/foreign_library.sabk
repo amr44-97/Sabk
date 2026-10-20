@@ -1,0 +1,38 @@
+// #library: a library file of the program's own, relative to this file
+// (tests/run.sh builds them in build/test_libs first)
+#import "std/io";
+#import "std/str";
+#import "std/build";
+
+// both libsabk_both.a and .so exist: the program links the static archive,
+// and #run opens the shared object
+const both = #library "../../build/test_libs/libsabk_both";
+// only a .so: linked by name, so the loader finds it (`--run` says where)
+const shared = #library "../../build/test_libs/libsabk_shared";
+// the static archive needs libm, which nothing here declares anything from
+const libm = #system_library,link_always "libm";
+
+fn add(a: int, b: int) -> int #foreign both "sabk_both_add";
+fn kind() -> *char #foreign both "sabk_both_kind";
+fn hypot(a: double, b: double) -> double #foreign both "sabk_both_hypot";
+let counter: int #foreign both "sabk_both_counter";
+fn triple(x: int) -> int #foreign shared "sabk_shared_triple";
+
+// a system library outside the usual places: add_library_dir says where,
+// for the linker and for `--run` (not for #run, which runs before it)
+const system_shared = #system_library "libsabk_shared";
+fn triple_again(x: int) -> int #foreign system_shared "sabk_shared_triple";
+
+#run configure();
+
+fn configure() { add_library_dir("../../build/test_libs"); } // relative to this file's directory
+
+const KIND_WHILE_COMPILING = #run copy_string(from_cstring(kind()));
+const SUM = #run add(2, 3);
+const TRIPLED = #run triple(5);
+
+fn main() {
+    println("the program's: % % % %", from_cstring(kind()), add(20, 22), hypot(3, 4), counter);
+    println("#run's: % % %", KIND_WHILE_COMPILING, SUM, TRIPLED);
+    println("triple: % %", triple(7), triple_again(8));
+}

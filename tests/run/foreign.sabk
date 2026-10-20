@@ -1,0 +1,45 @@
+// C's functions and variables through #foreign, from the libraries that
+// define them
+#import "std/io";
+#import "std/str";
+#import "lib/other_strlen" as other;
+
+const libc = #system_library "libc";
+const libm = #system_library "libm";
+
+fn strlen(s: *char) -> size_t #foreign libc;
+fn string_length(s: *u8) -> size_t #foreign libc "strlen"; // our name, C's in quotes
+fn snprintf(buffer: *char, size: size_t, format: *char, ...) -> int #foreign libc;
+let environ: **char #foreign libc;                          // a C variable
+
+// foreign functions overload like any others: the C name is separate
+fn sin(x: f64) -> f64 #foreign libm;
+fn sin(x: f32) -> f32 #foreign libm "sinf";
+
+// another module's library, imported with `as`
+fn abs(x: int) -> int #foreign other.libc;
+
+// and a C function can share its name with one of ours
+fn puts(s: *char) -> int #foreign libc;
+fn puts(s: string) { println("ours: %", s); }
+
+// all of it while compiling too: #run opens the libraries
+const LENGTH = #run string_length("compile");
+const SINE = #run sin(0.5);
+const HAS_ENV = #run has_environment();
+
+fn has_environment() -> bool { return environ != null && environ[0] != null; }
+
+fn main() {
+    println("strlen: % %", strlen("hello"), string_length("hi"));
+    println("other module's: % %", other.length_as_i32("four"), abs(-6));
+    let buffer: [32]char;
+    let n = snprintf(&buffer[0], 32, "%d-%s", 42, "x");
+    println("snprintf: % %", n, from_cstring(&buffer[0]));
+    println("sin: % %", sin(0.5), sin(0.5 as f32));
+    let c_text: *char = "C's puts";
+    puts(c_text);       // a *char: C's
+    puts("a string");   // a literal fits `string` best: ours
+    println("environ: %", environ != null);
+    println("compile time: % % %", LENGTH, SINE, HAS_ENV);
+}

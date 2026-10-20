@@ -356,6 +356,8 @@ fn describe_fn(c: *Checker, f: *Node) -> string {
         print_to(&out, "%: %{}%", params[i].tok.text, if (is_variadic_param(params[i])) ".." else "", pt);
         k++;
     }
+    if (f.kind is .Fn{variadic: true}) // C's `...`
+        append_string(&out, if (params.len > 0) ", ..." else "...");
     append_string(&out, ")");
     if (t.kind == .Fn && t.ret.kind != .Void)
         print_to(&out, " -> %", type_name(t.ret));
@@ -664,6 +666,17 @@ fn visible_candidates(c: *Checker, at: Token, fns: []*Node) -> [..]*Node {
                 hidden = hidden || (a.kind == .Fn && b.kind == .Fn && same_params(a, b));
             }
         }
+        // one C function declared in several modules (each binding
+        // declaring the `printf` it uses) is one function: the first
+        // stands for the rest. Declarations that disagree stay overloads.
+        if (is_foreign(f)) {
+            for (k in kept) {
+                if (!is_foreign(k) || c_symbol(k) != c_symbol(f))
+                    continue;
+                let a, b = decl_type(c, f), decl_type(c, k);
+                hidden = hidden || (a.kind == .Fn && b.kind == .Fn && same_params(a, b));
+            }
+        }
         if (!hidden)
             array_add(&kept, f);
     }
@@ -678,8 +691,12 @@ fn rank_call(c: *Checker, f: *Node, args: []*Node) -> ([]i32, bool) {
     let ranks = new([]i32, args.len, context.temp_allocator);
     if (t.kind != .Fn || !count_fits(f, t, args.len))
         return ranks, false;
+    let c_variadic = f.kind is .Fn{variadic: true};
     for (i in 0..args.len) {
-        let r = rank_at(c, f, t, args, i);
+        // C's `...` takes anything, as a bare `$T` does: the loosest fit
+        let r = if (c_variadic && i >= t.params.len && !(args[i].kind is .Spread)) 7
+                else if (c_variadic && i >= t.params.len) 0
+                else rank_at(c, f, t, args, i);
         if (r == 0)
             return ranks, false;
         ranks[i] = r;
@@ -708,7 +725,8 @@ fn count_fits(f: *Node, t: *Type, given: isize) -> bool {
     for (i in 0..fixed)
         if (value_of(params[i]) == null)
             needed = i + 1;
-    return given >= needed && (variadic || given <= params.len);
+    let c_variadic = f.kind is .Fn{variadic: true}; // C's `...`
+    return given >= needed && (variadic || c_variadic || given <= params.len);
 }
 
 // the type the i-th argument goes to: a `..T` parameter takes each extra

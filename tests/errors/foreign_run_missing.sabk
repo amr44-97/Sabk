@@ -1,0 +1,10 @@
+// #run can't open a system library that isn't installed
+const missing = #library "no/such/libnothing";
+const not_installed = #system_library "libsabk_not_installed";
+
+fn nothing() -> i32 #foreign missing;
+fn absent() -> i32 #foreign not_installed;
+
+const A = #run absent();
+
+fn main() {}

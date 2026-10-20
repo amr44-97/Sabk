@@ -10,10 +10,12 @@
 // which reports it.
 
 #import "std/array";
+#import "std/fs";
 #import "std/fmt";
 #import "std/io";
 #import "std/map";
 #import "std/mem";
+#import "std/path";
 #import "std/str";
 #import "ast";
 #import "const";
@@ -109,6 +111,7 @@ struct VmFunction {
     // a C function
     native: bool;
     address: *void;
+    unavailable: string;    // why `address` is null: its library's error
     is_abort: bool;         // stopped instead of called
     is_exit: bool;
 
@@ -228,6 +231,159 @@ fn vm_dlsym(name: string) -> *void {
     return vmffi_dlsym(c_name);
 }
 
+// Where a foreign function or variable is while compiling: in its
+// library, opened for #run (once), or among what the compiler itself
+// links. Null, and why when its library is the reason.
+fn vm_foreign_address(decl: *Node) -> (*void, string) {
+    let symbol = c_symbol(decl);
+    let lib = foreign_library(decl);
+    // libc and libm are the compiler's own (and glibc's libc.so can't be
+    // dlopen-ed: it's a linker script), so a system library's names are
+    // looked for there first
+    if (lib == null || lib.kind is .Library{system: true}) {
+        let found = vm_dlsym(symbol);
+        if (found != null || lib == null)
+            return found, "";
+    }
+    let handle, why = vm_open_library(lib);
+    if (handle == null)
+        return null, why;
+    let c_name = to_cstring(symbol);
+    defer free(c_name);
+    let found = vmffi_dlsym_in(handle, c_name);
+    if (found == null)
+        return null, tformat("library `%` has no `%` (%)", library_text(lib), symbol, from_cstring(vmffi_dlerror()));
+    return found, "";
+}
+
+// a library's handle for #run, opened the first time; null and why if it
+// can't be
+fn vm_open_library(lib: *Node) -> (*void, string) {
+    let known = map_get(&opened_libraries, lib) or_else null;
+    if (known != null)
+        return known, "";
+    let file = "";
+    if (lib.kind is .Library{system: true}) {
+        file = tformat("%.%", library_text(lib), if (OS == .MacOS) "dylib" else "so");
+    } else {
+        let found, _, tried = library_file(lib, true);
+        if (found.len == 0) {
+            let static_file, _, _ = library_file(lib, false);
+            if (static_file.len > 0)
+                return null, tformat("library `%` is a static archive (%), which only the program links: `#run` can only call into a shared one (%)",
+                                     library_text(lib), path_base(static_file), if (OS == .MacOS) ".dylib" else ".so");
+            return null, tformat("can't find library `%` (looked for %)", library_text(lib), join(tried, ", "));
+        }
+        file = found;
+    }
+    let handle, why = vm_dlopen(file, 0);
+    if (handle == null)
+        return null, tformat("can't open library `%` for `#run`: %", library_text(lib), why);
+    map_put(&opened_libraries, lib, handle);
+    return handle, "";
+}
+
+// dlopen, and through a linker script: glibc's libc.so and libm.so (and
+// some systems' libncurses.so) are text, `GROUP ( /usr/lib/libm.so.6 ...
+// )`, which only the linker reads, so the shared object it names is
+// opened instead. Null and dlerror's text if it can't be.
+fn vm_dlopen(file: string, depth: isize) -> (*void, string) {
+    let c_path = to_cstring(file);
+    defer free(c_path);
+    let handle = vmffi_dlopen(c_path);
+    if (handle != null)
+        return handle, "";
+    let why = copy_string(from_cstring(vmffi_dlerror()));
+    // dlerror says "<the file it found>: invalid ELF header"
+    let colon = index_of(why, ": ");
+    if (depth > 2 || colon <= 0)
+        return null, why;
+    let text, err = read_file(why[..colon]);
+    if (err != .None || !(contains(text, "GROUP") || contains(text, "INPUT")))
+        return null, why;
+    for (name in script_inputs(text)) {
+        let target = if (starts_with(name, "-l")) tformat("lib%.so", name[2..]) else name;
+        if (!contains(path_base(target), ".so"))
+            continue; // a static part, like libc_nonshared.a
+        let inner, _ = vm_dlopen(target, depth + 1);
+        if (inner != null)
+            return inner, "";
+    }
+    return null, why;
+}
+
+// the file names in a linker script's GROUP ( ... ) or INPUT ( ... )
+fn script_inputs(text: string) -> [..]string {
+    let names: [..]string;
+    let word: [..]u8;
+    let inside = false;
+    for (c in text) {
+        let space = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '(' || c == ')';
+        if (!space) {
+            array_add(&word, c);
+            continue;
+        }
+        if (word.len > 0) {
+            let w = copy_string(word as string);
+            if (inside && w != "AS_NEEDED")
+                array_add(&names, w);
+            word.len = 0;
+        }
+        if (c == '(')
+            inside = true;
+    }
+    return names;
+}
+
+// a library's name as written: "libm", "vendor/libraylib"
+fn library_text(lib: *Node) -> string {
+    if (lib.kind is .Library{path})
+        return path.text[1..path.text.len - 1];
+    return "";
+}
+
+// A `#library`'s file: the path as written when it names a file, else the
+// static archive (unless `shared_only`), then the shared object. Also
+// whether it's shared, and the paths looked at, for an error.
+fn library_file(lib: *Node, shared_only: bool) -> (string, bool, []string) {
+    let tried: [..]string;
+    let path, dir = "", "";
+    if (lib.kind is .Library{path: p, dir: d})
+        path, dir = p.text[1..p.text.len - 1], d;
+    let full = path_normalize(path_join(dir, path, context.temp_allocator));
+    let candidates: [..]string;
+    array_add(&candidates, full);
+    if (!shared_only)
+        array_add(&candidates, tformat("%.a", full));
+    array_add(&candidates, tformat("%.%", full, if (OS == .MacOS) "dylib" else "so"));
+    for (file in candidates) {
+        let shared = is_shared_object(file);
+        if (shared_only && !shared && file != full)
+            continue;
+        array_add(&tried, file);
+        if (file_exists(file) && !is_dir(file) && (shared || !shared_only))
+            return path_real(file) or_else file, shared, tried;
+    }
+    return "", false, tried;
+}
+
+// libfoo.so, libfoo.so.6, libfoo.dylib
+fn is_shared_object(file: string) -> bool {
+    let base = path_base(file);
+    return ends_with(base, ".so") || contains(base, ".so.") || ends_with(base, ".dylib");
+}
+
+// `#system_library "libm"` to the linker: `m`, or "" if it isn't named
+// with its `lib`
+fn system_link_name(lib: *Node) -> string {
+    if (lib.kind is .Library{path}) {
+        let name = path.text[1..path.text.len - 1];
+        if (starts_with(name, "lib") && name.len > 3)
+            return name[3..];
+    }
+    return "";
+}
+
 /* ---------------------------------------------- build script functions */
 
 // What build scripts (top-level `#run`, using std/build) set. The compiler
@@ -246,6 +402,11 @@ struct BuildOptions {
     c_flags: [..]string;   // passed to the C compiler as written
     libraries: [..]string; // -l<name>
     c_files: [..]string;   // compiled and linked with the program
+    // what `#library` declarations the program uses link: static archives
+    // by path, shared objects as -L<dir> -l:<file> (no rpath, as in Jai)
+    library_files: [..]string;
+    shared_libraries: [..]string;
+    library_dirs: [..]string; // add_library_dir: -L, and --run's search path
     base_dir: string;      // relative paths are relative to this: the
                            // directory of the program's main file
     program_args: [..]string; // args() while compiling: the program's
@@ -285,11 +446,12 @@ fn vm_function_for(vm: *Vm, decl: *Node) -> *VmFunction {
     f.name = decl.tok.text;
     if (decl.kind is .Fn{is_extern: true, body} && body == null) {
         f.native = true;
-        f.is_abort = f.name == "abort";
-        f.is_exit = f.name == "exit";
-        f.address = host_function(f.name);
+        let symbol = c_symbol(decl);
+        f.is_abort = symbol == "abort";
+        f.is_exit = symbol == "exit";
+        f.address = host_function(symbol);
         if (f.address == null)
-            f.address = vm_dlsym(f.name);
+            f.address, f.unavailable = vm_foreign_address(decl);
     }
     map_put(&vm.functions, decl, f);
     return f;
@@ -303,10 +465,11 @@ fn vm_global_storage(vm: *Vm, decl: *Node) -> *u8 {
         return known;
     decl_type(vm.c, decl); // its initializer is checked, any #run in it baked
     if (decl.kind is .Let{is_extern: true}) { // C's own: the compiler's copy of it
-        let address = vm_dlsym(decl.tok.text) as *u8;
+        let found, why = vm_foreign_address(decl);
+        let address = found as *u8;
         if (address == null) {
             let none: Token;
-            vm_fail(vm, none, tformat("the C variable `%` isn't available while compiling", decl.tok.text), false);
+            vm_fail(vm, none, if (why.len > 0) why else tformat("the C variable `%` isn't available while compiling", decl.tok.text), false);
             return null;
         }
         map_put(&vm.globals, decl, address);
@@ -649,6 +812,11 @@ fn write_float(p: *u8, k: VmKind, v: f64) {
 /* ------------------------------------------------------------------ C */
 
 extern fn vmffi_dlsym(name: *u8) -> *void;
+extern fn vmffi_dlopen(path: *u8) -> *void;
+extern fn vmffi_dlsym_in(library: *void, name: *u8) -> *void;
+extern fn vmffi_dlerror() -> *u8;
+
+let opened_libraries: Map(*Node, *void); // #run's handles, by library
 extern fn vmffi_type(kind: i32) -> *void;
 extern fn vmffi_cif(fixed: i32, count: i32, types: **void, ret: *void) -> *void;
 extern fn vmffi_call(cif: *void, f: *void, ret: *void, args: **void);
@@ -705,6 +873,10 @@ extern fn host_link_library(p: *u8, len: isize) {
     array_add(&building().libraries, name);
 }
 extern fn host_add_c_file(p: *u8, len: isize) { array_add(&building().c_files, host_path(p, len)); }
+extern fn host_add_library_dir(p: *u8, len: isize) {
+    let dir = host_path(p, len);
+    array_add(&building().library_dirs, path_real(dir) or_else dir);
+}
 
 // args() (std/os) while compiling
 extern fn host_arg_count() -> i32 { return building().program_args.len as i32; }
@@ -741,6 +913,7 @@ fn host_function(name: string) -> *void {
     case "sabk_build_add_c_flags": host_add_c_flags;
     case "sabk_build_link_library": host_link_library;
     case "sabk_build_add_c_file": host_add_c_file;
+    case "sabk_build_add_library_dir": host_add_library_dir;
     default: null;
     };
 }
@@ -900,7 +1073,8 @@ fn call_native(vm: *Vm, call: *VmCallSite, f: *VmFunction, frame: *u8) -> bool {
         return false;
     }
     if (f.address == null) {
-        vm_fail(vm, none, tformat("the C function `%` isn't available while compiling", f.name), false);
+        vm_fail(vm, none, if (f.unavailable.len > 0) tformat("can't call `%`: %", f.name, f.unavailable)
+                          else tformat("the C function `%` isn't available while compiling", f.name), false);
         return false;
     }
     if (!call.prepared) {

@@ -1,0 +1,2 @@
+const libc = #system_library "libc";
+fn f() -> i32 #foreign libc { return 0; }
