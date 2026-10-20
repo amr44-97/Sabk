@@ -1329,8 +1329,17 @@ fn array_view(g: *CodeGen, n: *Node) -> string {
 
 // writes out one of the checker's implicit conversions
 fn convert(g: *CodeGen, value: string, from: *Type, to: *Type) -> string {
-    if (to == g.c.any_type) // a pointer to a copy of the value, and its type
-        return compound(g, to, cat(".value = (", c_type(g, from), "[1]){", value, "}, .info = ", type_info_ref(g, from)));
+    if (to == g.c.any_type) { // a pointer to a copy of the value, and its type
+        let info = type_info_ref(g, from);
+        // at the top level, a compound literal lasts the whole program; in
+        // a function, the copy is declared at its top, so it outlives a
+        // statement expression it's made in (`if (e is .V(x)) x else 0`)
+        if (g.static_init || g.current_fn == null)
+            return compound(g, to, cat(".value = (", c_type(g, from), "[1]){", value, "}, .info = ", info));
+        let name = tmp(g, "any");
+        print_to(&g.fn_storage, "  % %;\n", c_type(g, from), name);
+        return compound(g, to, cat(".value = (", name, " = ", value, ", &", name, "), .info = ", info));
+    }
     if (from.kind == .Growable) // [..]T -> []T, and [..]u8 -> string
         return cat(c_type(g, from), "__view(", value, ")");
     if (to.is_string) // []u8 as text: the same C struct

@@ -1,0 +1,14 @@
+// values made inside a statement expression (an `if` that binds, a value
+// `switch`) passed as Any: the copy the Any points to outlives it
+#import "std/io";
+
+enum Shape { Circle(f64), Rect(w: f64, h: f64), Dot }
+
+fn main() {
+    let a: Shape = .Circle(2);
+    let b: Shape = .Rect(3, 4);
+    println("% % %", if (a is .Circle(r)) r else 0.0, if (b is .Rect{w, h}) w * h else 0.0,
+            switch b { case .Rect{w}: w; default: 0.0; });
+    for (s in Shape.[.Circle(1), .Dot]) // one copy per conversion, made again each time round
+        println("%", if (s is .Circle(r)) r else -1.0);
+}
