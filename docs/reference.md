@@ -299,6 +299,30 @@ values      = expr { "," expr } ;
 - A default value on a parameter (`= expr`) is evaluated at the call site. It
   may use `context`, which is how library functions default to the context
   allocator.
+- **`#caller_location`** as a parameter's default is where the call is: a
+  `Location`, the prelude's `struct Location { file: string; line: i32;
+  column: i32; }`, for loggers, test helpers and error reports.
+
+  ```
+  fn log(message: string, at: Location = #caller_location) {
+      println("%:%:% %", at.file, at.line, at.column, message);
+  }
+  log("starting");             // main.sabk:12:5 starting
+  ```
+
+  - The position is the call as written, at its first token (`io` in
+    `io.log(...)`). A call written in a macro's own code gets the macro's
+    line; a call in code you give a macro (its `Code` argument) is yours,
+    and gets your line.
+  - Only a parameter's default can be `#caller_location`, and the
+    parameter's type is `Location`. A call can pass its own `Location`
+    instead; called through a function value, the default isn't used, as
+    no default is, so the caller passes one.
+  - It works in generic functions and in `#run` code (the call's position
+    in the source), and costs a `Location` passed per call, the file name
+    a constant string.
+  - Inside a macro, `#location(code)` is the older way to the same thing,
+    as a `"file:line:col"` string.
 - `fn name(...) #foreign lib;` declares a C function from a library, and
   `let name: T #foreign lib;` a C variable; `fn name(...) #c_call { ... }`
   is one of ours that C calls. See
@@ -775,6 +799,7 @@ primary     = NUMBER | FLOAT | STRING | CHAR
             | "#insert" IDENT                           // macros only
             | "#insert" unary              // an expression made by code (not IDENT)
             | ( "#text" | "#location" ) "(" IDENT ")"   // macros only
+            | "#caller_location"                       // a parameter's default only
             | "#run" unary                              // runs while compiling
             | "(" expr ")"
             | "switch" expr "{" { value_case } "}"
@@ -4178,7 +4203,7 @@ A few things to know:
 - Names that aren't keywords but are always there: the built-in types
   (`i32`, `string`, ...) and C's names for them (reserved: see
   [Name resolution](#name-resolution)), `Code` (for macros), and
-  the prelude's `Any`, `TypeInfo`, `Error`, `Option`, `Allocator`, `Context`,
+  the prelude's `Any`, `TypeInfo`, `Error`, `Option`, `Allocator`, `Context`, `Location`,
   the target constants `OS`, `ARCH` and `POINTER_SIZE`. C's type names are
   `int`, `long`, `char`, `size_t`, ... (see
   [C interop details](#compiling-and-running)).

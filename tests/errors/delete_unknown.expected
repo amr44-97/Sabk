@@ -5,8 +5,8 @@ std/mem.sabk:180:15: panic: delete can't free a `*i64`: it frees strings, slices
 [note]: in `delete` with T = *i64, used here at [tests/errors/delete_unknown.sabk:5:17]
      5 | fn f(p: *i64) { delete(p); }
        |                 ^
-[note]: here at [<prelude>:202:5]
-   202 |     abort();
+[note]: here at [<prelude>:210:5]
+   210 |     abort();
        |     ^
 [note]: called from here at [std/os.sabk:58:52]
     58 |     handler.procedure(handler.data, what, message, location);

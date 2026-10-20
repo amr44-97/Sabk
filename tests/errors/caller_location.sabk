@@ -1,0 +1,6 @@
+// #caller_location is where a call is: only a parameter's default
+struct Config { at: Location = #caller_location; }
+
+fn main() {
+    let here = #caller_location;
+}

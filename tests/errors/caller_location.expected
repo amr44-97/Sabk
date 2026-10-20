@@ -1,0 +1,6 @@
+[error]: `#caller_location` is where a call is, so it's a parameter's default: `at: Location = #caller_location` at [tests/errors/caller_location.sabk:2:32]
+     2 | struct Config { at: Location = #caller_location; }
+       |                                ^
+[error]: `#caller_location` is where a call is, so it's a parameter's default: `at: Location = #caller_location` at [tests/errors/caller_location.sabk:5:16]
+     5 |     let here = #caller_location;
+       |                ^

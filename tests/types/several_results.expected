@@ -1,7 +1,7 @@
 MODULE tests/types/several_results.sabk
 ROOT
   ENUM `CheckError` : CheckError
-    type: TYPE_NAME `Error` -> ENUM `Error` <prelude>:132:6 : Error
+    type: TYPE_NAME `Error` -> ENUM `Error` <prelude>:140:6 : Error
     ENUM_VARIANT `None` : CheckError = 0
     ENUM_VARIANT `Bad` : CheckError = 1
   FUN_DECL `divide` : fn(i64, i64) -> (i64, i64)

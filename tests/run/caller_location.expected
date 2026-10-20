@@ -1,0 +1,10 @@
+tests/run/caller_location.sabk:14:5 [1] hello
+tests/run/caller_location.sabk:15:5 [3] with a level
+tests/run/caller_location.sabk:16:9 [1] indented: the column follows
+42 at line 17
+tests/run/caller_location.sabk:9:34 [1] from the macro's own code
+tests/run/caller_location.sabk:18:17 [1] from code given to the macro: yours
+given.sabk:1:2 [2] passed explicitly
+value: given.sabk
+compile time: line 11
+[exit 0]

@@ -1,0 +1,4 @@
+// #caller_location is a Location
+fn wrong_type(at: string = #caller_location) {}
+
+fn main() { wrong_type(); }

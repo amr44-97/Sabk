@@ -508,6 +508,8 @@ fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
         }
         t = enum_variant(c, n, expected, name);
 
+    case .CallerLocation: // a parameter's default: each call gives its own (add_caller_locations)
+        t = decl_type(c, module_decl(c.res.prelude, "Location"));
     case .Number:
         t = c.types.untyped_int;
         let value, _ = integer_value(n.tok.text);
@@ -885,7 +887,77 @@ fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
     }
     if (fun != null && fun.kind is .Fn{format: true})
         check_format_call(c, n, fun);
+    if (fun != null)
+        add_caller_locations(c, n, callee, fun);
     return t.ret;
+}
+
+// `log("x")` where log takes `at: Location = #caller_location`: the call
+// gets its own position as that argument (and the defaults before it, as
+// they are), so nothing after the checker needs to know
+fn add_caller_locations(c: *Checker, n: *Node, callee: *Node, fun: *Node) {
+    let args: []*Node;
+    if (n.kind is .Call{args: a})
+        args = a;
+    let params = fn_params(fun);
+    let last: isize = -1;
+    for (i in args.len..params.len) {
+        let d = value_of(params[i]);
+        if (d != null && d.kind.tag == .CallerLocation)
+            last = i;
+    }
+    let location = decl_type(c, module_decl(c.res.prelude, "Location"));
+    if (last < 0 || params[last].ty != location)
+        return; // a parameter of another type: its signature said so
+    let more: [..]*Node;
+    array_append(&more, args);
+    for (i in args.len..last + 1) {
+        let d = value_of(params[i]);
+        if (d.kind.tag != .CallerLocation) {
+            array_add(&more, d); // a default is evaluated at the call anyway
+            continue;
+        }
+        let lit = location_literal(c, first_token(callee));
+        check_expr(c, lit, params[i].ty);
+        coerce(c, lit, params[i].ty);
+        array_add(&more, lit);
+    }
+    if (n.kind is .Call{args: &a})
+        a.* = more;
+}
+
+// `.{ .file = "x.sabk", .line = 3, .column = 5 }`: where `at` is
+fn location_literal(c: *Checker, at: Token) -> *Node {
+    let file = module_of(c.res, at.text.ptr);
+    let path = if (file != null) file.path else "<unknown>";
+    let text = at;
+    text.kind = .String;
+    let items: [..]*Node;
+    array_add(&items, field_init(at, "file", new_node(text, .String(quote_string(path)))));
+    array_add(&items, field_init(at, "line", number_at(at, at.line as isize)));
+    array_add(&items, field_init(at, "column", number_at(at, at.column as isize)));
+    return new_node(at, .StructInit(null, items));
+}
+
+fn field_init(at: Token, name: string, value: *Node) -> *Node {
+    let t = at;
+    t.kind = .Identifier;
+    t.text = name;
+    return new_node(t, .FieldInit(value));
+}
+
+fn number_at(at: Token, v: isize) -> *Node {
+    let t = at;
+    t.kind = .Number;
+    t.text = tformat("%", v);
+    return new_node(t, .Number);
+}
+
+// where an expression starts: `io` in `io.log(...)`
+fn first_token(e: *Node) -> Token {
+    if (e.kind is .Member{object} && object != null)
+        return first_token(object);
+    return e.tok;
 }
 
 #scope_file

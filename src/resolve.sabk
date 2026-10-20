@@ -1409,7 +1409,7 @@ fn resolve_fn(r: *Resolver, n: *Node) {
     for (param in f.params) {
         if (param.kind is .Param{declared, value}) {
             resolve_type(r, declared);
-            if (value != null)
+            if (value != null && value.kind.tag != .CallerLocation) // the one place it goes
                 resolve_expr(r, value);
         }
     }
@@ -2314,6 +2314,9 @@ fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
     case .Context:
         if (!r.context_ok)
             error(r, n.tok, "`context` is only available inside functions");
+
+    case .CallerLocation:
+        error(r, n.tok, "`#caller_location` is where a call is, so it's a parameter's default: `at: Location = #caller_location`");
 
     case .Number, .Float, .String, .Char, .Bool, .Null:
 

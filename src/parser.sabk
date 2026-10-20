@@ -1976,6 +1976,8 @@ fn primary(p: *Parser) -> *Node {
             return new_node(expect(p, .Identifier, "a Code parameter after `#insert`"), .Insert);
         if (d == "run")
             return new_node(name, .Run(unary(p)));
+        if (d == "caller_location") // `at: Location = #caller_location`
+            return new_node(name, .CallerLocation);
         if (d == "text" || d == "location") {
             expect(p, .LParen, tformat("`(` after `#%`", d));
             let code = expect(p, .Identifier, "a Code parameter");

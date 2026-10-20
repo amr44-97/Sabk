@@ -161,6 +161,7 @@ enum NodeKind {
     EnumShorthand,                           // .Red; tok: `.Red`
     TextOf,                                  // #text(code)
     LocationOf,                              // #location(code)
+    CallerLocation,                          // #caller_location: a parameter's default
     TypeExpr(declared: *Node),               // a type where an expression goes
     // made by the resolver: a macro call replaced by a copy of the macro's
     // body, `expansion` the copy's color; tok: the callee's
@@ -399,6 +400,7 @@ fn old_shape(n: *Node) -> OldShape {
     case .EnumShorthand: s.tag = "ENUM_SHORTHAND";
     case .TextOf: s.tag = "TEXT_OF";
     case .LocationOf: s.tag = "LOCATION_OF";
+    case .CallerLocation: s.tag = "CALLER_LOCATION";
     case .TypeExpr{declared}: s.tag = "TYPE_EXPR"; s.lhs = declared;
     case .MacroExpansion{callee, stmts, result}:
         s.tag = "MACRO_EXPANSION"; s.declared = result; s.lhs = callee; s.list = stmts;

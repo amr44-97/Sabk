@@ -1,0 +1,24 @@
+// `at: Location = #caller_location`: each call gives its own position
+#import "std/io";
+
+fn log(message: string, level: i32 = 1, at: Location = #caller_location) {
+    println("%:%:% [%] %", at.file, at.line, at.column, level, message);
+}
+fn where_am_i(at: Location = #caller_location) -> Location { return at; }
+fn generic_log(x: $T, at: Location = #caller_location) { println("% at line %", x, at.line); }
+fn logging(body: Code) #expand { log("from the macro's own code"); #insert body; }
+
+const AT_COMPILE = #run where_am_i();          // in #run too
+
+fn main() {
+    log("hello");
+    log("with a level", 3);                     // the defaults before it, as they are
+        log("indented: the column follows");
+    generic_log(42);
+    logging() { log("from code given to the macro: yours"); }
+    let mine: Location = .{ .file = "given.sabk", .line = 1, .column = 2 };
+    log("passed explicitly", 2, mine);
+    let f = where_am_i;                         // through a function value, no default
+    println("value: %", f(mine).file);
+    println("compile time: line %", AT_COMPILE.line);
+}

@@ -96,6 +96,14 @@ const OS = OperatingSystem.@OS@;
 const ARCH = Architecture.@ARCH@;
 const POINTER_SIZE = sizeof(*void);
 
+// ---- where code is: what a parameter defaulting to #caller_location gets,
+// the position of the call; printed with "%:%:%", at.file, at.line, at.column
+struct Location {
+    file: string;   // the source file, as the compiler was given it
+    line: i32;
+    column: i32;
+}
+
 // ---- C's types, for C interop: aliases of Sabk's own, which std and
 // Sabk code keep using. long is the one that differs by target (Windows
 // and 32-bit targets make it 32 bits), filled in like OS and ARCH. Like

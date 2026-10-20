@@ -13,7 +13,7 @@ switch to them at the bootstrap.
 
 - [x] **Formatting:** letter directives (`%s %q %w %x %X %b %o %e %f %c`), `%{}` before a letter, errors that teach (section 1)
 - [x] **Modules:** `#import`, `#load`, and `#scope_export` / `#scope_module` / `#scope_file` instead of `pub` (section 2); `pub` and `import` are ordinary names now
-- [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3). Built: `#assert` (section 8's step 7)
+- [ ] **Metaprogramming, layer 1:** `$` value parameters, `#assert`, `#where`, `#caller_location`, notes (`@name`), `#embed` (section 3). Built: `#assert` (section 8's step 7), `#caller_location`
 - [ ] **Metaprogramming, layer 2:** `#code` values and syntax trees in std/compiler (section 3)
 - [ ] **Metaprogramming, layer 3:** a build script that sees every declaration as it's checked (section 3)
 - [ ] **Types as values:** `#insert` in struct and enum bodies, value parameters on structs (section 3)
@@ -1323,6 +1323,19 @@ Decided with the user: the message is optional; without one, the error quotes th
 3. **A condition known only at run time** points to std/os's `assert`, the run-time one, since that's the likely intent.
 4. **Top-level `#assert`s are checked in the declarations' pass**, in order with them; a top-level one in a branch of `#if` that's taken is collected like the branch's declarations, and one in a branch not taken is never checked.
 5. **Struct bodies can't hold one** (no syntax): a check on a generic struct's types goes in a function that uses it, or waits for `#where`.
+
+### Built (Oct 21, 2026): `#caller_location`
+
+Decided with the user: the value is the prelude's `struct Location { file: string; line: i32; column: i32; }` (as Jai's Source_Code_Location); only a parameter's default can be `#caller_location`; the position is the call as written (a macro's own call gets the macro's line, code given to a macro the caller's).
+
+#### Edge cases met building it (to review)
+
+1. **Each call gets its position as an ordinary argument**: the checker appends a `.{ .file = ..., .line = ..., .column = ... }` literal for a `#caller_location` parameter the call leaves out (and the defaults before it, as the shared default expressions they are), so the C output and the VM need nothing new.
+2. **The position is the call's first token**: `io` in `io.log(...)`, not `log`.
+3. **The file is the path the compiler was given** (`tests/run/x.sabk`, or std's full path), as `#location` and panics print it.
+4. **A parameter of another type** (`at: string = #caller_location`) is the signature's type error alone; calls add nothing, so it isn't reported again at each call.
+5. **Through a function value** the default isn't used (as no default is), so the caller passes a `Location`.
+6. **`Location` is a prelude name**, not reserved: a program's own `Location` hides it, as with `TypeKind`.
 
 ## 9. How it lands
 
