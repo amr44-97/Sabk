@@ -833,15 +833,103 @@ fn condition(p: *Parser, what: string) -> *Node {
 }
 
 // `if (x) stmt` takes any statement; `if x { ... }` takes a block, so the
-// condition can't run into it (`if done -count;`)
+// condition can't run into it (`if done -count;`); `if x then stmt` takes
+// any statement after the `then`
 fn condition_and_body(p: *Parser, what: string) -> (*Node, *Node) {
     let parens = parenthesized(p);
     let begin = peek(p).text.ptr;
     let cond = condition(p, what);
-    if (!parens && !at(p, .LBrace))
-        return cond, fail(p, peek(p), tformat("`{` after the condition `%`: without parentheses, `%`'s body is a block",
-                                              span_from(p, begin), what));
+    if (what == "if" && at_then(p)) {
+        let then_tok = next(p);
+        if (!then_ends_well(p, then_tok))
+            return cond, null;
+        return cond, stmt(p);
+    }
+    if (at_then(p))
+        return cond, fail(p, peek(p), tformat("`then` only goes with `if`; `%`'s body is a block, or put the condition in parentheses", what));
+    if (!parens && !at(p, .LBrace)) {
+        let or_then = if (what == "if") ", or a statement after `then`" else "";
+        return cond, fail(p, peek(p), tformat("`{` after the condition `%`: without parentheses, `%`'s body is a block%",
+                                              span_from(p, begin), what, or_then));
+    }
     return cond, stmt(p);
+}
+
+// `then` right after an `if`'s condition ends it (Jai's): `if done then
+// return;`. Anywhere else it's an ordinary name.
+fn at_then(p: *Parser, k: isize = 0) -> bool {
+    let t = peek(p, k);
+    return t.kind == .Identifier && t.text == "then";
+}
+
+// after `if c then`: a value or a statement. `then` right there is always
+// the separator, so `if (c) then else x` with a variable named `then`
+// is a mistake to point out.
+fn then_ends_well(p: *Parser, then_tok: Token) -> bool {
+    let after = peek(p).kind;
+    if (after != .Else && after != .Semicolon && !is_assign_op(after))
+        return true;
+    fail(p, then_tok, "`then` after a condition separates it from what follows; for a variable named `then` here, write `(then)`");
+    return false;
+}
+
+// in a value `if` starting with `(`: does a `then` end the condition, as
+// in `if (a + b) > 2 then x else y`? Looked for up to its `else` (or an
+// inner `if`, which has its own).
+fn then_before_else(p: *Parser) -> bool {
+    let depth = 0;
+    let i: isize = 0;
+    while (true) {
+        let kind = peek(p, i).kind;
+        if (depth == 0) {
+            if (at_then(p, i))
+                return true;
+            if (kind == .Else || kind == .If || kind == .Semicolon || kind == .Comma || kind == .Eof)
+                return false;
+        }
+        if (kind == .LBrace || kind == .LParen || kind == .LBracket)
+            depth += 1;
+        if (kind == .RBrace || kind == .RParen || kind == .RBracket) {
+            depth -= 1;
+            if (depth < 0)
+                return false;
+        }
+        i += 1;
+    }
+}
+
+// the `{` at `k` after a name, in a condition without parentheses: are the
+// braces the name's (a variant literal's fields, `K.Let{ .declared = 1 }`,
+// or a pattern's bindings, `is .Circle{r}`) rather than the body? They are
+// when what follows them can't follow a body (another `{`, `then`, an
+// operator) and they hold no statements. `if x {} { ... }`, a body then a
+// block, is the one way to get it wrong, and the checker reports it.
+fn braces_are_names(p: *Parser, k: isize) -> bool {
+    let first = peek(p, k + 1).kind;
+    switch (first) {
+    case .LBrace, .While, .For, .Do, .Return, .Let, .Const, .Defer, .Break, .Continue, .Case, .Default:
+        return false; // a statement
+    default:
+    }
+    let depth = 0;
+    let i = k;
+    while (true) {
+        let kind = peek(p, i).kind;
+        if (kind == .Eof)
+            return false;
+        if (kind == .LBrace || kind == .LParen || kind == .LBracket)
+            depth += 1;
+        if (kind == .RBrace || kind == .RParen || kind == .RBracket) {
+            depth -= 1;
+            if (depth == 0)
+                break;
+        }
+        if (kind == .Semicolon && depth == 1)
+            return false; // a statement
+        i += 1;
+    }
+    let after = peek(p, i + 1).kind;
+    return after == .LBrace || at_then(p, i + 1) || binary_prec(after) > 0;
 }
 
 // an expression a block follows: `x {` ends at the `{`, which isn't a
@@ -873,13 +961,40 @@ fn parenthesized(p: *Parser) -> bool {
         }
         k += 1;
     }
-    // not `(`: `if (x) (p as *f32).* = v;` is a statement after the
-    // condition, and calling what's in parentheses is rare
     let after = peek(p, k + 1).kind;
+    if (after == .LParen)
+        return !reaches_block(p, k + 1);
     let goes_on = binary_prec(after) > 0 || (after == .Bang && at(p, .Is, k + 2)) ||
                   after == .Period || after == .LBracket || after == .As ||
                   after == .OrReturn;
     return !goes_on;
+}
+
+// a `(` after the condition's `)`: the body, `if (k == .F32) (p as *f32).*
+// = v;`, when a `;` or an assignment comes first; the condition going on,
+// `if (get())(n) > 4 {`, when a block or `then` does. (A block after a
+// call in parentheses can't be a macro's trailing one: those are called by
+// name.)
+fn reaches_block(p: *Parser, k: isize) -> bool {
+    let depth = 0;
+    let i = k;
+    while (true) {
+        let t = peek(p, i);
+        let kind = t.kind;
+        if (kind == .Eof)
+            return false;
+        if (depth == 0) {
+            if (kind == .Semicolon || is_assign_op(kind) || kind == .RBrace)
+                return false;
+            if (at_then(p, i) || (kind == .LBrace && peek(p, i - 1).kind != .Period))
+                return true;
+        }
+        if (kind == .LBrace || kind == .LParen || kind == .LBracket)
+            depth += 1;
+        if (kind == .RBrace || kind == .RParen || kind == .RBracket)
+            depth -= 1;
+        i += 1;
+    }
 }
 
 fn is_assign_op(kind: TokenKind) -> bool {
@@ -1094,8 +1209,9 @@ fn pattern_inner(p: *Parser, min_prec: isize) -> *Node {
         if (k < 3 && !(k == 1 && at(p, .LParen, 1)))
             k = 0;
     }
-    // (in `if x is .V {`, the `{` is the body's)
-    if (k > 0 && ((at(p, .LBrace, k) && !p.bare_condition) || at(p, .LParen, k))) {
+    // (in `if x is .V {`, the `{` is the body's; in `if x is .V{a} {`, the
+    // first braces are the pattern's)
+    if (k > 0 && ((at(p, .LBrace, k) && (!p.bare_condition || braces_are_names(p, k))) || at(p, .LParen, k))) {
         let variant: *Node;
         if (at(p, .Period)) {
             let dot = next(p);
@@ -1465,7 +1581,7 @@ fn postfix(p: *Parser) -> *Node {
             // `if x {` always), except C's way of writing a struct
             // literal, `Vec2{...}`, which is an error. At the head of a
             // statement, `m(x) {` is a macro call with a trailing block.
-            if (p.bare_condition)
+            if (p.bare_condition && !braces_are_names(p, 0))
                 return e;
             let named = e.kind.tag == .Identifier || e.kind.tag == .Member;
             let generic_type = false;
@@ -1586,11 +1702,25 @@ fn primary(p: *Parser) -> *Node {
             return n;
         }
         return new_node(next(p), .Identifier);
-    case .If: // if (c) a else b: one of two values
+    case .If: // if (c) a else b, or if c then a else b: one of two values
         next(p);
-        expect(p, .LParen, "`(` after `if`");
-        let cond = expr(p);
-        expect(p, .RParen, "`)` after the condition");
+        let cond: *Node = null;
+        if (at(p, .LParen) && !then_before_else(p)) {
+            // the `(` holds the whole condition: what follows is the value,
+            // which may well start with `-` or `.` (`if (x < 0) -1 else 1`)
+            next(p);
+            cond = expr(p);
+            expect(p, .RParen, "`)` after the condition");
+        } else {
+            let begin = peek(p).text.ptr;
+            cond = bare_expr(p);
+            if (!at_then(p))
+                return fail(p, peek(p), tformat("`then` after the condition `%`: an `if` that gives a value is `if (c) a else b` or `if c then a else b`",
+                                                span_from(p, begin)));
+            let then_tok = next(p);
+            if (!then_ends_well(p, then_tok))
+                return new_node(then_tok, .Identifier);
+        }
         let then = expr(p);
         expect(p, .Else, "`else` and a second value: an `if` that gives a value needs both");
         return new_node(t, .If(cond, then, expr(p), true));
@@ -1610,7 +1740,7 @@ fn primary(p: *Parser) -> *Node {
             return array_items(p, dot, null);
         let name = expect(p, .Identifier, "`{`, `[` or an enum variant after `.`");
         let shorthand = new_node(joined(dot, name), .EnumShorthand); // `.Red`: one token
-        if (at(p, .LBrace) && !p.bare_condition) { // .Let{ .declared = t }: a variant, by its fields
+        if (at(p, .LBrace) && (!p.bare_condition || braces_are_names(p, 0))) { // .Let{ .declared = t }: a variant, by its fields
             let lit = init_list(p, shorthand, false);
             if (lit.kind is .StructInit{variant: &v})
                 v.* = true;

@@ -406,7 +406,7 @@ fn check_if_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
     // a constant condition with constant values folds (unless the value is
     // converted, as to an Any)
     if (cond_node.cval.kind == .Bool) {
-        let taken = if (cond_node.cval.i.lo != 0) then else else_;
+        let taken = if (cond_node.cval.i.lo == 0) else_ else then;
         if (taken.conv == null)
             n.cval = taken.cval;
     }

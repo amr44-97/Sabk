@@ -1,0 +1,5 @@
+// `then` is only `if`'s
+fn main() {
+    let ok = true;
+    while ok then ok = false;
+}

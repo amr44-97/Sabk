@@ -317,6 +317,8 @@ fn assignable(c: *Checker, n: *Node, why: *string) -> bool {
 fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
     if (n.is_baked)
         return n.ty;
+    if (c.pre_checked.entries.len > 0 && n.ty != null && map_remove(&c.pre_checked, n))
+        return n.ty; // checked for an operator function already
     expected = context_type(c, n, expected);
     // several values are only taken where the caller of check_expr said so
     let several_ok = c.several_ok_for == n;

@@ -1,0 +1,11 @@
+// braces after a name in a condition without parentheses
+enum K { Let(declared: i32 = 0, value: i32 = 7), Nil }
+enum Color { Red, Green }
+fn operator ==(a: K, b: K) -> bool { return true; }
+
+fn main() {
+    let k = K.Let{};
+    let c = Color.Red;
+    if k == K.Let { }                       // the body: `K.Let` alone isn't a value
+    if c == Color.Red {} { }                // read as `Color.Red{}`, which has no fields
+}

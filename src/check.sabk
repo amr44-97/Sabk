@@ -102,6 +102,10 @@ struct Checker {
     // the value of `let a, b =`, a `return`, `or_return`, ...; anywhere
     // else that's an error
     several_ok_for: *Node;
+    // operands an operator function was checked against and then left to
+    // the built-in operator (`i + 1` where some `operator +` exists): the
+    // next check of each takes its type, so none is checked twice
+    pre_checked: Map(*Node, bool);
 
     packs: Map(*Node, bool);    // the `.{...}`s pack_variadic made
     // does a type, or something it holds by value, have field defaults?
@@ -186,7 +190,7 @@ fn text_of(n: *Node) -> string {
 // the branch of a checked #if that's compiled, or null
 fn static_if_branch(n: *Node) -> *Node {
     if (n.kind is .StaticIf{then, else_})
-        return if (n.cval.i.lo != 0) then else else_;
+        return if (n.cval.i.lo == 0) else_ else then;
     return null;
 }
 
@@ -597,6 +601,9 @@ fn variant_value(c: *Checker, n: *Node, t: *Type, name: string, call: *Node) -> 
         if (pt != null) {
             error(c, n.tok, tformat("% holds a value of type %; write %. To test which variant a value is, compare its `.tag` with `.%`",
                                     q(written), qt(pt), q(tformat("%(...)", written)), name));
+            if (fields != null && char_after(c, n.tok) == '{') // `if x == K.Let { ... }`
+                note(c, n.tok, tformat("in a condition without parentheses, a `{` after % is the body; for its fields, `%{}{ ... } {`",
+                                       q(written), written));
             return c.types.error;
         }
     } else if (pt == null) {
@@ -719,6 +726,18 @@ fn check_var(c: *Checker, d: *Node) {
     }
 
     d.ty = if (t != null) t else c.types.error;
+}
+
+// the first character after `t` in its file, past spaces and line ends
+fn char_after(c: *Checker, t: Token) -> u8 {
+    let m = module_of(c.res, t.text.ptr);
+    if (m == null)
+        return 0;
+    let text = m.src.text;
+    let i = (t.text.ptr as isize) - (text.ptr as isize) + t.text.len;
+    while (i < text.len && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r'))
+        i++;
+    return if (i < text.len) text[i] else 0;
 }
 
 fn fn_body(fun: *Node) -> *Node {

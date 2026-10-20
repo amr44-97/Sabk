@@ -1,0 +1,9 @@
+[error]: `K.Let` holds a value of type `K.Let`; write `K.Let(...)`. To test which variant a value is, compare its `.tag` with `.Let` at [tests/errors/condition_braces.sabk:9:15]
+     9 |     if k == K.Let { }                       // the body: `K.Let` alone isn't a value
+       |               ^
+[note]: in a condition without parentheses, a `{` after `K.Let` is the body; for its fields, `K.Let{ ... } {` at [tests/errors/condition_braces.sabk:9:15]
+     9 |     if k == K.Let { }                       // the body: `K.Let` alone isn't a value
+       |               ^
+[error]: `Color.Red` holds no value, so it has no fields; write `Color.Red` at [tests/errors/condition_braces.sabk:10:19]
+    10 |     if c == Color.Red {} { }                // read as `Color.Red{}`, which has no fields
+       |                   ^

@@ -755,6 +755,53 @@ fn parse_int(s: string) -> i64, ParseError = .None { ... }   // results, in a de
 
 6. **`do ... while`** takes either form: `while i > 0;` ends at the `;`.
 
+#### Reviewed with the user, built Oct 20, 2026
+
+Compared with Jai, which has one mode (the body is any statement, and an
+optional `then` ends the condition when it must) and `ifx` for values.
+The user's rule for this review: where a change would complicate things
+or add ambiguity, go back to mandatory parentheses. None did.
+
+1. **`then`**, Jai's, for `if` only: `if done then return; else count += 1;`,
+   with `else` and `else if` as usual, and in the value form:
+   `if n > 2 then 1 else 2`. Contextual: right after an `if`'s condition
+   it always ends it (a variable named `then` there is written `(then)`,
+   and the error says so); elsewhere it's an ordinary name. The compiler
+   had four `if (c) then else else_` (a variable `then`), now written
+   `if (!c) else_ else then`.
+2. **The value `if` takes parentheses or `then`.** Its parentheses hold
+   the whole condition unless a `then` comes before its `else`
+   (`if (a + b) > 2 then x else y`), since a value often starts with `-`
+   or `.` (`if (x < 0) -1 else 1`). Blocks, `if c { 1 } else { 2 }`, are
+   left out: a Sabk block gives no value (only `name: { break name = v; }`
+   does), so they'd need a new rule. **Open, for the user.**
+3. **Braces after a name, in a condition without parentheses** (item 3
+   above), are the name's when they hold no statements and a `{`,
+   `then` or an operator follows them: `if s is .Circle{r} {`,
+   `if s is .Circle{r} && r > 2 {`, `if k == K.Let{ .declared = 1 } {`,
+   `if k == K.Let{} {`. The parser can't tell `K.Let` (a variant with
+   fields, never a value alone) from `Color.Red`, so this is decided by
+   what follows the braces, not by the name. The one wrong reading,
+   `if c == Color.Red {} { ... }` (an empty body, then a block), is
+   reported by the checker ("`Color.Red` holds no value, so it has no
+   fields"); `if x == K.Let { ... }` gets a note saying the `{` is the
+   body and how to write the fields.
+4. **A `(` right after the condition's `)`** (item 2 above) looks ahead
+   instead of always starting the body: a `;` or an assignment before any
+   block makes it the body (`if (k == .F32) (p as *f32).* = v;`), and a
+   block or `then` makes it part of the condition
+   (`if (get())(n) > 4 {`). Nothing is left ambiguous: a block after a
+   call in parentheses can't be a macro's trailing block, since those are
+   called by name.
+5. **Found while testing it**: in a program that declares an operator,
+   the built-in operator checked operands an operator function had
+   already been checked against, a second time: errors came out twice
+   (the call path had the same double check, which crashed on
+   `k == K.Wrap(3)`; fixed earlier the same day). Such
+   operands are now kept in `pre_checked` and not checked again. And
+   `p[1] = .Green` through an `operator []=` failed ("can't tell which
+   enum"): a literal there now takes its type from the parameter.
+
 ## 7. Function overloading
 
 Added Oct 19, 2026, at the user's request, and decided the same day:

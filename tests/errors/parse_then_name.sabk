@@ -1,0 +1,7 @@
+// `then` right after a condition always separates it: a variable named
+// `then` there needs parentheses
+fn main() {
+    let ok = true;
+    let then = 1;
+    let a = if (ok) then else 0;
+}

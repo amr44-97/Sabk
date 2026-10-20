@@ -1,0 +1,61 @@
+// conditions without parentheses, part 2: `then` (with `else`), the value
+// `if` with `then`, braces that belong to the condition, and a `(` after
+// a condition's parentheses
+#import "std/io";
+
+enum Shape { Circle(r: i64), Square(side: i64), Dot }
+enum K { Let(declared: i32 = 0, value: i32 = 7), Wrap(i32), Nil }
+
+fn declared_of(k: K) -> i32 { switch k { case .Let{declared}: return declared; default: return -1; } }
+fn operator ==(a: K, b: K) -> bool { return declared_of(a) == declared_of(b); }
+
+fn sign(n: i64) -> string {
+    if n < 0 then return "negative"; else if n == 0 then return "zero"; else return "positive";
+}
+
+fn twice(x: i64) -> i64 { return x * 2; }
+fn get() -> fn(i64) -> i64 { return twice; }
+
+fn main() {
+    // `then`, and `else` after it
+    println("% % %", sign(-2), sign(0), sign(5));
+    let done = false;
+    let count = 3;
+    if done then return; else count += 1;
+    if count > 3 then println("count %", count); else { println("not printed"); }
+    if count == 4 then { println("a block after then"); } else { println("not printed"); }
+    if (count == 4) then println("parentheses and then");
+    if done then println("not printed");
+    else println("else on its own line");
+
+    // the value `if`: parentheses, or `then`
+    let x = if count > 2 then 1 else 2;
+    let y = if (count > 2) -1 else 1;                       // a value starting with `-`
+    let z = if (count + 1) * 2 > 9 then "big" else "small"; // `(` only starts the condition
+    let w = if count > 9 then 0 else if count > 3 then 4 else 9;
+    let u = if (count > 9) 0 else if count > 3 then 5 else 9;
+    let d: Shape = if (count > 2) .Dot else .Circle(1);      // a value starting with `.`
+    println("% % % % % %", x, y, z, w, u, d);
+
+    // a `(` right after the condition's parentheses
+    let v: f32 = 0;
+    let p = &v;
+    if (count == 4) (p as *f32).* = 2.5;                    // the body
+    if (get())(count) > 4 { println("called: % %", v, get()(count)); }   // the condition goes on
+    if (get())(count) > 4 then println("and with then");
+
+    // braces after a name that belong to the condition
+    let s = Shape.Circle(3);
+    if s is .Circle{r} { println("circle %", r); }
+    if s is .Circle{r} && r > 2 { println("a big circle"); }
+    if s is .Circle{r} then println("then: %", r);
+    if s !is .Dot { println("not a dot"); }                 // no braces: the body's
+    let k = K.Let{ .declared = 1 };
+    if k == K.Let{ .declared = 1 } { println("the same `declared`"); }
+    if k == .Let{ .declared = 1 } { println("shorthand"); }
+    if K.Let{} == K.Let{ .value = 3 } { println("defaults: the same `declared`"); }
+    if k == K.Let{} { } else { println("not the defaults"); }
+    while s is .Circle{r} && r > 5 { println("not printed"); }
+    if s is .Square{side} { println("not printed"); } else if s is .Circle{r} && r == 3 { println("else if %", r); }
+    switch s { case .Circle{r}: println("switch %", r); default: }   // a case's braces, as before
+}

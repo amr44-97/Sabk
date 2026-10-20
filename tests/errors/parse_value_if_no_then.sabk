@@ -1,0 +1,5 @@
+// a value `if` without parentheses takes `then`, not blocks
+fn main() {
+    let ok = true;
+    let b = if ok { 1 } else { 2 };
+}

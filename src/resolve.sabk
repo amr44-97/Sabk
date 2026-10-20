@@ -827,7 +827,7 @@ fn taken_decls(r: *Resolver, n: *Node) -> []*Node {
     }
     resolve_condition(r, cond);
     let value, known = decide_condition(r, cond, true);
-    let taken: *Node = if (!known) null else if (value) then else else_;
+    let taken: *Node = if (!known) null else if (!value) else_ else then;
     for (branch in .[then, else_])
         if (branch != null && branch != taken)
             set_aside(r, branch, n);
@@ -1627,7 +1627,7 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
         if (has_string_insert(then) || has_string_insert(else_)) {
             let value, known = decide_condition(r, cond, false);
             if (known) {
-                let taken = if (value) then else else_;
+                let taken = if (!value) else_ else then;
                 if (taken != null)
                     resolve_body(r, taken);
                 return;

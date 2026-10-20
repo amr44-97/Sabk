@@ -495,10 +495,12 @@ simple_stmt = expr [ assign_op expr | "++" | "--" ]
 assign_op   = "=" | "+=" | "-=" | "*=" | "/=" | "%="
             | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
 
-if_stmt     = "if" body [ "else" stmt ] ;
+if_stmt     = "if" ( body | expr "then" stmt ) [ "else" stmt ] ;
 while_stmt  = "while" body ;
 body        = "(" expr ")" stmt                      // parentheses: any statement
             | expr block ;                           // none: a block
+if_expr     = "if" "(" expr ")" expr "else" expr     // a value: one of two
+            | "if" expr "then" expr "else" expr ;
 do_stmt     = "do" stmt "while" expr ";" ;
 
 for_stmt    = "for" "(" header ")" stmt
@@ -525,17 +527,29 @@ item        = [ "&" ] IDENT                          // a name for it (`_`: none
   them, the body is a block, so the condition can't run into it:
   `if err != .None { return err; }`. The same goes for `while` and `for`
   (`for x, i in xs { ... }`); `switch x { ... }` always has its braces.
+  - `if` also takes `then` after its condition, and then any statement,
+    as Jai does: `if done then return; else count += 1;`. `then` there
+    always ends the condition (a variable named `then` right after one is
+    written `(then)`); elsewhere it's an ordinary name. `while`, `for` and
+    `switch` don't take it.
   - A `(` holds the whole condition only when the condition ends at its
     `)`: `if (a + b) * 2 > c { ... }` is a condition without parentheses,
-    so it takes a block.
+    so it takes a block. A `(` right after the `)` starts the body when a
+    `;` or an assignment comes before any block, `if (k == .F32) (p as
+    *f32).* = v;`, and continues the condition otherwise, `if (get())(n) >
+    4 { ... }`.
   - In a condition without parentheses, a `{` after a name is the body's:
     `if p == origin {`. A literal there is written `Point.{ ... }`, as
-    everywhere; C's `Point{ ... }` isn't one.
+    everywhere; C's `Point{ ... }` isn't one. The braces are the name's
+    when they hold no statements and a `{`, `then` or an operator follows
+    them: a pattern's bindings, `if s is .Circle{r} { ... }`, or a
+    variant's fields, `if k == K.Let{ .declared = 1 } { ... }`.
   - A declaration's results don't need them either:
     `fn divmod(a: i64, b: i64) -> i64, i64 { ... }`. A function type keeps
     them, `fn(i64) -> (i64, bool)`, since a comma there could start the
     next parameter.
-  - The `if` that gives a value, `if (c) a else b`, keeps its parentheses.
+  - The `if` that gives a value takes parentheses or `then`:
+    `if (c) a else b`, `if c then a else b` (below).
 - **Assignment, `++` and `--` are statements, not expressions.** `if (x = 5)`
   is a syntax error, and `a = b = c` isn't allowed.
 - **There's no `goto` and no `static`.** `defer` covers what `goto cleanup`
@@ -1738,7 +1752,7 @@ outer: for (i in 0..3) {
 
 ### `if` as an expression
 
-In a value's place, `if (c) a else b` is one of
+In a value's place, `if (c) a else b` or `if c then a else b` is one of
 two values, and only the chosen one is evaluated. The `else` is required.
 The values have the type the context wants; without one, an untyped value
 follows a typed one (`if (c) x else 0` with `x: u8` is a `u8`), and two
@@ -1747,6 +1761,7 @@ first value:
 
 ```
 let sign = if (x < 0) -1 else 1;
+let size = if n > 1000 then "big" else "small";
 let radius = if (shape is .Circle(r)) r else 0.0;
 const BITS = if (POINTER_SIZE == 8) 64 else 32;  // a constant: it folds
 ```
@@ -1758,6 +1773,9 @@ let b = if (x > 0) 1 else "one";   // error: the `if`'s two values don't agree: 
                                    //   one with `as`
 return if (x) 1;                   // error: expected `else` and a second value: an `if`
                                    //   that gives a value needs both
+let c = if x > 0 { 1 } else { 2 }; // error: `then` after the condition `x > 0`: an `if`
+                                   //   that gives a value is `if (c) a else b` or
+                                   //   `if c then a else b`
 ```
 
 At the start of a statement, `if` is always an `if` statement, as in C.
@@ -3116,6 +3134,48 @@ pick(a, b);   // a, b: i32, with pick(i32, i64) and pick(i64, i32)
   fits both ambiguous, and the error says to name the module
   (`left.shared`). A qualified call, `io.print(...)`, only sees that
   module's. `extern` functions don't join sets: yours hides theirs.
+
+### Operators
+
+An operator can be given a meaning for a struct, union or enum: it's a
+function named by the operator, picked like any overload.
+
+```
+fn operator +(a: Vec2, b: Vec2) -> Vec2 { return .{ .x = a.x + b.x, .y = a.y + b.y }; }
+fn operator *(v: Vec2, k: f64) -> Vec2 #symmetric { return .{ .x = v.x * k, .y = v.y * k }; }
+fn operator ==(a: Vec2, b: Vec2) -> bool { return a.x == b.x && a.y == b.y; }
+fn operator [](g: *Grid, i: isize) -> i64 { return g.cells[i]; }
+fn operator []=(g: *Grid, i: isize, value: i64) { g.cells[i] = value; }
+
+let c = a + b;
+let d = 2.0 * c;     // #symmetric: (v: Vec2, k: f64) taken either way round
+c += b;              // c = c + b
+let same = a != b;   // !(a == b): `!=` comes from `==`
+g[4] = 5;            // operator []=, with `&g`
+let n = g[4];        // operator []
+```
+
+- **The operators:** `+ - * / % & | ^ << >> == !=`, `[]` (reading) and
+  `[]=` (writing). The others (`<`, `&&`, `!`, unary `-`, `=`, `.`, `as`,
+  `is`, ...) can't be given a meaning.
+- **Only where an operand is a struct, union or enum** (by value: on
+  pointers, `p - q` stays pointer arithmetic). Every other `+` is the
+  built-in one, so `+` on `i64` can't change. An enum keeps its built-in
+  `==` and `!=` when no `operator ==` takes the operands.
+- **`a += b` is `a = a + b`**, when reading `a` again can't run anything
+  twice; `xs[next()] += b` is an error that asks to write it out.
+- **`operator []`** may take its object by pointer (`&g` is passed). It
+  gives a value, not a variable: `g[i] += 1`, `g[i]++` and `&g[i]` are
+  errors; only `g[i] = v` goes to `operator []=`.
+- **Checked where it's declared:** two parameters (three for `[]=`), a
+  struct, union or enum among them, a `bool` from `==` and `!=`, and a
+  `#symmetric` with two different parameter types.
+- Operators work across plain imports, as generic functions
+  (`fn operator +(p: Pair($T), q: Pair(T)) -> Pair(T)`), in macros and in
+  `#run`. In C, each is a function named after its parameters:
+  `operator_add__Vec2__Vec2`.
+- Advice, Jai's too: keep them for math. A `v + w` that allocates or fails
+  hides what `vec_add(v, w)` would show.
 
 ## Generics
 

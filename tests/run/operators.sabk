@@ -50,7 +50,8 @@ fn main() {
     println("% %", red + red, red == .Red);       // == on an enum: the built-in one
     let tape: Tape;
     tape[1] = Tok.Num(1);                         // a variant's value, as `[]=`'s value
-    println("% % %", Tok.Num(2) == Tok.Word{ .text = "hi" }, tape[Tok.Num(1)] == Tok.Num(1), Tok.End == Tok.Num(5));
+    tape[0] = .End;                               // a literal: typed by `[]=`'s parameter
+    println("% % % %", Tok.Num(2) == Tok.Word{ .text = "hi" }, tape[Tok.Num(1)] == Tok.Num(1), Tok.End == Tok.Num(5), tape[Tok.Num(0)]);
     let m = a;
     add_to(m, b);
     let vs = Vec2.[a, b, a];

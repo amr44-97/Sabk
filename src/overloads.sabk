@@ -201,7 +201,7 @@ fn operator_binary(c: *Checker, n: *Node, expected: *Type) -> (*Type, bool) {
         rt = check_expr(c, rhs, lt);
     }
     if (!(user_type(lt) || user_type(rt)) || lt.kind == .Error || rt.kind == .Error)
-        return null, false;
+        return left_to_built_in(c, lhs, rhs, null);
     let args = new([]*Node, 2);
     args[0], args[1] = lhs, rhs;
     // none fits: an enum's `==` and `!=` are built in; for the rest the
@@ -209,7 +209,7 @@ fn operator_binary(c: *Checker, n: *Node, expected: *Type) -> (*Type, bool) {
     let built_in = (op == .EqEq || op == .NotEq) && !(struct_or_union(lt) || struct_or_union(rt));
     if (!fits_any(c, n.tok, set, args)) {
         if (built_in)
-            return null, false;
+            return left_to_built_in(c, lhs, rhs, null);
         report_no_fit(c, n.tok, visible_candidates(c, n.tok, members(set)), args);
         return c.types.error, true;
     }
@@ -430,10 +430,14 @@ fn index_args(c: *Checker, set: *Node, at: Token, object: *Node, index: *Node, v
     if (set == null)
         return none, false;
     let ot = check_expr(c, object, null);
-    if (!user_type(ot))
+    if (!user_type(ot)) {
+        left_to_built_in(c, object, null, null);
         return none, false;
-    check_expr(c, index, null);
-    if (value != null)
+    }
+    // `.Red` and `.{...}` take their types from the parameters, as in calls
+    if (!is_contextual(index) && !is_open_literal(index))
+        check_expr(c, index, null);
+    if (value != null && !is_contextual(value) && !is_open_literal(value))
         check_expr(c, value, null);
     let count: isize = if (value != null) 3 else 2;
     for (by_pointer in .[false, true]) {
@@ -452,7 +456,17 @@ fn index_args(c: *Checker, set: *Node, at: Token, object: *Node, index: *Node, v
         if (fits_any(c, at, set, args))
             return args, true;
     }
+    left_to_built_in(c, object, index, value);
     return none, false;
+}
+
+// operands checked for an operator function, which the built-in operator
+// takes from here: they aren't checked again (`c.pre_checked`)
+fn left_to_built_in(c: *Checker, a: *Node, b: *Node, d: *Node) -> (*Type, bool) {
+    for (n in .[a, b, d])
+        if (n != null && n.ty != null)
+            map_put(&c.pre_checked, n, true);
+    return null, false;
 }
 
 // can `n` be read twice without running anything twice: names, fields,

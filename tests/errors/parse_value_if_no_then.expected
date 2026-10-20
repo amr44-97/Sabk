@@ -1,0 +1,3 @@
+[error]: `then` after the condition `ok`: an `if` that gives a value is `if (c) a else b` or `if c then a else b` at [tests/errors/parse_value_if_no_then.sabk:4:19]
+     4 |     let b = if ok { 1 } else { 2 };
+       |                   ^
