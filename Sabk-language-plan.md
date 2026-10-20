@@ -25,7 +25,7 @@ switch to them at the bootstrap.
 - [ ] **`or_return .Replacement`** (section 5): deferred Oct 20, 2026 ("not solving a real problem" yet); the open points are in section 5
 - [x] **`--strict` and `--werror`:** dropped failures and unchecked values as opt-in warnings (section 5)
 - [ ] **Debug failure traces** through `or_return` (section 5)
-- [ ] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
+- [x] **Function overloading:** Jai's model, functions and operators (`operator +`, `#symmetric`) (section 7)
 - [x] **Optional parentheses** in `if`/`while`/`for`/`switch` and declared results; a block without them (section 6)
 - [x] **Smaller additions:** named variant construction, `for (x, i in xs)`, `let a, b: T;`, keywords as field names, null checks, wrapping into `?T` (section 6)
 
@@ -924,6 +924,52 @@ a += b;                       // from operator +
 - In C an operator is a function: `operator_add__Vec2__Vec2`.
 - Advice (Jai's too): keep them for math. `v + w` that allocates or fails
   hides what `vec_add(v, w)` would show.
+
+### Built, step 4 (Oct 20, 2026): operators
+
+#### Edge cases met building it (to review)
+
+1. **Only where an operand is a struct, union or enum**: the resolver
+   gives `a + b` (and `a[i]`, `a[i] = v`, `a += b`) the `operator +`
+   functions in scope, and the checker calls one only when an operand's
+   type is a struct, union or enum. Everything else keeps the built-in
+   operator, unchanged, so programs without operators pay nothing.
+2. **`!=` comes from `==`** when there's no `operator !=`: `a != b` is
+   `!(a == b)`. Not in the plan: declaring both would only be a way to
+   make them disagree.
+3. **An enum keeps its built-in `==` and `!=`** when no `operator ==`
+   takes the operands; for a struct or union, and for every other
+   operator, no fit is an error: ``no `operator -` takes these
+   arguments: (Vec2, a float constant)``, with a note on each candidate.
+4. **`a += b` is `a = a + b` only when reading `a` twice is harmless**
+   (names, fields, `p.*`, and indexes by those); `vs[next()] -= a` is an
+   error asking to write it out, since `next()` would run twice. Not in
+   the plan.
+5. **`operator []` takes the object by value or by pointer**: with
+   `fn operator [](g: *Grid, i: isize)`, `g[i]` passes `&g`. `m[i] = v`
+   needs an `operator []=`; with only `[]`, the error says so.
+6. **A literal operand takes the other's type**: `red == .Red`,
+   `v + .{ .x = 1 }`.
+7. **`#symmetric` adds a second function** with the two parameters
+   swapped and the same body (it names the parameters, not their order),
+   so `3 * a` still runs left to right.
+8. **The declaration is checked**: two parameters (three for `[]=`),
+   generic ones too, and a struct, union or enum among them; `operator <`
+   and the others outside the list are a parse error naming the ones
+   that can be given a meaning.
+9. **C names**: the operator as a word, after the module and before the
+   parameters like any overload (`operators__operator_add__operators__Vec2__operators__Vec2`
+   for `+` in `operators.sabk`; `[]` is `operator_index`, `[]=`
+   `operator_index_set`). `#run` calls them like any function.
+10. **Across imports and generic, like other overloads**: a library's
+    `operator +` joins yours, and `fn operator +(p: Pair($T), q: Pair(T))`
+    is a generic candidate.
+11. **Found on the way (a bug from step 3)**: a generic function in a set
+    merged across imports broke its instances ("an unresolved type
+    reached the code generator"). The "yours hides an imported one with
+    the same parameters" check typed the generic declaration itself,
+    whose parameters aren't types until a call, and the instances copied
+    that broken type. A generic one now neither hides nor is hidden.
 
 ## 8. How it lands
 

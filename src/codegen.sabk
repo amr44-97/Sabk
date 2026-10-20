@@ -378,13 +378,35 @@ fn is_function(d: *Node) -> bool { return d.kind is .Fn{is_macro: false}; }
 
 fn conv_or_ty(n: *Node) -> *Type { return if (n.conv != null) n.conv else n.ty; }
 
+// an operator function's name in C; other names as they are
+fn operator_word(name: string) -> string {
+    return switch (name) {
+    case "+": "operator_add";
+    case "-": "operator_sub";
+    case "*": "operator_mul";
+    case "/": "operator_div";
+    case "%": "operator_mod";
+    case "&": "operator_and";
+    case "|": "operator_or";
+    case "^": "operator_xor";
+    case "<<": "operator_shl";
+    case ">>": "operator_shr";
+    case "==": "operator_eq";
+    case "!=": "operator_ne";
+    case "[]": "operator_index";
+    case "[]=": "operator_index_set";
+    default: name;
+    };
+}
+
 /* ------------------------------------------------------------------ names */
 
 fn global_name(g: *CodeGen, decl: *Node) -> string {
     if ((decl.kind.tag == .Fn || decl.kind.tag == .Let) && is_extern_decl(decl))
         return decl.tok.text; // C's own, under its own name
     let prefix = map_get(&g.module_prefix, decl.owner) or_else "";
-    let name = if (prefix.len == 0) decl.tok.text else cat(prefix, "__", decl.tok.text);
+    let base = operator_word(decl.tok.text); // `operator +`: operator_add
+    let name = if (prefix.len == 0) base else cat(prefix, "__", base);
     // a generic instance is named after its types: max__i32, List__u8;
     // one of a function sharing its name, apart from a non-generic one
     // with those parameters: show__generic__i64, not show__i64

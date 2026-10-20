@@ -1,0 +1,24 @@
+[error]: `operator +` takes 2 parameters, found 1 at [tests/errors/operator_misuse.sabk:4:13]
+     4 | fn operator +(a: Vec2) -> Vec2 { return a; }                  // two parameters
+       |             ^
+[error]: `operator *` needs a struct, union or enum among its parameters: `*` on built-in types keeps its meaning at [tests/errors/operator_misuse.sabk:5:13]
+     5 | fn operator *(a: i64, b: i64) -> i64 { return 1; }            // built-in types only
+       |             ^
+[error]: `operator -` takes 2 parameters, found 1 at [tests/errors/operator_misuse.sabk:10:13]
+    10 | fn operator -(p: Pair($T)) -> Pair(T) { return p; }           // generic: two parameters too
+       |             ^
+[error]: no `operator -` takes these arguments: (Vec2, a float constant) at [tests/errors/operator_misuse.sabk:16:15]
+    16 |     let b = a - 1.5;                                          // no `-` takes (Vec2, f64)
+       |               ^
+[note]: `operator -(a: Vec2, b: Vec2) -> Vec2`: the 2nd argument is a float constant, not a `Vec2` at [tests/errors/operator_misuse.sabk:6:13]
+     6 | fn operator -(a: Vec2, b: Vec2) -> Vec2 { return a; }
+       |             ^
+[note]: `operator -(p: Pair($T)) -> Pair(T)`: it takes 1 argument, given 2 at [tests/errors/operator_misuse.sabk:10:13]
+    10 | fn operator -(p: Pair($T)) -> Pair(T) { return p; }           // generic: two parameters too
+       |             ^
+[error]: `-=` with an `operator -` reads its target again, which runs code twice here: write it out, `x = x - y` at [tests/errors/operator_misuse.sabk:18:22]
+    18 |     vs[next_index()] -= a;                                    // the target would run twice
+       |                      ^
+[error]: there's no `operator []=` for this: `operator []` only reads; declare `fn operator []=(x: *T, i: I, value: V)` to assign at [tests/errors/operator_misuse.sabk:19:10]
+    19 |     a[0] = 1.0;                                               // `[]` reads; there's no `[]=`
+       |          ^

@@ -1,0 +1,20 @@
+// mistakes giving operators a meaning
+struct Vec2 { x: f64; y: f64; }
+
+fn operator +(a: Vec2) -> Vec2 { return a; }                  // two parameters
+fn operator *(a: i64, b: i64) -> i64 { return 1; }            // built-in types only
+fn operator -(a: Vec2, b: Vec2) -> Vec2 { return a; }
+fn operator [](v: Vec2, i: isize) -> f64 { return v.x; }
+
+struct Pair($T) { a: T; b: T; }
+fn operator -(p: Pair($T)) -> Pair(T) { return p; }           // generic: two parameters too
+
+fn next_index() -> isize { return 0; }
+
+fn main() {
+    let a = Vec2.{ .x = 1, .y = 2 };
+    let b = a - 1.5;                                          // no `-` takes (Vec2, f64)
+    let vs: [2]Vec2;
+    vs[next_index()] -= a;                                    // the target would run twice
+    a[0] = 1.0;                                               // `[]` reads; there's no `[]=`
+}

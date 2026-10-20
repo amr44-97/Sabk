@@ -46,6 +46,7 @@ struct Resolver {
     // get their parameters' types
     overloaded: Map(*Node, bool);
     overload_sets: [..]*Node;
+    has_operators: bool;         // some module gives an operator a meaning
     merged: Map(string, *Node);  // "module:name": its functions and its imports', as one set
     builtins: Map(string, *Node); // i32, u8, bool, ...
     error_count: isize;
@@ -300,6 +301,14 @@ fn exported(d: *Node) -> bool {
     }
     let m = d.owner;
     return m == null || !map_has(&m.regions, d);
+}
+
+// `operator +` and the like: a function named by an operator
+fn is_operator_fn(d: *Node) -> bool {
+    if (d.kind.tag != .Fn || d.tok.text.len == 0)
+        return false;
+    let c = d.tok.text[0];
+    return !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_');
 }
 
 #scope_file
@@ -615,6 +624,12 @@ fn collect_decls(r: *Resolver, m: *Module) {
 // a top-level declaration of `m`: its owner and its name in `m`'s scope
 fn collect_decl(r: *Resolver, m: *Module, n: *Node) {
     prepare_decl(r, m, n);
+    if (is_operator_fn(n)) {
+        map_put(&r.overloaded, n, true); // operator_add__Vec2__Vec2
+        r.has_operators = true;
+    }
+    if (n.kind is .Fn{symmetric: true, params} && params.len == 2)
+        add_swapped(r, m, n);
     if (r.region != null)
         map_put(&m.regions, n, r.region);
     // a `#scope_file` name is its file's: two files of a module can each
@@ -676,6 +691,41 @@ fn declare_or_overload(r: *Resolver, m: *Module, scope: *Map(ScopeKey, *Node), n
     set.owner = m;
     array_add(&r.overload_sets, set);
     map_put(scope, key, set);
+}
+
+// `operator *(v: Vec2, k: f64) #symmetric`: the same function taking
+// `(k: f64, v: Vec2)` too, so `3 * v` works and still runs left to right.
+// The copy's body is the same code: it names the parameters, not their
+// order.
+fn add_swapped(r: *Resolver, m: *Module, n: *Node) {
+    let copy = clone_node(n, -1);
+    switch (copy.kind) {
+    case .Fn{params: &ps, symmetric: &s}:
+        let swapped = new([]*Node, 2);
+        swapped[0] = ps.*[1];
+        swapped[1] = ps.*[0];
+        ps.* = swapped;
+        s.* = false;
+    default:
+    }
+    let decls = root_decls(m);
+    let more: [..]*Node;
+    array_append(&more, decls.*);
+    array_add(&more, copy);
+    decls.* = more;
+    collect_decl(r, m, copy);
+}
+
+// the functions giving `name` (`+`, `[]`) a meaning, seen from `n`: for
+// the checker to pick from when an operand is a struct, union or enum
+fn operator_fns(r: *Resolver, n: *Node, name: string) -> *Node {
+    if (!r.has_operators)
+        return null;
+    let found = lookup(r, name, color_of(r, n), n.tok.text.ptr);
+    r.ambiguous.len = 0;
+    if (found == null || !(found.kind.tag == .Fn || found.kind.tag == .Overloads))
+        return null;
+    return found;
 }
 
 // a function that can join others of its name, or a set of them
@@ -1524,6 +1574,11 @@ fn resolve_stmt(r: *Resolver, n: *Node) {
     case .Dec{target}: resolve_expr(r, target);
 
     case .Assign{target, value}:
+        // xs[i] = v and a += b: the operator functions in scope
+        if (n.tok.text == "=" && target.kind.tag == .Index)
+            n.decl = operator_fns(r, n, "[]=");
+        else if (n.tok.text.len >= 2 && n.tok.text != "==")
+            n.decl = operator_fns(r, n, n.tok.text[..n.tok.text.len - 1]);
         if (target.kind is .Values{items}) {
             // a, b = ...; `_` is a target that drops its value
             for (t in items)
@@ -1750,6 +1805,16 @@ fn resolve_leave(r: *Resolver, n: *Node, label: *Node, value: *Node, is_break: b
 // allowed on the left of `.` (`Color.Red`, `io.print`) and before a struct
 // literal (`Vec2.{...}`)
 fn resolve_expr(r: *Resolver, n: *Node, non_value_ok: bool = false) {
+    // a + b, a[i]: the operator functions in scope, if there are any
+    switch (n.kind) {
+    case .Binary{op} if (op != .And && op != .Or && op != .Lt && op != .Gt && op != .LtEq && op != .GtEq):
+        n.decl = operator_fns(r, n, n.tok.text);
+        if (n.decl == null && op == .NotEq) // `!=` as not `==`
+            n.decl = operator_fns(r, n, "==");
+    case .Index:
+        n.decl = operator_fns(r, n, "[]");
+    default:
+    }
     switch (n.kind) {
     case .Identifier:
         if (!check_backtick(r, n))

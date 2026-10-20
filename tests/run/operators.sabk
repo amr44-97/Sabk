@@ -1,0 +1,41 @@
+// operators given a meaning for a type: functions named by the operator
+#import "std/io";
+
+struct Vec2 { x: f64; y: f64; }
+
+fn operator +(a: Vec2, b: Vec2) -> Vec2 { return .{ .x = a.x + b.x, .y = a.y + b.y }; }
+fn operator -(a: Vec2, b: Vec2) -> Vec2 { return .{ .x = a.x - b.x, .y = a.y - b.y }; }
+fn operator *(v: Vec2, k: f64) -> Vec2 #symmetric { return .{ .x = v.x * k, .y = v.y * k }; }
+fn operator ==(a: Vec2, b: Vec2) -> bool { return a.x == b.x && a.y == b.y; }
+
+struct Grid { cells: [9]i64; }
+
+fn operator [](g: *Grid, i: isize) -> i64 { return g.cells[i]; }
+fn operator []=(g: *Grid, i: isize, value: i64) { g.cells[i] = value * 10; }
+
+enum Color { Red, Green }
+fn operator +(a: Color, b: Color) -> Color { return .Green; }   // an enum too
+
+fn show(v: Vec2) -> string { return tformat("(%, %)", v.x, v.y); }
+
+#import "std/fmt";
+
+const DOUBLED = #run (Vec2.{ .x = 1, .y = 1 } * 2.0).y;   // #run calls them too
+
+fn main() {
+    let a = Vec2.{ .x = 1, .y = 2 };
+    let b = Vec2.{ .x = 3, .y = 4 };
+    println("% % %", show(a + b), show(b - a), show(a * 2));
+    println("%", show(3 * a));                    // #symmetric
+    let c = a;
+    c += b;                                       // c = c + b
+    c *= 2;
+    println("% % %", show(c), a == a, a != b);    // != is not ==
+    let g: Grid;
+    g[4] = 5;                                     // operator []=
+    println("% %", g[4], g.cells[4]);
+    let red = Color.Red;
+    println("% %", red + red, red == .Red);       // == on an enum: the built-in one
+    let n = 2 + 3;                                // built-in types: built-in operators
+    println("% %", n, DOUBLED);
+}

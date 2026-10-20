@@ -1,0 +1,21 @@
+// operators across plain imports, and generic ones
+#import "std/io";
+#import "lib/vectors";
+
+fn operator +(v: Vec3, k: i64) -> Vec3 { return .{ .x = v.x + k, .y = v.y + k, .z = v.z + k }; }   // joins the library's `+`
+
+struct Pair($T) { a: T; b: T; }
+
+fn operator +(p: Pair($T), q: Pair(T)) -> Pair(T) { return .{ .a = p.a + q.a, .b = p.b + q.b }; }
+fn operator [](p: Pair($T), i: isize) -> T { return if (i == 0) p.a else p.b; }
+
+fn main() {
+    let v = Vec3.{ .x = 1, .y = 2, .z = 3 };
+    println("% %", show(v + v), show(v + 10));
+    let w = v;
+    w += v;                                         // the library's `+`
+    println("% %", w == v + v, w != v);             // its `==`, and `!=` from it
+    let p = Pair(i64).{ .a = 1, .b = 2 };
+    let q = Pair(f64).{ .a = 0.5, .b = 1.5 };
+    println("% % % %", (p + p).a, (p + p)[1], (q + q).b, q[0]);
+}

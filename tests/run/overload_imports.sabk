@@ -4,8 +4,11 @@
 
 fn describe(s: string) -> string { return s; }         // joins the library's two
 fn label(x: i64) -> string { return "my label"; }      // the same parameters: ours hides theirs
+fn describe(xs: []$T) -> string { return "some items"; }  // a generic one joins them too
 
 fn main() {
     println("%, %, %", describe(5), describe(true), describe("text"));
     println("% / %", label(1), describing.label(1));
+    let xs = i64.[1, 2];
+    println(describe(xs[..]));
 }

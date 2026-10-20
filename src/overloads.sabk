@@ -17,6 +17,13 @@
 //      (`[]$T` a slice or array, `*$T` a pointer, `List($T)` a List)
 //   7  ... a bare `$T`, which takes anything
 // The generic call then works out the types as usual.
+//
+// Operators are functions named by the operator, `fn operator +(a: Vec2,
+// b: Vec2) -> Vec2`: where an operand is a struct, union or enum and one
+// fits, `a + b` becomes a call of it (`a[i]` of `operator []`, `a[i] = v`
+// of `operator []=`; `a += b` is `a = a + b`, and `a != b` is
+// `!(a == b)` when there's no `operator !=`). Otherwise it's the built-in
+// operator, as before.
 // The pick is better or equal on every argument and better on one. None
 // fitting, or several fitting equally, is an error listing them.
 //
@@ -47,6 +54,10 @@ fn pick_overload(c: *Checker, n: *Node, callee: *Node, fns: []*Node) -> *Node {
     for (a in args) {
         if (is_contextual(a) || is_open_literal(a) || a.kind.tag == .TypeExpr)
             continue;
+        if (a.ty != null) { // checked already (an operator's operands)
+            broken = broken || a.ty.kind == .Error;
+            continue;
+        }
         let e = if (a.kind is .Spread{value}) value else a; // ..xs: the slice
         if (check_expr(c, e, null).kind == .Error)
             broken = true;
@@ -64,11 +75,9 @@ fn pick_overload(c: *Checker, n: *Node, callee: *Node, fns: []*Node) -> *Node {
             array_add(&ranks, r);
         }
     }
-    let name = callee.tok.text;
+    let name = shown_name(fns[0]);
     if (fitting.len == 0) {
-        error(c, callee.tok, tformat("no `%` takes these arguments: (%)", name, arg_types(c, args)));
-        for (f in candidates)
-            note(c, f.tok, tformat("`%`: %", describe_fn(c, f), why_not(c, f, args)));
+        report_no_fit(c, callee.tok, candidates, args);
         return null;
     }
     // the one better or equal on every argument than each other one, and
@@ -146,6 +155,150 @@ fn check_overload_sets(c: *Checker) {
     }
 }
 
+// a + b where an operand is a struct, union or enum and an `operator +`
+// fits: a call of it. False: the built-in operator, as before.
+fn operator_binary(c: *Checker, n: *Node, expected: *Type) -> (*Type, bool) {
+    let op: BinaryOp;
+    let lhs: *Node = null;
+    let rhs: *Node = null;
+    if (n.kind is .Binary{op: o, lhs: l, rhs: r})
+        op, lhs, rhs = o, l, r;
+    let set = n.decl;
+    // a literal operand (`.Red`, `.{...}`) takes the other one's type
+    let lt: *Type = null;
+    let rt: *Type = null;
+    if (is_contextual(lhs) || is_open_literal(lhs)) {
+        rt = check_expr(c, rhs, null);
+        lt = check_expr(c, lhs, rt);
+    } else {
+        lt = check_expr(c, lhs, null);
+        rt = check_expr(c, rhs, lt);
+    }
+    if (!(user_type(lt) || user_type(rt)) || lt.kind == .Error || rt.kind == .Error)
+        return null, false;
+    let args = new([]*Node, 2);
+    args[0], args[1] = lhs, rhs;
+    // none fits: an enum's `==` and `!=` are built in; for the rest the
+    // call reports why none takes them
+    let built_in = (op == .EqEq || op == .NotEq) && !(struct_or_union(lt) || struct_or_union(rt));
+    if (!fits_any(c, n.tok, set, args)) {
+        if (built_in)
+            return null, false;
+        report_no_fit(c, n.tok, visible_candidates(c, n.tok, members(set)), args);
+        return c.types.error, true;
+    }
+    let callee = new_node(n.tok, .Identifier);
+    callee.decl = set;
+    callee.color = n.color;
+    n.decl = null;
+    // `!=` from `==`: not equal
+    if (op == .NotEq && n.tok.text != members(set)[0].tok.text) {
+        let call = new_node(n.tok, .Call(callee, args, false));
+        call.color = n.color;
+        n.kind = .Unary(.Not, call);
+        return check_expr(c, n, expected), true;
+    }
+    n.kind = .Call(callee, args, false);
+    return check_call(c, n, expected), true;
+}
+
+// m[i] where m is a struct, union or enum and an `operator []` fits: a
+// call of it, with `&m` when its first parameter takes a pointer
+fn operator_index(c: *Checker, n: *Node, expected: *Type) -> (*Type, bool) {
+    let object: *Node = null;
+    let index: *Node = null;
+    if (n.kind is .Index{object: o, index: i})
+        object, index = o, i;
+    let args, ok = index_args(c, n.decl, n.tok, object, index, null);
+    if (!ok)
+        return null, false;
+    let callee = new_node(n.tok, .Identifier);
+    callee.decl = n.decl;
+    callee.color = n.color;
+    n.decl = null;
+    n.kind = .Call(callee, args, false);
+    return check_call(c, n, expected), true;
+}
+
+// `m[i] = v` where an `operator []=` fits: the statement becomes its call
+fn operator_index_assign(c: *Checker, n: *Node) -> bool {
+    let target: *Node = null;
+    let value: *Node = null;
+    if (n.kind is .Assign{target: t, value: v})
+        target, value = t, v;
+    let object: *Node = null;
+    let index: *Node = null;
+    if (target.kind is .Index{object: o, index: i})
+        object, index = o, i;
+    let args, ok = index_args(c, n.decl, n.tok, object, index, value);
+    if (!ok)
+        return false;
+    let callee = new_node(target.tok, .Identifier);
+    callee.decl = n.decl;
+    callee.color = n.color;
+    let call = new_node(target.tok, .Call(callee, args, false));
+    call.color = n.color;
+    n.decl = null;
+    n.kind = .ExprStmt(call, false);
+    return true;
+}
+
+// `a += b` where `a` is a struct, union or enum and an `operator +`
+// fits: `a = a + b`, when reading `a` again can't do anything twice
+fn operator_compound(c: *Checker, n: *Node, target_type: *Type) -> bool {
+    if (!user_type(target_type))
+        return false;
+    let target: *Node = null;
+    let value: *Node = null;
+    if (n.kind is .Assign{target: t, value: v})
+        target, value = t, v;
+    let set = n.decl;
+    n.decl = null;
+    if (!without_effects(target)) {
+        error(c, n.tok, tformat("`%` with an `operator %` reads its target again, which runs code twice here: write it out, `x = x % y`",
+                                n.tok.text, op_of(n.tok.text), op_of(n.tok.text)));
+        return true;
+    }
+    let again = clone_node(target, -1); // resolved: the same names
+    let sum = new_node(n.tok, .Binary(compound_op(n.tok.text), again, value));
+    sum.decl = set;
+    sum.color = n.color;
+    // the `=` of `+=` (a token of the source, for messages)
+    let eq = n.tok;
+    eq.text = n.tok.text[n.tok.text.len - 1..];
+    n.tok = eq;
+    n.kind = .Assign(target, sum);
+    return false; // checked as an `=` from here
+}
+
+// a function whose name is an operator: its parameters say what it's for
+fn check_operators(c: *Checker) {
+    for (m in c.res.modules) {
+        for (d in root_list(m)) {
+            if (!is_operator_fn(d))
+                continue;
+            let name = d.tok.text;
+            let want: isize = if (name == "[]=") 3 else 2;
+            let given = fn_params(d).len;
+            if (given != want) {
+                error(c, d.tok, tformat("`operator %` takes % parameters, found %", name, want, given));
+                continue;
+            }
+            if (is_template(d))
+                continue; // its types are known per call
+            let t = decl_type(c, d);
+            if (t.kind != .Fn)
+                continue;
+            let any_own = false;
+            for (pt in t.params)
+                any_own = any_own || user_type(pt) || (pt.kind == .Ptr && user_type(pt.elem));
+            if (!any_own)
+                error(c, d.tok, tformat("`operator %` needs a struct, union or enum among its parameters: `%` on built-in types keeps its meaning",
+                                        name, name));
+        }
+    }
+}
+
 // `area(r: Rect) -> f64`
 fn describe_fn(c: *Checker, f: *Node) -> string {
     if (is_template(f)) // as written: show(x: $T)
@@ -153,7 +306,7 @@ fn describe_fn(c: *Checker, f: *Node) -> string {
     let t = decl_type(c, f);
     let out: [..]u8;
     out.allocator = context.temp_allocator;
-    print_to(&out, "%(", f.tok.text);
+    print_to(&out, "%{}%(", if (is_operator_fn(f)) "operator " else "", f.tok.text);
     let params = fn_params(f);
     let k = 0;
     for (i in 0..params.len) {
@@ -170,6 +323,106 @@ fn describe_fn(c: *Checker, f: *Node) -> string {
 }
 
 #scope_file
+
+// `area`, or `operator +`
+fn shown_name(f: *Node) -> string {
+    return if (is_operator_fn(f)) tformat("operator %", f.tok.text) else f.tok.text;
+}
+
+// none of `candidates` takes `args`: an error, and a note on each saying why
+fn report_no_fit(c: *Checker, at: Token, candidates: []*Node, args: []*Node) {
+    error(c, at, tformat("no `%` takes these arguments: (%)", shown_name(candidates[0]), arg_types(c, args)));
+    for (f in candidates)
+        note(c, f.tok, tformat("`%`: %", describe_fn(c, f), why_not(c, f, args)));
+}
+
+// a struct, union or enum: what an operator can be given a meaning for
+fn user_type(t: *Type) -> bool {
+    return (t.kind == .Struct && !t.is_tuple) || t.kind == .Union || t.kind == .Enum;
+}
+
+fn struct_or_union(t: *Type) -> bool { return (t.kind == .Struct && !t.is_tuple) || t.kind == .Union; }
+
+fn members(set: *Node) -> []*Node {
+    if (set.kind is .Overloads{fns})
+        return fns;
+    let one = new([]*Node, 1, context.temp_allocator);
+    one[0] = set;
+    return one;
+}
+
+// does one of the functions in `set` take `args`?
+fn fits_any(c: *Checker, at: Token, set: *Node, args: []*Node) -> bool {
+    for (f in visible_candidates(c, at, members(set))) {
+        let _, fits = rank_call(c, f, args);
+        if (fits)
+            return true;
+    }
+    return false;
+}
+
+// the arguments of an `operator []` or `[]=` call: the object, or `&`
+// it when the function takes a pointer, the index, and the value; false
+// when the object isn't a struct, union or enum, or none fits
+fn index_args(c: *Checker, set: *Node, at: Token, object: *Node, index: *Node, value: *Node) -> ([]*Node, bool) {
+    let none: []*Node;
+    if (set == null)
+        return none, false;
+    let ot = check_expr(c, object, null);
+    if (!user_type(ot))
+        return none, false;
+    check_expr(c, index, null);
+    if (value != null)
+        check_expr(c, value, null);
+    let count: isize = if (value != null) 3 else 2;
+    for (by_pointer in .[false, true]) {
+        let first = object;
+        if (by_pointer) {
+            if (!is_place(object))
+                continue;
+            first = new_node(object.tok, .Unary(.AddressOf, object));
+            first.color = object.color;
+            check_expr(c, first, null);
+        }
+        let args = new([]*Node, count);
+        args[0], args[1] = first, index;
+        if (value != null)
+            args[2] = value;
+        if (fits_any(c, at, set, args))
+            return args, true;
+    }
+    return none, false;
+}
+
+// can `n` be read twice without running anything twice: names, fields,
+// `p.*`, and indexes by those
+fn without_effects(n: *Node) -> bool {
+    switch (n.kind) {
+    case .Identifier, .Number, .Char, .Bool: return true;
+    case .Grouped{inner}: return without_effects(inner);
+    case .Member{object}: return without_effects(object);
+    case .Deref{pointer}: return without_effects(pointer);
+    case .Index{object, index}: return without_effects(object) && without_effects(index);
+    default: return false;
+    }
+}
+
+fn op_of(compound: string) -> string { return compound[..compound.len - 1]; }
+
+fn compound_op(compound: string) -> BinaryOp {
+    return switch (compound) {
+    case "+=": .Add;
+    case "-=": .Sub;
+    case "*=": .Mul;
+    case "/=": .Div;
+    case "%=": .Mod;
+    case "&=": .BitAnd;
+    case "|=": .BitOr;
+    case "^=": .BitXor;
+    case "<<=": .Shl;
+    default: .Shr;
+    };
+}
 
 // a generic candidate: a parameter its type parameters appear in takes an
 // argument of that shape (rank 6); the others rank as usual
@@ -257,7 +510,7 @@ fn type_fits(c: *Checker, pattern: *Node, t: *Type) -> bool {
 fn describe_template(f: *Node) -> string {
     let out: [..]u8;
     out.allocator = context.temp_allocator;
-    print_to(&out, "%(", f.tok.text);
+    print_to(&out, "%(", shown_name(f));
     let params = fn_params(f);
     for (i in 0..params.len) {
         if (i > 0)
@@ -321,14 +574,16 @@ fn visible_candidates(c: *Checker, at: Token, fns: []*Node) -> [..]*Node {
         if (caller == null || caller.inserted_by != null || f.owner == caller || exported(f))
             array_add(&out, f);
     // a function of the caller's own module hides an imported one with the
-    // same parameters: your names win
+    // same parameters: your names win. A generic one's parameters aren't
+    // types until a call, so it neither hides nor is hidden (and typing
+    // its declaration here would leave its instances broken).
     let kept: [..]*Node;
     kept.allocator = context.temp_allocator;
     for (f in out) {
         let hidden = false;
-        if (caller != null && f.owner != caller) {
+        if (caller != null && f.owner != caller && !is_template(f)) {
             for (g in out) {
-                if (g.owner != caller)
+                if (g.owner != caller || is_template(g))
                     continue;
                 let a, b = decl_type(c, f), decl_type(c, g);
                 hidden = hidden || (a.kind == .Fn && b.kind == .Fn && same_params(a, b));

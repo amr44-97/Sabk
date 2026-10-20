@@ -291,7 +291,7 @@ fn import_decl(p: *Parser) -> *Node {
 fn fn_decl(p: *Parser) -> *Node {
     let is_extern = eat(p, .Extern);
     expect(p, .Fn, "`fn` after `extern`");
-    let name = expect(p, .Identifier, "a function name");
+    let name = if (at_operator_name(p)) operator_name(p) else expect(p, .Identifier, "a function name");
     let params: [..]*Node;
     let variadic = false;
 
@@ -352,10 +352,18 @@ fn fn_decl(p: *Parser) -> *Node {
     // fn sum(xs: []i64) -> i64 #no_bounds_check { ... }: its indexing and
     // slicing aren't checked (unless the build says always)
     // These come in any order, before `#expand`.
-    let format, nodiscard, no_bounds_check = false, false, false;
+    let format, nodiscard, no_bounds_check, symmetric = false, false, false, false;
     let no_checks: Token;
     while (true) {
-        if (at_directive(p, "format")) {
+        if (at_directive(p, "symmetric")) {
+            // fn operator *(v: Vec2, k: f64) #symmetric: also k * v
+            let hash = next(p);
+            next(p);
+            symmetric = true;
+            if (params.len != 2)
+                fail(p, hash, tformat("`#symmetric` takes a function's two parameters either way round; `%` has %",
+                                      name.text, params.len));
+        } else if (at_directive(p, "format")) {
             next(p);
             next(p);
             format = true;
@@ -402,6 +410,8 @@ fn fn_decl(p: *Parser) -> *Node {
     }
     let fun = new_node(name, .Fn(params, result, body, is_extern, is_macro,
                                  variadic, format, nodiscard, no_bounds_check));
+    if (symmetric && fun.kind is .Fn{symmetric: &s})
+        s.* = true;
     for (d in defaults) {
         if (d == null)
             continue;
@@ -434,6 +444,34 @@ fn declared_results(p: *Parser, defaults: *[..]*Node) -> *Node {
     if (items.len == 1)
         return items[0];
     return new_node(if (grouped) open else items[0].tok, .TypeTuple(items));
+}
+
+// `operator +`: a function named by an operator it gives a meaning to
+fn at_operator_name(p: *Parser) -> bool {
+    return at(p, .Identifier) && peek(p).text == "operator" && !at(p, .LParen, 1);
+}
+
+// the operator after `operator`, as the function's name: `+`, `==`,
+// `[]`, `[]=` (one token, written without spaces)
+fn operator_name(p: *Parser) -> Token {
+    next(p); // operator
+    let t = next(p);
+    switch (t.kind) {
+    case .Plus, .Minus, .Star, .Slash, .Percent, .Amp, .Pipe, .Caret, .Shl, .Shr, .EqualEq, .BangEq:
+        return t;
+    case .LBracket:
+        let close = expect(p, .RBracket, "`]` in `operator []`");
+        let name = joined(t, close);
+        if (at(p, .Equal) && peek(p).text.ptr == close.text.ptr + 1)
+            name = joined(name, next(p)); // []=
+        if (name.text.len != 2 && name.text.len != 3)
+            fail(p, t, "write `operator []` or `operator []=` without spaces");
+        return name;
+    default:
+        fail(p, t, tformat("`operator %` can't be given a meaning; the ones that can are + - * / %% & | ^ << >> == != [] []=",
+                           t.text));
+        return t;
+    }
 }
 
 // a generic declaration's ($A, $B)

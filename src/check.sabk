@@ -419,6 +419,7 @@ fn prepare(c: *Checker) {
 fn check_program(c: *Checker) -> bool {
     prepare(c);
     check_overload_sets(c); // before any call picks among them
+    check_operators(c);
     for (d in root_list(c.res.prelude))
         check_top(c, d);
     for (m in c.res.modules) {

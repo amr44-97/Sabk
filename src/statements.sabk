@@ -15,6 +15,7 @@
 #import "expressions";
 #import "generics";
 #import "narrowing";
+#import "overloads";
 
 fn check_cond(c: *Checker, n: *Node) {
     let t = check_expr(c, n, null);
@@ -763,6 +764,11 @@ fn check_assign(c: *Checker, n: *Node) {
         check_assign_values(c, n);
         return;
     }
+    // m[i] = v with an `operator []=`: a call
+    if (n.decl != null && n.tok.text == "=" && operator_index_assign(c, n)) {
+        check_stmt(c, n);
+        return;
+    }
     if (value.kind is .Values{items}) {
         error(c, items[1].tok, tformat("one target, but %", count_values(items.len)));
         check_expr(c, target, null);
@@ -770,7 +776,19 @@ fn check_assign(c: *Checker, n: *Node) {
             check_expr(c, item, null);
         return;
     }
+    let indexed = target.kind.tag == .Index;
     let t = check_expr(c, target, null);
+    if (indexed && target.kind.tag == .Call && n.tok.text == "=") { // `operator []` took it
+        error(c, n.tok, "there's no `operator []=` for this: `operator []` only reads; declare `fn operator []=(x: *T, i: I, value: V)` to assign");
+        return;
+    }
+    // a += b with an `operator +`: a = a + b
+    if (n.decl != null && n.tok.text != "=") {
+        if (operator_compound(c, n, t))
+            return; // reported
+        if (n.kind is .Assign{value: v})
+            value = v;
+    }
     let vt = check_expr(c, value, t);
     if (t.kind == .Error || vt.kind == .Error)
         return;

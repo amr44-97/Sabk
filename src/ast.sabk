@@ -73,8 +73,9 @@ enum NodeKind {
        is_extern: bool, is_macro: bool, variadic: bool, format: bool,
        nodiscard: bool, no_bounds_check: bool,
        type_params: []*Node = .[],           // the $Ts in params' types
-       result_defaults: []*Node = .[]),      // -> (i64, ParseError = .None): one per
+       result_defaults: []*Node = .[],       // -> (i64, ParseError = .None): one per
                                              // written result, null where there's none
+       symmetric: bool = false),             // #symmetric: two parameters, either order
     Param(declared: *Node, value: *Node, is_type: bool, variadic: bool),
     Struct(fields: []*Node, type_params: []*Node, is_union: bool),
     Field(declared: *Node, value: *Node),

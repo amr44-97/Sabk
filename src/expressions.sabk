@@ -472,7 +472,11 @@ fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
         n.cval = inner.cval;
 
     case .Binary:
-        t = check_binary(c, n);
+        let done = false; // an `operator +` took it
+        if (n.decl != null)
+            t, done = operator_binary(c, n, expected);
+        if (!done)
+            t = check_binary(c, n);
     case .Unary, .Deref:
         t = check_unary(c, n);
     case .Member:
@@ -480,7 +484,11 @@ fn check_expr(c: *Checker, n: *Node, expected: *Type) -> *Type {
     case .Call:
         t = check_call(c, n, expected);
     case .Index:
-        t = check_index(c, n);
+        let done = false; // an `operator []` took it
+        if (n.decl != null)
+            t, done = operator_index(c, n, expected);
+        if (!done)
+            t = check_index(c, n);
     case .Slice:
         t = check_slice(c, n);
     case .StructInit:
@@ -665,6 +673,136 @@ fn unify(c: *Checker, n: *Node, lhs: *Node, rhs: *Node) -> *Type {
     explain_pointer_index(c, lhs);
     explain_pointer_index(c, rhs);
     return c.types.error;
+}
+
+fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
+    let callee: *Node = null;
+    if (n.kind is .Call{callee: e})
+        callee = e;
+
+    // a tagged enum's value: Expr.Number(1), or .Number(1) where an Expr
+    // is expected
+    if (callee.kind is .Member{object} && callee.decl != null && callee.decl.kind.tag == .Variant &&
+        is_decl_of_type(object.decl)) {
+        if (is_template(object.decl)) {
+            error(c, callee.tok, generic_variant_hint(object.decl, callee.tok.text));
+            check_items_for_error(c, n);
+            return c.types.error;
+        }
+        let t = decl_type(c, object.decl);
+        object.ty = t;
+        if (t.is_tagged)
+            return variant_value(c, n, t, callee.tok.text, n);
+    }
+    if (callee.kind.tag == .EnumShorthand && expected != null && expected.is_tagged) {
+        let name = callee.tok.text;
+        return variant_value(c, n, expected, if (starts_with(name, ".")) name[1..] else name, n);
+    }
+
+    // several functions of this name: the arguments pick one, already
+    // checked for it
+    let picked = false;
+    if (callee.decl != null && callee.decl.kind is .Overloads{fns}) {
+        let chosen = pick_overload(c, n, callee, fns);
+        if (chosen == null)
+            return c.types.error;
+        callee.decl = chosen;
+        picked = true;
+    }
+
+    // a declared function, whose defaults (and type parameters) are known
+    let fun: *Node = if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl else null;
+    if (fun != null)
+        pack_variadic(c, n, fun); // a `..xs` left over is reported when it's checked
+    let args = call_args(n);
+
+    let t: *Type = null;
+    if (fun != null && is_template(fun)) {
+        // the value arguments' types decide the type parameters; `.{...}`,
+        // `.Red` and `[...]` wait for the instance to say what they are (a
+        // `[...]` decides itself when nothing else does)
+        for (i in 0..args.len)
+            if (!is_type_arg(fun, i) && !is_contextual(args[i]) && !is_open_literal(args[i]) &&
+                (!picked || args[i].ty == null)) // checked to pick the function
+                check_expr(c, args[i], null);
+        if (!check_arg_count(c, n, fun, fn_params(fun).len, false))
+            return c.types.error;
+        let instance = instantiate_call(c, n, fun, expected);
+        if (instance == null)
+            return c.types.error;
+        n.decl = instance; // the code generator calls the instance
+        fun = instance;
+        t = instance.ty;
+        callee.ty = t;
+        let k = 0;
+        for (i in 0..args.len) {
+            if (is_type_arg(fun, i))
+                continue;
+            if (args[i].ty == null && (is_contextual(args[i]) || is_open_literal(args[i])))
+                check_expr(c, args[i], if (k < t.params.len) t.params[k] else null);
+            k++;
+        }
+    } else {
+        if (fun != null)
+            c.extern_callee = callee;
+        t = check_expr(c, callee, null);
+        c.extern_callee = null;
+        // each argument is checked expecting its parameter's type; past the
+        // parameters of a variadic function there's none, and when the
+        // callee is broken the arguments only get checked for their own
+        // errors
+        for (i in 0..args.len) {
+            let want = c.types.error;
+            if (t.kind == .Fn)
+                want = if (i < t.params.len) t.params[i] else null;
+            if (!picked || args[i].ty == null) // checked to pick the function
+                check_expr(c, args[i], want);
+        }
+        if (t.kind == .Error)
+            return t;
+        if (t.kind != .Fn) {
+            error(c, callee.tok, tformat("% isn't a function, its type is %", q(callee.tok.text), qt(t)));
+            return c.types.error;
+        }
+        check_arg_count(c, n, fun, t.params.len, t.is_variadic);
+    }
+
+    // the defaults this call uses, checked the first time an instance needs
+    // them (a non-generic function's are checked with its signature)
+    if (fun != null && fun.generic != null) {
+        let params = fn_params(fun);
+        for (i in args.len..params.len) {
+            let p = params[i];
+            let value = value_of(p);
+            if (value == null || value.ty != null)
+                continue;
+            let saved = c.current_instance;
+            c.current_instance = fun;
+            check_expr(c, value, p.ty);
+            coerce(c, value, p.ty);
+            c.current_instance = saved;
+        }
+    }
+
+    let param = 0; // index into the value parameters, t.params
+    for (i in 0..args.len) {
+        let arg = args[i];
+        if (is_type_arg(fun, i))
+            continue;
+        if (param < t.params.len) {
+            coerce(c, arg, t.params[param]);
+            param++;
+        } else if (arg.ty.kind == .UntypedString) {
+            coerce(c, arg, ptr_to(&c.types, c.types.u8)); // C varargs want C strings
+        } else if (arg.ty.kind == .UntypedInt && arg.cval.kind == .Int && fits(arg.cval.i, c.types.i32)) {
+            coerce(c, arg, c.types.i32); // C's int, so `printf("%d", 5)` works
+        } else {
+            default_type(c, arg);
+        }
+    }
+    if (fun != null && fun.kind is .Fn{format: true})
+        check_format_call(c, n, fun);
+    return t.ret;
 }
 
 #scope_file
@@ -1329,136 +1467,6 @@ fn call_args(n: *Node) -> []*Node {
     if (n.kind is .Call{args})
         return args;
     return .[];
-}
-
-fn check_call(c: *Checker, n: *Node, expected: *Type) -> *Type {
-    let callee: *Node = null;
-    if (n.kind is .Call{callee: e})
-        callee = e;
-
-    // a tagged enum's value: Expr.Number(1), or .Number(1) where an Expr
-    // is expected
-    if (callee.kind is .Member{object} && callee.decl != null && callee.decl.kind.tag == .Variant &&
-        is_decl_of_type(object.decl)) {
-        if (is_template(object.decl)) {
-            error(c, callee.tok, generic_variant_hint(object.decl, callee.tok.text));
-            check_items_for_error(c, n);
-            return c.types.error;
-        }
-        let t = decl_type(c, object.decl);
-        object.ty = t;
-        if (t.is_tagged)
-            return variant_value(c, n, t, callee.tok.text, n);
-    }
-    if (callee.kind.tag == .EnumShorthand && expected != null && expected.is_tagged) {
-        let name = callee.tok.text;
-        return variant_value(c, n, expected, if (starts_with(name, ".")) name[1..] else name, n);
-    }
-
-    // several functions of this name: the arguments pick one, already
-    // checked for it
-    let picked = false;
-    if (callee.decl != null && callee.decl.kind is .Overloads{fns}) {
-        let chosen = pick_overload(c, n, callee, fns);
-        if (chosen == null)
-            return c.types.error;
-        callee.decl = chosen;
-        picked = true;
-    }
-
-    // a declared function, whose defaults (and type parameters) are known
-    let fun: *Node = if (callee.decl != null && callee.decl.kind.tag == .Fn) callee.decl else null;
-    if (fun != null)
-        pack_variadic(c, n, fun); // a `..xs` left over is reported when it's checked
-    let args = call_args(n);
-
-    let t: *Type = null;
-    if (fun != null && is_template(fun)) {
-        // the value arguments' types decide the type parameters; `.{...}`,
-        // `.Red` and `[...]` wait for the instance to say what they are (a
-        // `[...]` decides itself when nothing else does)
-        for (i in 0..args.len)
-            if (!is_type_arg(fun, i) && !is_contextual(args[i]) && !is_open_literal(args[i]) &&
-                (!picked || args[i].ty == null)) // checked to pick the function
-                check_expr(c, args[i], null);
-        if (!check_arg_count(c, n, fun, fn_params(fun).len, false))
-            return c.types.error;
-        let instance = instantiate_call(c, n, fun, expected);
-        if (instance == null)
-            return c.types.error;
-        n.decl = instance; // the code generator calls the instance
-        fun = instance;
-        t = instance.ty;
-        callee.ty = t;
-        let k = 0;
-        for (i in 0..args.len) {
-            if (is_type_arg(fun, i))
-                continue;
-            if (args[i].ty == null && (is_contextual(args[i]) || is_open_literal(args[i])))
-                check_expr(c, args[i], if (k < t.params.len) t.params[k] else null);
-            k++;
-        }
-    } else {
-        if (fun != null)
-            c.extern_callee = callee;
-        t = check_expr(c, callee, null);
-        c.extern_callee = null;
-        // each argument is checked expecting its parameter's type; past the
-        // parameters of a variadic function there's none, and when the
-        // callee is broken the arguments only get checked for their own
-        // errors
-        for (i in 0..args.len) {
-            let want = c.types.error;
-            if (t.kind == .Fn)
-                want = if (i < t.params.len) t.params[i] else null;
-            if (!picked || args[i].ty == null) // checked to pick the function
-                check_expr(c, args[i], want);
-        }
-        if (t.kind == .Error)
-            return t;
-        if (t.kind != .Fn) {
-            error(c, callee.tok, tformat("% isn't a function, its type is %", q(callee.tok.text), qt(t)));
-            return c.types.error;
-        }
-        check_arg_count(c, n, fun, t.params.len, t.is_variadic);
-    }
-
-    // the defaults this call uses, checked the first time an instance needs
-    // them (a non-generic function's are checked with its signature)
-    if (fun != null && fun.generic != null) {
-        let params = fn_params(fun);
-        for (i in args.len..params.len) {
-            let p = params[i];
-            let value = value_of(p);
-            if (value == null || value.ty != null)
-                continue;
-            let saved = c.current_instance;
-            c.current_instance = fun;
-            check_expr(c, value, p.ty);
-            coerce(c, value, p.ty);
-            c.current_instance = saved;
-        }
-    }
-
-    let param = 0; // index into the value parameters, t.params
-    for (i in 0..args.len) {
-        let arg = args[i];
-        if (is_type_arg(fun, i))
-            continue;
-        if (param < t.params.len) {
-            coerce(c, arg, t.params[param]);
-            param++;
-        } else if (arg.ty.kind == .UntypedString) {
-            coerce(c, arg, ptr_to(&c.types, c.types.u8)); // C varargs want C strings
-        } else if (arg.ty.kind == .UntypedInt && arg.cval.kind == .Int && fits(arg.cval.i, c.types.i32)) {
-            coerce(c, arg, c.types.i32); // C's int, so `printf("%d", 5)` works
-        } else {
-            default_type(c, arg);
-        }
-    }
-    if (fun != null && fun.kind is .Fn{format: true})
-        check_format_call(c, n, fun);
-    return t.ret;
 }
 
 fn is_type_arg(fun: *Node, i: isize) -> bool {

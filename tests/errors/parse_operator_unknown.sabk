@@ -1,0 +1,2 @@
+// only these operators can be given a meaning
+fn operator <(a: i64, b: i64) -> bool { return true; }
