@@ -1,0 +1,274 @@
+// Makes a function's IR smaller once it's lowered, for the VM and every
+// backend at once. The lowering writes each value into a temporary of its
+// own and copies it where it goes; these passes undo what that costs:
+// - a temporary written and then only copied, by the next instruction,
+//   into its place: the instruction writes the place itself
+// - a return right after a return
+// - slots nothing uses any more, dropped from the table (the frame keeps
+//   its layout)
+// Instructions are taken out, not changed in place, and the jumps are
+// renumbered.
+
+#import "std/array";
+#import "std/map";
+#import "vm";
+
+fn ir_optimize(vm: *Vm, f: *VmFunction) {
+    let keep = new([]bool, f.code.len, context.temp_allocator);
+    for (k in 0..keep.len)
+        keep[k] = true;
+    forward_writes(vm, f, keep);
+    single_returns(f, keep);
+    compact(f, keep);
+    drop_unused_slots(vm, f);
+}
+
+#scope_file
+
+// one operand of an instruction: `size` bytes at offset `at` (0 for an
+// address taken, which counts as a use), read or written
+struct Use {
+    at: u32;
+    size: u32;
+    write: bool;
+}
+
+fn uses(f: *VmFunction, i: VmInstr, out: *[..]Use) {
+    out.len = 0;
+    let k = kind_size(i.kind);
+    switch (i.op) {
+    case .Const: array_add(out, Use.{ .at = i.a, .size = k, .write = true });
+    case .Zero, .Fill: array_add(out, Use.{ .at = i.a, .size = i.imm as u32, .write = true });
+    case .Move:
+        array_add(out, Use.{ .at = i.a, .size = i.imm as u32, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = i.imm as u32 });
+    case .AddrFrame:
+        array_add(out, Use.{ .at = i.a, .size = 8, .write = true });
+        array_add(out, Use.{ .at = i.b });
+    case .Addr: array_add(out, Use.{ .at = i.a, .size = 8, .write = true });
+    case .Load:
+        array_add(out, Use.{ .at = i.a, .size = i.imm as u32, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = 8 });
+    case .Store:
+        array_add(out, Use.{ .at = i.a, .size = 8 });
+        array_add(out, Use.{ .at = i.b, .size = i.imm as u32 });
+    case .PtrAdd:
+        array_add(out, Use.{ .at = i.a, .size = 8, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = 8 });
+        array_add(out, Use.{ .at = i.c, .size = 8 });
+    case .PtrOffset:
+        array_add(out, Use.{ .at = i.a, .size = 8, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = 8 });
+    case .Bin:
+        let op = i.sub as VmBin;
+        array_add(out, Use.{ .at = i.a, .size = k, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = k });
+        array_add(out, Use.{ .at = i.c, .size = if (op == .Shl || op == .Shr) 8 else k });
+    case .Cmp:
+        array_add(out, Use.{ .at = i.a, .size = 1, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = k });
+        array_add(out, Use.{ .at = i.c, .size = k });
+    case .Un:
+        array_add(out, Use.{ .at = i.a, .size = k, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = k });
+    case .Conv:
+        array_add(out, Use.{ .at = i.a, .size = k, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = kind_size(i.sub as VmKind) });
+    case .Jz, .Jnz: array_add(out, Use.{ .at = i.b, .size = 1 });
+    case .Call:
+        let call = &f.calls[i.imm];
+        if (call.callee == null)
+            array_add(out, Use.{ .at = call.fn_slot, .size = 8 });
+        for (arg in call.args)
+            array_add(out, Use.{ .at = arg.slot, .size = arg.size });
+        if (call.ret_size > 0)
+            array_add(out, Use.{ .at = call.ret_slot, .size = call.ret_size, .write = true });
+    case .Ret:
+        if (f.ret_size > 0)
+            array_add(out, Use.{ .at = f.ret_offset, .size = f.ret_size });
+    case .CheckIndex:
+        array_add(out, Use.{ .at = i.b, .size = 8 });
+        array_add(out, Use.{ .at = i.c, .size = 8 });
+    case .CheckSlice:
+        array_add(out, Use.{ .at = i.a, .size = 8 });
+        array_add(out, Use.{ .at = i.b, .size = 8 });
+        array_add(out, Use.{ .at = i.c, .size = 8 });
+    case .CheckNull, .NonNull: array_add(out, Use.{ .at = i.b, .size = 8 });
+    case .MemZero:
+        array_add(out, Use.{ .at = i.b, .size = 8 });
+        array_add(out, Use.{ .at = i.c, .size = 8 });
+    case .StrEq:
+        array_add(out, Use.{ .at = i.a, .size = 1, .write = true });
+        array_add(out, Use.{ .at = i.b, .size = 16 });
+        array_add(out, Use.{ .at = i.c, .size = 16 });
+    case .Jmp, .Fail:
+    }
+}
+
+// the slot the offset `at` is in, or -1
+fn slot_of(f: *VmFunction, at: u32) -> isize {
+    let lo: isize = 0;
+    let hi = f.slots.len;
+    while (lo < hi) {
+        let mid = (lo + hi) / 2;
+        if (f.slots[mid].offset <= at)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo == 0)
+        return -1;
+    let s = f.slots[lo - 1];
+    let room = if (s.size == 0) 1 else s.size;
+    return if (at < s.offset + room) lo - 1 else -1;
+}
+
+// how many operands use each slot (the parameters and the result count)
+fn use_counts(f: *VmFunction) -> []i32 {
+    let counts = new([]i32, f.slots.len, context.temp_allocator);
+    let ops: [..]Use;
+    ops.allocator = context.temp_allocator;
+    for (i in f.code) {
+        uses(f, i, &ops);
+        for (u in ops) {
+            let s = slot_of(f, u.at);
+            if (s >= 0)
+                counts[s]++;
+        }
+    }
+    for (p in f.param_offsets) {
+        let s = slot_of(f, p);
+        if (s >= 0)
+            counts[s] += 100; // written by the call
+    }
+    if (f.ret_size > 0) {
+        let s = slot_of(f, f.ret_offset);
+        if (s >= 0)
+            counts[s] += 100;
+    }
+    return counts;
+}
+
+fn jump_targets(f: *VmFunction) -> []bool {
+    let targets = new([]bool, f.code.len + 1, context.temp_allocator);
+    for (i in f.code)
+        if (i.op == .Jmp || i.op == .Jz || i.op == .Jnz)
+            targets[i.imm as isize] = true;
+    return targets;
+}
+
+// the operand an instruction writes its value to, and how many bytes: a
+// Move's source can be forwarded only into one of these
+fn written(f: *VmFunction, i: VmInstr) -> (u32, u32, bool) {
+    switch (i.op) {
+    case .Const, .Un, .Bin: return i.a, kind_size(i.kind), true;
+    case .Conv: return i.a, kind_size(i.kind), true;
+    case .Cmp, .StrEq: return i.a, 1, true;
+    case .AddrFrame, .Addr, .PtrAdd, .PtrOffset: return i.a, 8, true;
+    case .Zero, .Fill, .Load, .Move: return i.a, i.imm as u32, true;
+    case .Call:
+        let call = &f.calls[i.imm];
+        return call.ret_slot, call.ret_size, call.ret_size > 0;
+    default: return 0, 0, false;
+    }
+}
+
+fn retarget(f: *VmFunction, i: *VmInstr, to: u32) {
+    if (i.op == .Call)
+        f.calls[i.imm].ret_slot = to;
+    else
+        i.a = to;
+}
+
+// the slots whose address is taken: memory a pointer can reach
+fn addressed(f: *VmFunction) -> []bool {
+    let taken = new([]bool, f.slots.len, context.temp_allocator);
+    for (i in f.code) {
+        if (i.op == .AddrFrame) {
+            let s = slot_of(f, i.b);
+            if (s >= 0)
+                taken[s] = true;
+        }
+    }
+    return taken;
+}
+
+// `t = <value>; x = t` with t a temporary nothing else uses: `x = <value>`,
+// unless x's bytes could be what the value is read from, which the copy
+// through t kept apart: a move from x's own slot, or a load through a
+// pointer that can reach x
+fn forward_writes(vm: *Vm, f: *VmFunction, keep: []bool) {
+    let counts = use_counts(f);
+    let targets = jump_targets(f);
+    let taken = addressed(f);
+    for (pc in 1..f.code.len) {
+        let move = f.code[pc];
+        if (move.op != .Move || targets[pc] || !keep[pc - 1])
+            continue;
+        let at, size, forwardable = written(f, f.code[pc - 1]);
+        if (!forwardable || at != move.b || size != move.imm as u32)
+            continue;
+        let s = slot_of(f, at);
+        if (s < 0 || f.slots[s].offset != at || f.slots[s].size != size || f.slots[s].name.len > 0 || counts[s] != 2)
+            continue;
+        let writer = f.code[pc - 1];
+        let to = slot_of(f, move.a);
+        if (writer.op == .Move && slot_of(f, writer.b) == to)
+            continue;
+        if (writer.op == .Load && to >= 0 && taken[to])
+            continue;
+        retarget(f, &f.code[pc - 1], move.a);
+        keep[pc] = false;
+        counts[s] = 0;
+    }
+    _ = vm;
+}
+
+// a return right after a return (the one ending every function) that
+// nothing jumps to
+fn single_returns(f: *VmFunction, keep: []bool) {
+    let targets = jump_targets(f);
+    for (pc in 1..f.code.len)
+        if (f.code[pc].op == .Ret && f.code[pc - 1].op == .Ret && keep[pc - 1] && !targets[pc])
+            keep[pc] = false;
+}
+
+// the kept instructions, with the jumps renumbered (a jump to one taken out
+// goes to the next one kept)
+fn compact(f: *VmFunction, keep: []bool) {
+    let new_pc = new([]isize, f.code.len + 1, context.temp_allocator);
+    let n: isize = 0;
+    for (pc in 0..f.code.len) {
+        new_pc[pc] = n;
+        if (keep[pc])
+            n++;
+    }
+    new_pc[f.code.len] = n;
+    if (n == f.code.len)
+        return;
+    let out: isize = 0;
+    for (pc in 0..f.code.len) {
+        if (!keep[pc])
+            continue;
+        let i = f.code[pc];
+        if (i.op == .Jmp || i.op == .Jz || i.op == .Jnz)
+            i.imm = new_pc[i.imm as isize] as u64;
+        f.code[out] = i;
+        out++;
+    }
+    f.code.len = n;
+}
+
+// the slots no operand uses any more (the frame's offsets don't change)
+fn drop_unused_slots(vm: *Vm, f: *VmFunction) {
+    let counts = use_counts(f);
+    let out: isize = 0;
+    for (s in 0..f.slots.len) {
+        if (counts[s] == 0)
+            continue;
+        f.slots[out] = f.slots[s];
+        out++;
+    }
+    f.slots.len = out;
+    _ = vm;
+}

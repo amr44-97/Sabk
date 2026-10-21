@@ -2,26 +2,20 @@ fn main (frame 248, align 8)
      0 *Context             ctx
      8 i32                  return
     16 fn(i32) -> i32       f
-    24 *void                -
     32 fn(i32) -> i32 #c_call g
-    40 *void                -
     48 string               s
     64 string               -
     80 *TypeInfo            info
-    88 *void                -
     96 usize                n
    104 *void                -
-   112 usize                -
    120 *void                -
    128 i32                  -
    132 i32                  -
-   136 i32                  -
    140 i32                  -
    144 *void                -
    152 i64                  -
    160 u64                  -
    168 *void                -
-   176 i32                  -
    180 i32                  -
    184 i32                  -
    188 i32                  -
@@ -34,47 +28,38 @@ fn main (frame 248, align 8)
    224 *void                -
    232 isize                -
    240 i32                  -
-   244 i32                  -
-     0: t24 = &fn helper                             ; 11:13
-     1: f = t24 (8)                                  ; 11:13
-     2: t40 = &c fn on_c                             ; 12:13
-     3: g = t40 (8)                                  ; 12:13
-     4: t64 = &"tab\x09here \"quoted\"\n\x01 and a long t..." ; 13:13
-     5: t64+8 = u64.57                               ; 13:13
-     6: s = t64 (16)                                 ; 13:13
-     7: t88 = &type_info(i32)                        ; 14:16
-     8: info = t88 (8)                               ; 14:16
-     9: t104 = &"abc"                                ; 15:20
-    10: t112 = call strlen(t104)                     ; 15:20
-    11: n = t112 (8)                                 ; 15:20
-    12: t120 = &global counter                       ; 16:5
-    13: t128 = load 4 [t120]                         ; 16:5
-    14: t132 = i32.1                                 ; 16:18
-    15: t136 = call [f](ctx, t132)                   ; 16:18
-    16: t140 = t136 (4)                              ; 16:18
-    17: t144 = &global table                         ; 16:23
-    18: t152 = i64.2                                 ; 16:29
-    19: t160 = t152.i64 as u64                       ; 16:29
-    20: t168 = t144 + t160 * 4                       ; 16:28
-    21: t176 = load 4 [t168]                         ; 16:28
-    22: t180 = t176 (4)                              ; 16:28
-    23: t184 = t140 +.i32 t180                       ; 16:21
-    24: t188 = t128 +.i32 t184                       ; 16:28
-    25: store 4 [t120] = t188                        ; 16:28
-    26: t192 = &global counter                       ; 17:12
-    27: t200 = load 4 [t192]                         ; 17:12
-    28: t204 = n.u64 as i32                          ; 17:23
-    29: t208 = t200 +.i32 t204                       ; 17:20
-    30: t212 = s+8.i64 as i32                        ; 17:36
-    31: t216 = t208 +.i32 t212                       ; 17:33
-    32: check info != null                           ; 17:58
-    33: t224 = info + 24                             ; 17:58
-    34: t232 = load 8 [t224]                         ; 17:58
-    35: t240 = t232.i64 as i32                       ; 17:53
-    36: t244 = t216 +.i32 t240                       ; 17:50
-    37: return = t244 (4)                            ; 17:53
-    38: return                                       ; 17:53
-    39: return                                       ; 17:53
+     0: f = &fn helper                               ; 11:13
+     1: g = &c fn on_c                               ; 12:13
+     2: t64 = &"tab\x09here \"quoted\"\n\x01 and a long t..." ; 13:13
+     3: t64+8 = u64.57                               ; 13:13
+     4: s = t64 (16)                                 ; 13:13
+     5: info = &type_info(i32)                       ; 14:16
+     6: t104 = &"abc"                                ; 15:20
+     7: n = call strlen(t104)                        ; 15:20
+     8: t120 = &global counter                       ; 16:5
+     9: t128 = load 4 [t120]                         ; 16:5
+    10: t132 = i32.1                                 ; 16:18
+    11: t140 = call [f](ctx, t132)                   ; 16:18
+    12: t144 = &global table                         ; 16:23
+    13: t152 = i64.2                                 ; 16:29
+    14: t160 = t152.i64 as u64                       ; 16:29
+    15: t168 = t144 + t160 * 4                       ; 16:28
+    16: t180 = load 4 [t168]                         ; 16:28
+    17: t184 = t140 +.i32 t180                       ; 16:21
+    18: t188 = t128 +.i32 t184                       ; 16:28
+    19: store 4 [t120] = t188                        ; 16:28
+    20: t192 = &global counter                       ; 17:12
+    21: t200 = load 4 [t192]                         ; 17:12
+    22: t204 = n.u64 as i32                          ; 17:23
+    23: t208 = t200 +.i32 t204                       ; 17:20
+    24: t212 = s+8.i64 as i32                        ; 17:36
+    25: t216 = t208 +.i32 t212                       ; 17:33
+    26: check info != null                           ; 17:58
+    27: t224 = info + 24                             ; 17:58
+    28: t232 = load 8 [t224]                         ; 17:58
+    29: t240 = t232.i64 as i32                       ; 17:53
+    30: return = t216 +.i32 t240                     ; 17:50
+    31: return                                       ; 17:53
 
 fn strlen #foreign
 
@@ -83,12 +68,9 @@ fn helper (frame 24, align 8)
      8 i32                  x
     12 i32                  return
     16 i32                  -
-    20 i32                  -
      0: t16 = i32.1                                  ; 8:39
-     1: t20 = x +.i32 t16                            ; 8:37
-     2: return = t20 (4)                             ; 8:39
-     3: return                                       ; 8:39
-     4: return                                       ; 8:39
+     1: return = x +.i32 t16                         ; 8:37
+     2: return                                       ; 8:39
 
 fn on_c (frame 16, align 8)
      0 i32                  x
@@ -97,7 +79,6 @@ fn on_c (frame 16, align 8)
      0: t8 = &default context                        ; 9:4
      1: return = x (4)                               ; 9:41
      2: return                                       ; 9:41
-     3: return                                       ; 9:41
 
 data "tab\x09here \"quoted\"\n\x01 and a long t..." (58 bytes)
 

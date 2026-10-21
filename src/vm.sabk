@@ -29,6 +29,7 @@
 #import "comptime";
 #import "lower";
 #import "ir";
+#import "ir_opt";
 
 // how a scalar is stored, which picks the arithmetic; vm_ffi.c knows the
 // order
@@ -1395,6 +1396,7 @@ fn compile(vm: *Vm, f: *VmFunction) -> bool {
         f.frame_size, f.ret_offset, f.ret_size = 0, 0, 0;
         return false;
     }
+    ir_optimize(vm, f);
     if (verify_ir) {
         let why = ir_verify(vm, f);
         if (why.len > 0) {
