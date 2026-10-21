@@ -3074,6 +3074,7 @@ inspect types the same way, and produces the same text.
 ./sabk prog.sabk -o out     ... named `out`
 ./sabk --run prog.sabk      build, run, and exit with the program's exit code
 ./sabk --interp prog.sabk   run it in the compiler's interpreter: no C compiler
+./sabk --ir prog.sabk       print the IR of main and what it calls (see below)
 ./sabk --release prog.sabk  build optimized (-O2), without debug info
 ./sabk --sanitize prog.sabk build with AddressSanitizer (see Memory traps)
 ./sabk --bounds-checks off prog.sabk   no index or slice checks (on, off, always)
@@ -3253,6 +3254,27 @@ expected output):
 
 A test the interpreter can't run says so with a `// no-interp: why` line,
 which `tests/run.sh --interp` skips.
+
+**The IR.** What the interpreter runs is the IR that backends other than
+C will be written from: each function is a frame of typed slots (its
+parameters and variables by name, `ctx` for the context, `return` for the
+result, temporaries as `t` and their offset) and instructions on them.
+`--ir` prints it for `main` and every function it calls, which is for
+working on the compiler, not a format to rely on:
+
+```
+fn sum (frame 136, align 8)
+     0 *Context             ctx
+     8 []i64                xs
+    32 i64                  total
+    ...
+     4: t80 = t72 <.u64 t56+8                        ; 4:15
+     5: if !t80 jump 16                              ; 4:15
+```
+
+`--verify-ir` checks each function's IR as it's made: that every operand is
+inside a slot, and that a value an instruction reads or writes as a scalar
+is one of that size and kind there (the test suite always passes it).
 
 ### C interop: libraries and `#foreign`
 

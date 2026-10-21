@@ -1,0 +1,29 @@
+// control flow as jumps: a switch, a defer at each exit, a failure passed
+// on with or_return, and a shift (whose count is a u64)
+enum Shape { Circle, Square, Line }
+enum Bad: Error { Negative }
+
+fn sides(s: Shape) -> i32 {
+    return switch (s) {
+    case .Circle: 0;
+    case .Square: 4;
+    default: 1;
+    };
+}
+
+fn checked(n: i32) -> (i32, Bad) {
+    if (n < 0) return 0, .Negative;
+    return n << 2, .None;
+}
+
+fn twice(n: i32) -> (i32, Bad) {
+    let count = 0;
+    defer count = 1;
+    let v = checked(n) or_return;
+    return v * 2, .None;
+}
+
+fn main() -> i32 {
+    let v, _ = twice(sides(.Square));
+    return v;
+}

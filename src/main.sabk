@@ -26,6 +26,7 @@
 #import "token";
 #import "types";
 #import "vm";
+#import "ir";
 
 // the VM's way to C, and libffi
 #run configure();
@@ -37,7 +38,7 @@ fn configure() {
 
 fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32 #foreign libc;
 
-enum Mode { Build, Run, Interp, EmitC, Check, Tokens, Ast, Resolve, Types }
+enum Mode { Build, Run, Interp, Ir, EmitC, Check, Tokens, Ast, Resolve, Types }
 
 /* ------------------------------------------------------------------ stats */
 
@@ -242,6 +243,9 @@ fn print_usage(exe: string) -> i32 {
     eprint("  --emit-c     print the generated C (--lines: with #line\n");
     eprint("               directives mapping it to the Sabk lines)\n");
     eprint("  --check      only check the program for errors\n");
+    eprint("  --ir         print the IR of main and what it calls (the VM's\n");
+    eprint("               bytecode, what backends are written from)\n");
+    eprint("  --verify-ir  check each function's IR as it's made (for tests)\n");
     eprint("  --quiet      don't print how long each phase took (it's on stderr\n");
     eprint("               after every compile)\n");
     eprint("  --stats      also print the functions written and the generic\n");
@@ -292,6 +296,10 @@ fn main() -> i32 {
             mode = .Run;
         } else if (arg == "--interp") {
             mode = .Interp;
+        } else if (arg == "--ir") {
+            mode = .Ir;
+        } else if (arg == "--verify-ir") {
+            verify_ir = true;
         } else if (arg == "--emit-c") {
             mode = .EmitC;
         } else if (arg == "--check") {
@@ -417,6 +425,8 @@ fn main() -> i32 {
 
     if (mode == .Interp)
         return interpret(&r, &c);
+    if (mode == .Ir)
+        return print_ir(&r, &c);
 
     let g = make_codegen(&r, &c);
     g.line_directives = mode != .EmitC || lines;
@@ -489,6 +499,25 @@ fn interpret(r: *Resolver, c: *Checker) -> i32 {
         c.vm = make_vm(c);
     print_stats(c); // the compile's times, then the program's output
     return vm_run_program(c.vm, main_fn);
+}
+
+// --ir: the IR of main and of what it calls, as the VM compiles them
+fn print_ir(r: *Resolver, c: *Checker) -> i32 {
+    let main_fn = program_main(r, c);
+    if (main_fn == null)
+        return 1;
+    if (c.vm == null)
+        c.vm = make_vm(c);
+    let functions = vm_lower_program(c.vm, main_fn);
+    if (functions.len == 0)
+        return 1;
+    for (f in functions) {
+        if (f.native)
+            println("fn % #foreign\n", f.name);
+        else
+            println(ir_dump(c.vm, f));
+    }
+    return 0;
 }
 
 fn dump_tokens(tokens: []Token) {

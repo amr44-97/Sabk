@@ -58,7 +58,8 @@ fn lower_function(l: *Lower) {
     let t = fun.ty;
     let top = Scope.{ .kind = .Fn };
     if (!is_extern) {
-        let slot = alloc_slot(l, 8, 8);
+        let slot = alloc(l, ptr_to(&l.c.types, l.c.context_type));
+        l.f.slots[l.f.slots.len - 1].name = "ctx";
         array_add(&l.f.param_offsets, slot);
         top.ctx_slot = slot;
     }
@@ -67,10 +68,11 @@ fn lower_function(l: *Lower) {
             continue;
         let slot = alloc(l, p.ty);
         array_add(&l.f.param_offsets, slot);
-        map_put(&l.locals, p, slot);
+        local(l, p, slot);
     }
     if (t.ret.kind != .Void) {
         l.f.ret_offset = alloc(l, t.ret);
+        l.f.slots[l.f.slots.len - 1].name = "return"; // a keyword: no variable has the name
         l.f.ret_size = vm_size_of(l.vm, t.ret);
     }
     array_add(&l.scopes, top);
@@ -219,17 +221,58 @@ fn failed(l: *Lower) -> bool { return l.vm.failed; }
 
 /* --------------------------------------------------------------- emitting */
 
-fn alloc_slot(l: *Lower, size: u32, align: u32) -> u32 {
+// a new slot of type `t` in the frame, recorded in its slots; every slot
+// is new (none is reused), so their offsets only grow
+fn alloc(l: *Lower, t: *Type) -> u32 {
+    let size = vm_size_of(l.vm, t);
+    let align = vm_align_of(l.vm, t);
     let a = if (align == 0) 1 else align;
     if (a > l.f.frame_align)
         l.f.frame_align = a;
     l.f.frame_size = (l.f.frame_size + a - 1) / a * a;
     let slot = l.f.frame_size;
     l.f.frame_size += if (size != 0) size else 1;
+    array_add(&l.f.slots, VmSlot.{ .offset = slot, .size = size, .ty = concrete(l.vm, t) });
     return slot;
 }
 
-fn alloc(l: *Lower, t: *Type) -> u32 { return alloc_slot(l, vm_size_of(l.vm, t), vm_align_of(l.vm, t)); }
+// a temporary holding a scalar of kind `k`
+fn kind_slot(l: *Lower, k: VmKind) -> u32 { return alloc(l, kind_type(l, k)); }
+
+fn kind_type(l: *Lower, k: VmKind) -> *Type {
+    let ts = &l.c.types;
+    return switch (k) {
+    case .I8: ts.i8;
+    case .I16: ts.i16;
+    case .I32: ts.i32;
+    case .I64: ts.i64;
+    case .U8: ts.u8;
+    case .U16: ts.u16;
+    case .U32: ts.u32;
+    case .U64: ts.u64;
+    case .F32: ts.f32;
+    case .F64: ts.f64;
+    case .Bool: ts.bool_;
+    case .Ptr: ts.rawptr;
+    };
+}
+
+// `slot` is the variable `d`: its slot takes its name (a slot already
+// named, or a place inside one, keeps what it has)
+fn local(l: *Lower, d: *Node, slot: u32) {
+    map_put(&l.locals, d, slot);
+    let lo: isize = 0;
+    let hi = l.f.slots.len;
+    while (lo < hi) {
+        let mid = (lo + hi) / 2;
+        if (l.f.slots[mid].offset < slot)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo < l.f.slots.len && l.f.slots[lo].offset == slot && l.f.slots[lo].name.len == 0)
+        l.f.slots[lo].name = d.tok.text;
+}
 
 fn at(l: *Lower, t: Token) { array_add(&l.f.locs, t); }
 
@@ -260,8 +303,7 @@ fn patch(l: *Lower, jump: isize) { l.f.code[jump].imm = here(l) as u64; }
 fn patch_to(l: *Lower, jump: isize, to: isize) { l.f.code[jump].imm = to as u64; }
 
 fn konst(l: *Lower, kind: VmKind, bits: u64) -> u32 {
-    let size = kind_size(kind);
-    let slot = alloc_slot(l, size, size);
+    let slot = kind_slot(l, kind);
     emit(l, .{ .op = .Const, .kind = kind, .a = slot, .imm = bits });
     return slot;
 }
@@ -279,13 +321,13 @@ fn zero(l: *Lower, dst: u32, size: u32) {
 }
 
 fn addr_frame(l: *Lower, slot: u32) -> u32 {
-    let p = alloc_slot(l, 8, 8);
+    let p = kind_slot(l, .Ptr);
     emit(l, .{ .op = .AddrFrame, .a = p, .b = slot });
     return p;
 }
 
 fn addr(l: *Lower, address: *void) -> u32 {
-    let p = alloc_slot(l, 8, 8);
+    let p = kind_slot(l, .Ptr);
     emit(l, .{ .op = .Addr, .a = p, .imm = address as usize });
     return p;
 }
@@ -304,13 +346,13 @@ fn store(l: *Lower, ptr: u32, src: u32, size: u32) {
 fn offset(l: *Lower, ptr: u32, by: u64) -> u32 {
     if (by == 0)
         return ptr;
-    let p = alloc_slot(l, 8, 8);
+    let p = kind_slot(l, .Ptr);
     emit(l, .{ .op = .PtrOffset, .a = p, .b = ptr, .imm = by });
     return p;
 }
 
 fn ptr_add(l: *Lower, ptr: u32, index_u64: u32, scale: u64) -> u32 {
-    let p = alloc_slot(l, 8, 8);
+    let p = kind_slot(l, .Ptr);
     emit(l, .{ .op = .PtrAdd, .a = p, .b = ptr, .c = index_u64, .imm = scale });
     return p;
 }
@@ -335,7 +377,7 @@ fn fail_with(l: *Lower, t: Token, message: string) {
 fn move_pointer(l: *Lower, p: u32, pt: *Type, count: u32, ct: *Type, back: bool) -> u32 {
     let index = to_u64(l, count, ct);
     if (back) {
-        let negated = alloc_slot(l, 8, 8);
+        let negated = kind_slot(l, .I64);
         emit(l, .{ .op = .Un, .kind = .I64, .sub = VmUn.Neg as u8, .a = negated, .b = index });
         index = negated;
     }
@@ -346,8 +388,8 @@ fn move_pointer(l: *Lower, p: u32, pt: *Type, count: u32, ct: *Type, back: bool)
 fn pointer_arithmetic(l: *Lower, lhs: *Node, rhs: *Node, is_sub: bool, a: u32, b: u32) -> u32 {
     let lt, rt = type_of(l, lhs), type_of(l, rhs);
     if (lt.kind == .Ptr && rt.kind == .Ptr) {
-        let bytes = alloc_slot(l, 8, 8);
-        let count = alloc_slot(l, 8, 8);
+        let bytes = kind_slot(l, .I64);
+        let count = kind_slot(l, .I64);
         bin(l, .I64, .Sub, bytes, a, b);
         bin(l, .I64, .Div, count, bytes, konst(l, .I64, vm_size_of(l.vm, lt.elem) as u64));
         return count;
@@ -360,8 +402,7 @@ fn pointer_arithmetic(l: *Lower, lhs: *Node, rhs: *Node, is_sub: bool, a: u32, b
 fn conv(l: *Lower, slot: u32, from: VmKind, to: VmKind) -> u32 {
     if (from == to)
         return slot;
-    let size = kind_size(to);
-    let out = alloc_slot(l, size, size);
+    let out = kind_slot(l, to);
     emit(l, .{ .op = .Conv, .kind = to, .sub = from as u8, .a = out, .b = slot });
     return out;
 }
@@ -558,7 +599,7 @@ fn stmt(l: *Lower, n: *Node) {
                 let at_offset: u32 = if (t.is_tuple) t.fields[slots[i]].offset as u32 else 0;
                 move(l, slot, results + at_offset, vm_size_of(l.vm, d.ty));
             }
-            map_put(&l.locals, d, slot);
+            local(l, d, slot);
         }
 
     case .ExprStmt{value}:
@@ -683,7 +724,7 @@ fn local_decl(l: *Lower, n: *Node, value: *Node, uninit: bool) {
         move(l, slot, expr(l, value), size);
     else
         move(l, slot, default_value(l, n.ty), size);
-    map_put(&l.locals, n, slot);
+    local(l, n, slot);
 }
 
 // break and continue, labeled or not, with a value or not
@@ -834,8 +875,7 @@ fn step(l: *Lower, target: *Node, down: bool) {
     }
     let one: u32 = 0;
     if (is_float(k)) {
-        let size = kind_size(k);
-        one = alloc_slot(l, size, size);
+        one = kind_slot(l, k);
         emit(l, .{ .op = .Const, .kind = k, .a = one, .imm = float_bits(k, 1.0) });
     } else {
         one = konst(l, k, 1);
@@ -854,7 +894,7 @@ fn for_in(l: *Lower, n: *Node) {
     let var_type = n.ty;
     let var_size = vm_size_of(l.vm, var_type);
     let var = alloc(l, var_type);
-    map_put(&l.locals, n, var);
+    local(l, n, var);
     let k = kind_of(var_type);
     if (range_end != null) {
         // for (i in a..b): the end is evaluated once, first
@@ -862,7 +902,7 @@ fn for_in(l: *Lower, n: *Node) {
         move(l, end, expr(l, range_end), var_size);
         move(l, var, expr(l, iterable), var_size);
         let top = here(l);
-        let in_range = alloc_slot(l, 1, 1);
+        let in_range = kind_slot(l, .Bool);
         cmp(l, k, .Lt, in_range, var, end);
         let exit = jump(l, .Jz, in_range);
         push_loop(l, n, false);
@@ -891,13 +931,13 @@ fn for_in(l: *Lower, n: *Node) {
     }
     let i = u64_slot(l, 0);
     if (n.kind is .ForIn{index} && index != null)
-        map_put(&l.locals, index, i); // the count is the index
+        local(l, index, i); // the count is the index
     let top = here(l);
-    let more = alloc_slot(l, 1, 1);
+    let more = kind_slot(l, .Bool);
     cmp(l, .U64, .Lt, more, i, len);
     let exit = jump(l, .Jz, more);
     if (t.kind == .Slice || t.kind == .DynArray) {
-        let p = alloc_slot(l, 8, 8);
+        let p = kind_slot(l, .Ptr);
         move(l, p, base, 8);
         base = p;
     }
@@ -1067,9 +1107,9 @@ fn match_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32, fails: *[..]isize) {
     if (is_type_pattern(p)) { // IoError(e): the Error came from IoError
         let et = type_pattern_enum(p);
         let e = load(l, at_slot, t);
-        let high = alloc_slot(l, 8, 8);
+        let high = kind_slot(l, .U64);
         bin(l, .U64, .Shr, high, e, u64_slot(l, 32));
-        let same = alloc_slot(l, 1, 1);
+        let same = kind_slot(l, .Bool);
         let id = map_get(&l.c.error_ids, et) or_else 0;
         cmp(l, .U64, .Eq, same, high, u64_slot(l, id as u64));
         array_add(fails, jump(l, .Jz, same));
@@ -1087,7 +1127,7 @@ fn match_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32, fails: *[..]isize) {
     let tag_type = t.fields[0].ty;
     let variant, items, _ = pattern_parts(p);
     let head = if (variant != null) variant else p;
-    let same = alloc_slot(l, 1, 1);
+    let same = kind_slot(l, .Bool);
     cmp(l, kind_of(tag_type), .Eq, same, load(l, at_slot, tag_type), expr(l, head));
     array_add(fails, jump(l, .Jz, same));
     if (variant == null)
@@ -1103,7 +1143,7 @@ fn match_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32, fails: *[..]isize) {
             continue;
         }
         let ptr = load(l, where, it);
-        let set = alloc_slot(l, 1, 1);
+        let set = kind_slot(l, .Bool);
         cmp(l, .U64, .Ne, set, ptr, u64_slot(l, 0));
         array_add(fails, jump(l, .Jz, set));
         match_at(l, inner_pattern, it.elem, ptr, fails);
@@ -1119,7 +1159,7 @@ fn bind_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32) {
         for (item in items) {
             if (item.kind.tag == .FieldPattern || item.tok.text == "_")
                 continue;
-            map_put(&l.locals, item, error_as(l, load(l, at_slot, t), et));
+            local(l, item, error_as(l, load(l, at_slot, t), et));
         }
         return;
     }
@@ -1143,19 +1183,19 @@ fn bind_at(l: *Lower, p: *Node, pt: *Type, at_slot: u32) {
             move(l, slot, where, 8);
         else
             move(l, slot, load(l, where, it), vm_size_of(l.vm, it));
-        map_put(&l.locals, item, slot);
+        local(l, item, slot);
     }
 }
 
 // a bool slot: does the value in `tag` (of type `values`) match `p`?
 fn matches(l: *Lower, p: *Node, values: *Type, tag: u32) -> u32 {
     let k = kind_of(values);
-    let same = alloc_slot(l, 1, 1);
+    let same = kind_slot(l, .Bool);
     if (values.is_string) {
         emit(l, .{ .op = .StrEq, .a = same, .b = tag, .c = expr(l, p) });
     } else if (p.kind is .Range{lo, hi, inclusive}) {
-        let low = alloc_slot(l, 1, 1);
-        let high = alloc_slot(l, 1, 1);
+        let low = kind_slot(l, .Bool);
+        let high = kind_slot(l, .Bool);
         cmp(l, k, .Ge, low, tag, expr(l, lo));
         cmp(l, k, if (inclusive) .Le else .Lt, high, tag, expr(l, hi));
         bin(l, .Bool, .And, same, low, high);
@@ -1192,7 +1232,7 @@ fn bind(l: *Lower, p: *Node, tagged: *Type, value: u32, base: u32, by_ref: bool)
             move(l, slot, load(l, offset(l, base, at_offset as u64), bt), vm_size_of(l.vm, bt));
         else
             move(l, slot, value + at_offset, vm_size_of(l.vm, bt));
-        map_put(&l.locals, b, slot);
+        local(l, b, slot);
     }
 }
 
@@ -1272,7 +1312,7 @@ fn convert(l: *Lower, value: u32, from: *Type, to: *Type) -> u32 {
         let tag = if (from.is_tagged) value + from.fields[0].offset as u32 else value;
         let low = conv(l, conv(l, tag, kind_of(tag_type), .U32), .U32, .U64);
         let out = u64_slot(l, 0); // its 0 is Error's 0
-        let nonzero = alloc_slot(l, 1, 1);
+        let nonzero = kind_slot(l, .Bool);
         cmp(l, .U64, .Ne, nonzero, low, u64_slot(l, 0));
         let skip = jump(l, .Jz, nonzero);
         let id = map_get(&l.c.error_ids, from) or_else 0;
@@ -1348,7 +1388,7 @@ fn inner(l: *Lower, n: *Node) -> u32 {
         case .Lt, .Gt, .LtEq, .GtEq, .EqEq, .NotEq:
             let operand = type_of(l, lhs);
             let values = ordered(l, .[lhs, rhs]);
-            let result = alloc_slot(l, 1, 1);
+            let result = kind_slot(l, .Bool);
             if (operand.is_string) { // by their contents
                 emit(l, .{ .op = .StrEq, .a = result, .b = values[0], .c = values[1] });
                 if (op == .NotEq)
@@ -1359,7 +1399,7 @@ fn inner(l: *Lower, n: *Node) -> u32 {
             return result;
         case .And, .Or:
             // the right side only runs when it decides the result
-            let result = alloc_slot(l, 1, 1);
+            let result = kind_slot(l, .Bool);
             move(l, result, expr(l, lhs), 1);
             let skip = jump(l, if (op == .And) .Jz else .Jnz, result);
             move(l, result, expr(l, rhs), 1);
@@ -1458,7 +1498,7 @@ fn inner(l: *Lower, n: *Node) -> u32 {
             let option = is_option(l.c, from);
             let flag = if (option) values + from.fields[0].offset as u32 else values;
             let k = kind_of(if (option) from.fields[0].ty else from);
-            missing = alloc_slot(l, 1, 1);
+            missing = kind_slot(l, .Bool);
             cmp(l, k, .Eq, missing, flag, konst(l, k, 0));
             if (option)
                 value = values + from.fields[1].offset as u32;
@@ -1486,7 +1526,7 @@ fn inner(l: *Lower, n: *Node) -> u32 {
             value = expr(l, e);
         if (has_subpatterns(p) || is_type_pattern(p)) { // patterns inside the variant, or IoError(e)
             let at_slot = if (by_ref) base else addr_frame(l, value);
-            let same = alloc_slot(l, 1, 1);
+            let same = kind_slot(l, .Bool);
             let fails: [..]isize;
             match_at(l, p, subject, at_slot, &fails);
             bind_at(l, p, subject, at_slot);
@@ -1566,7 +1606,7 @@ fn failed_slot(l: *Lower, values: u32, t: *Type) -> u32 {
         flag += flag_type.fields[0].offset as u32;
         flag_type = flag_type.fields[0].ty;
     }
-    let out = alloc_slot(l, 1, 1);
+    let out = kind_slot(l, .Bool);
     let k = kind_of(flag_type);
     if (flag_type.kind == .Bool)
         emit(l, .{ .op = .Un, .kind = .Bool, .sub = VmUn.Not as u8, .a = out, .b = flag });
@@ -1732,7 +1772,7 @@ fn error_as(l: *Lower, e: u32, et: *Type) -> u32 {
 // fails unless the tag in slot `tag` is x.V's variant
 fn check_variant(l: *Lower, n: *Node, tag: u32, tagged: *Type) {
     let k = kind_of(tagged.fields[0].ty);
-    let same = alloc_slot(l, 1, 1);
+    let same = kind_slot(l, .Bool);
     cmp(l, k, .Eq, same, tag, konst(l, k, n.decl.cval.i.lo));
     let fine = jump(l, .Jnz, same);
     fail_with(l, n.tok, tformat("the value isn't .%", n.decl.tok.text));
@@ -1930,7 +1970,7 @@ fn array_literal(l: *Lower, n: *Node, t: *Type) -> u32 {
         emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = items.len as u64 });
         return s;
     }
-    let backing = alloc_slot(l, elem_size * (items.len as u32), vm_align_of(l.vm, t.elem));
+    let backing = alloc(l, array_type_of(&l.c.types, t.elem, items.len as u64));
     for (i in 0..items.len)
         move(l, backing + (i as u32) * elem_size, expr(l, items[i]), elem_size);
     move(l, s, addr_frame(l, backing), 8);
@@ -2059,10 +2099,10 @@ fn new_(l: *Lower, n: *Node, t: *Type) -> u32 {
     zero(l, result, vm_size_of(l.vm, t));
     if (is_slice) {
         count = to_u64(l, expr(l, first), type_of(l, first));
-        let is_empty = alloc_slot(l, 1, 1);
+        let is_empty = kind_slot(l, .Bool);
         cmp(l, .U64, .Eq, is_empty, count, u64_slot(l, 0));
         empty_jump = jump(l, .Jnz, is_empty);
-        size = alloc_slot(l, 8, 8);
+        size = kind_slot(l, .U64);
         bin(l, .U64, .Mul, size, count, u64_slot(l, elem_size as u64));
     } else {
         size = u64_slot(l, if (elem_size != 0) elem_size as u64 else 1);
@@ -2078,7 +2118,7 @@ fn new_(l: *Lower, n: *Node, t: *Type) -> u32 {
     array_add(&site.args, ArgSlot.{ .slot = u64_slot(l, vm_align_of(l.vm, of) as u64), .size = 8 });
     array_add(&site.args, ArgSlot.{ .slot = u64_slot(l, 0), .size = 8 });
     array_add(&site.args, ArgSlot.{ .slot = u64_slot(l, 0), .size = 8 });
-    site.ret_slot = alloc_slot(l, 8, 8);
+    site.ret_slot = kind_slot(l, .Ptr);
     site.ret_size = 8;
     let ret_slot = site.ret_slot;
     array_add(&l.f.calls, site);
@@ -2132,7 +2172,7 @@ fn fill(l: *Lower, base: u32, count: u32, value: u32, t: *Type) {
     let size = vm_size_of(l.vm, t);
     let i = u64_slot(l, 0);
     let top = here(l);
-    let more = alloc_slot(l, 1, 1);
+    let more = kind_slot(l, .Bool);
     cmp(l, .U64, .Lt, more, i, count);
     let exit = jump(l, .Jz, more);
     store(l, ptr_add(l, base, i, size as u64), value, size);

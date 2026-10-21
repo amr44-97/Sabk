@@ -1,0 +1,18 @@
+// a function's frame: typed slots, named for its parameters and variables
+// (ctx, the hidden context; return, the result), temporaries as t<offset>;
+// a struct's fields, a slice's len and an array's elements are places
+// inside a slot (+offset)
+struct Point { x: i32; y: i32; }
+
+fn sum(xs: []i64) -> i64 {
+    let total: i64 = 0;
+    for (x in xs) total += x;
+    return total;
+}
+
+fn main() -> i32 {
+    let p = Point.{ .x = 3, .y = 4 };
+    let q = &p;
+    let n = sum(.[1, 2, 3]);
+    return q.y * 10 + (n as i32) / p.x;
+}

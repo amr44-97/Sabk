@@ -27,6 +27,7 @@
 #import "check";
 #import "comptime";
 #import "lower";
+#import "ir";
 
 // how a scalar is stored, which picks the arithmetic; vm_ffi.c knows the
 // order
@@ -100,6 +101,15 @@ struct VmCallSite {
     ffi_args: [..]*void;
 }
 
+// a piece of a frame: what it holds, by its Sabk type, and a variable's
+// name. An operand can be inside one (a slice's len at offset 8).
+struct VmSlot {
+    offset: u32;
+    size: u32;
+    ty: *Type;
+    name: string;           // a variable's or parameter's; "" for a temporary
+}
+
 struct VmFunction {
     decl: *Node;
     name: string;
@@ -111,6 +121,9 @@ struct VmFunction {
     messages: [..]string;   // for Fail
     frame_size: u32;
     frame_align: u32;       // its most aligned slot's alignment (#align)
+    // the frame's slots, by offset. The VM runs without them; they are what
+    // a backend writing C or machine code needs to know about the frame
+    slots: [..]VmSlot;
     param_offsets: [..]u32; // the context pointer first, for Sabk code
     ret_offset: u32;
     ret_size: u32;
@@ -788,19 +801,45 @@ fn vm_bake(vm: *Vm, of_type: *Type, p: *u8, at: Token) -> *Node {
 
 /* --------------------------------------------------------------- programs */
 
+// --verify-ir: check each function's IR once it's compiled (see ir.sabk)
+let verify_ir = false;
+
+// the program's functions as the VM compiles them: main first, then what
+// it calls, as found (--ir); null and an error if one can't be compiled
+fn vm_lower_program(vm: *Vm, main_fn: *Node) -> [..]*VmFunction {
+    start_program(vm);
+    let all: [..]*VmFunction;
+    let seen: Map(*VmFunction, bool);
+    array_add(&all, vm_function_for(vm, main_fn));
+    let i: isize = 0;
+    while (i < all.len) {
+        let f = all[i];
+        i++;
+        if (f.native)
+            continue;
+        if (!compile(vm, f)) {
+            program_failure(vm);
+            all.len = 0;
+            return all;
+        }
+        for (call in f.calls) {
+            if (call.callee != null && !map_has(&seen, call.callee)) {
+                map_put(&seen, call.callee, true);
+                if (call.callee != f && call.callee != all[0])
+                    array_add(&all, call.callee);
+            }
+        }
+    }
+    return all;
+}
+
 // --interp: runs the program's `main` in the VM, as its executable would
 // run: what it prints, its exit code, and a panic as the C runtime writes
 // it ("file:line:col: panic: message", exit code 134, as abort's). What the
 // VM can't run (a C file a build script adds, a static library) is an
 // error, as in #run.
 fn vm_run_program(vm: *Vm, main_fn: *Node) -> i32 {
-    vm.program = true;
-    // the program starts from its globals' initial values, whatever #run
-    // did to them; compiled code has the old ones' addresses in it, so it
-    // is compiled again (and the context made again, from fresh globals)
-    map_clear(&vm.functions);
-    map_clear(&vm.globals);
-    vm.ctx = null;
+    start_program(vm);
     let f = vm_function_for(vm, main_fn);
     let ctx = vm_context(vm);
     let ok = !vm.failed && compile(vm, f);
@@ -829,6 +868,16 @@ fn vm_run_program(vm: *Vm, main_fn: *Node) -> i32 {
 }
 
 #scope_file
+
+fn start_program(vm: *Vm) {
+    vm.program = true;
+    // the program starts from its globals' initial values, whatever #run
+    // did to them; compiled code has the old ones' addresses in it, so it
+    // is compiled again (and the context made again, from fresh globals)
+    map_clear(&vm.functions);
+    map_clear(&vm.globals);
+    vm.ctx = null;
+}
 
 fn program_failure(vm: *Vm) -> i32 {
     let e = &vm.error;
@@ -1042,9 +1091,18 @@ fn compile(vm: *Vm, f: *VmFunction) -> bool {
         f.code.len = 0;
         f.calls.len = 0;
         f.locs.len = 0;
+        f.slots.len = 0;
         f.param_offsets.len = 0;
         f.frame_size, f.ret_offset, f.ret_size = 0, 0, 0;
         return false;
+    }
+    if (verify_ir) {
+        let why = ir_verify(vm, f);
+        if (why.len > 0) {
+            let none: Token;
+            vm_fail(vm, if (f.decl != null) f.decl.tok else none, tformat("[internal error] the IR is wrong: %", why), true);
+            return false;
+        }
     }
     f.compiled = true;
     return true;

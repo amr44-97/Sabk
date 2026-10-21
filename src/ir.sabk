@@ -1,0 +1,328 @@
+// The bytecode as an IR: what C, QBE and x64 backends will be written
+// from, beside the VM that runs it. A function's frame is a list of typed,
+// named slots (VmFunction.slots), and an instruction's operands are offsets
+// into it, at a slot or inside one (a slice's len, a struct's field).
+//
+// ir_verify checks that every operand is inside a slot and that a scalar
+// operand is a scalar of its instruction's kind there (--verify-ir, which
+// the tests use); ir_dump writes a function out (--ir).
+
+#import "std/array";
+#import "std/fmt";
+#import "std/str";
+#import "token";
+#import "types";
+#import "check";
+#import "module";
+#import "resolve";
+#import "vm";
+
+// what's wrong with `f`'s instructions, or "" if nothing is
+fn ir_verify(vm: *Vm, f: *VmFunction) -> string {
+    for (pc in 0..f.code.len) {
+        let i = f.code[pc];
+        let why = check_instr(vm, f, i);
+        if (why.len > 0)
+            return tformat("% instruction % (%): %", f.name, pc, describe(vm, f, i), why);
+    }
+    return "";
+}
+
+// `f` as text: its slots, then its instructions
+fn ir_dump(vm: *Vm, f: *VmFunction) -> string {
+    let out: [..]u8;
+    print_to(&out, "fn % (frame %, align %)\n", f.name, f.frame_size, f.frame_align);
+    for (s in f.slots)
+        print_to(&out, "  %{4} %{<20} %\n", s.offset, type_name(s.ty), if (s.name.len > 0) s.name else "-");
+    for (pc in 0..f.code.len) {
+        let i = f.code[pc];
+        let t = if (f.locs.len > 0) f.locs[i.loc] else Token.{};
+        print_to(&out, "  %{4}: %{<44} ; %:%\n", pc, describe(vm, f, i), t.line, t.column);
+    }
+    return out as string;
+}
+
+#scope_file
+
+/* ---------------------------------------------------------------- checking */
+
+// the slot holding the bytes [at, at + size), or null
+fn slot_holding(f: *VmFunction, at: u32, size: u32) -> *VmSlot {
+    let lo: isize = 0;
+    let hi = f.slots.len;
+    while (lo < hi) { // the last slot starting at or before `at`
+        let mid = (lo + hi) / 2;
+        if (f.slots[mid].offset <= at)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo == 0)
+        return null;
+    let s = &f.slots[lo - 1];
+    let room = if (s.size == 0) 1 else s.size; // a void slot still has an address
+    if (at + size > s.offset + room)
+        return null;
+    return s;
+}
+
+// the scalar at byte `at` of a value of type `t`: its type and where it
+// starts, or null if `at` is padding; a union's bytes can be any of its
+// fields', so its scalars aren't known (`opaque`)
+struct Scalar {
+    ty: *Type;
+    offset: u32;
+    opaque: bool;
+}
+
+fn scalar_at(vm: *Vm, of_type: *Type, at: u32) -> Scalar {
+    let t = concrete(vm, of_type);
+    let ts = &vm.c.types;
+    switch (t.kind) {
+    case .Int, .Float, .Bool, .Enum, .Ptr, .Rawptr, .Fn, .Null:
+        return .{ .ty = t };
+    case .Array:
+        let size = vm_size_of(vm, t.elem);
+        if (size == 0)
+            return .{};
+        let inner = scalar_at(vm, t.elem, at % size);
+        inner.offset += at / size * size;
+        return inner;
+    case .Slice: // pointer, length
+        if (at < 8)
+            return .{ .ty = ts.rawptr };
+        return .{ .ty = ts.isize, .offset = 8 };
+    case .DynArray: // pointer, length, capacity, allocator
+        if (at < 8)
+            return .{ .ty = ts.rawptr };
+        if (at < 24)
+            return .{ .ty = ts.isize, .offset = at / 8 * 8 };
+        let inner = scalar_at(vm, vm.c.allocator_type, at - 24);
+        inner.offset += 24;
+        return inner;
+    case .Struct:
+        for (fl in t.fields) {
+            let start = fl.offset as u32;
+            if (at >= start && at < start + vm_size_of(vm, fl.ty)) {
+                let inner = scalar_at(vm, fl.ty, at - start);
+                inner.offset += start;
+                return inner;
+            }
+        }
+        return .{};
+    case .Union:
+        return .{ .opaque = true };
+    default:
+        return .{};
+    }
+}
+
+// floats in float registers, everything else (integers, bools, pointers)
+// in integer ones: a kind and a type agree if their class and size do
+fn same_class(vm: *Vm, t: *Type, k: VmKind) -> bool {
+    let tk = kind_of(concrete(vm, t));
+    return is_float(tk) == is_float(k) && kind_size(tk) == kind_size(k);
+}
+
+// operand `at` holds a scalar of kind `k`
+fn scalar(vm: *Vm, f: *VmFunction, at: u32, k: VmKind, what: string) -> string {
+    let s = slot_holding(f, at, kind_size(k));
+    if (s == null)
+        return tformat("% at % isn't inside a slot", what, at);
+    let inside = scalar_at(vm, s.ty, at - s.offset);
+    if (inside.opaque)
+        return "";
+    if (inside.ty == null)
+        return tformat("% at % is padding in a %", what, at, type_name(s.ty));
+    if (inside.offset != at - s.offset)
+        return tformat("% at % is in the middle of a % (in a %)", what, at, type_name(inside.ty), type_name(s.ty));
+    if (!same_class(vm, inside.ty, k))
+        return tformat("% at % is a %, not a % (in a %)", what, at, type_name(inside.ty), k, type_name(s.ty));
+    return "";
+}
+
+// operand `at` is `size` bytes of one slot
+fn bytes(f: *VmFunction, at: u32, size: u64, what: string) -> string {
+    if (size == 0)
+        return "";
+    if (slot_holding(f, at, size as u32) == null)
+        return tformat("% (% bytes at %) isn't inside one slot", what, size, at);
+    return "";
+}
+
+fn first(a: string, b: string) -> string { return if (a.len > 0) a else b; }
+
+fn check_instr(vm: *Vm, f: *VmFunction, i: VmInstr) -> string {
+    switch (i.op) {
+    case .Const: return scalar(vm, f, i.a, i.kind, "the constant's slot");
+    case .Zero, .Fill: return bytes(f, i.a, i.imm, "what's cleared");
+    case .Move: return first(bytes(f, i.a, i.imm, "the destination"), bytes(f, i.b, i.imm, "the source"));
+    case .AddrFrame:
+        return first(scalar(vm, f, i.a, .Ptr, "the address"), bytes(f, i.b, 1, "what's addressed"));
+    case .Addr: return scalar(vm, f, i.a, .Ptr, "the address");
+    case .Load: return first(bytes(f, i.a, i.imm, "the destination"), scalar(vm, f, i.b, .Ptr, "the pointer"));
+    case .Store: return first(scalar(vm, f, i.a, .Ptr, "the pointer"), bytes(f, i.b, i.imm, "the value"));
+    case .PtrAdd:
+        return first(first(scalar(vm, f, i.a, .Ptr, "the result"), scalar(vm, f, i.b, .Ptr, "the pointer")),
+                     scalar(vm, f, i.c, .U64, "the index"));
+    case .PtrOffset: return first(scalar(vm, f, i.a, .Ptr, "the result"), scalar(vm, f, i.b, .Ptr, "the pointer"));
+    case .Bin:
+        // a shift's count is a u64 whatever the shifted value's kind
+        let op = i.sub as VmBin;
+        let count = if (op == .Shl || op == .Shr) VmKind.U64 else i.kind;
+        return first(first(scalar(vm, f, i.a, i.kind, "the result"), scalar(vm, f, i.b, i.kind, "the left side")),
+                     scalar(vm, f, i.c, count, "the right side"));
+    case .Cmp:
+        return first(first(scalar(vm, f, i.a, .Bool, "the result"), scalar(vm, f, i.b, i.kind, "the left side")),
+                     scalar(vm, f, i.c, i.kind, "the right side"));
+    case .Un: return first(scalar(vm, f, i.a, i.kind, "the result"), scalar(vm, f, i.b, i.kind, "the operand"));
+    case .Conv:
+        return first(scalar(vm, f, i.a, i.kind, "the result"), scalar(vm, f, i.b, i.sub as VmKind, "the operand"));
+    case .Jmp: return jump_target(f, i);
+    case .Jz, .Jnz: return first(scalar(vm, f, i.b, .Bool, "the condition"), jump_target(f, i));
+    case .Call:
+        let call = &f.calls[i.imm];
+        if (call.callee == null) {
+            let why = scalar(vm, f, call.fn_slot, .Ptr, "the function");
+            if (why.len > 0)
+                return why;
+        }
+        for (a in call.args) {
+            let why = bytes(f, a.slot, a.size, "an argument");
+            if (why.len > 0)
+                return why;
+        }
+        return bytes(f, call.ret_slot, call.ret_size, "the result");
+    case .Ret, .Fail: return "";
+    case .CheckIndex:
+        return first(scalar(vm, f, i.b, .U64, "the index"), scalar(vm, f, i.c, .U64, "the length"));
+    case .CheckSlice:
+        return first(first(scalar(vm, f, i.a, .U64, "the start"), scalar(vm, f, i.b, .U64, "the end")),
+                     scalar(vm, f, i.c, .U64, "the length"));
+    case .CheckNull: return scalar(vm, f, i.b, .Ptr, "the pointer");
+    case .MemZero: return first(scalar(vm, f, i.b, .Ptr, "the pointer"), scalar(vm, f, i.c, .U64, "the size"));
+    case .StrEq:
+        return first(first(scalar(vm, f, i.a, .Bool, "the result"), bytes(f, i.b, 16, "the left string")),
+                     bytes(f, i.c, 16, "the right string"));
+    }
+    return "";
+}
+
+fn jump_target(f: *VmFunction, i: VmInstr) -> string {
+    if (i.imm > f.code.len as u64)
+        return tformat("it jumps to %, past the end", i.imm);
+    return "";
+}
+
+/* ----------------------------------------------------------------- writing */
+
+// an operand: the slot's name (or `t` and its offset, for a temporary),
+// and `+n` for a place inside it
+fn operand(f: *VmFunction, at: u32) -> string {
+    let s = slot_holding(f, at, 1);
+    if (s == null)
+        return tformat("?%", at);
+    let base = if (s.name.len > 0) s.name else tformat("t%", s.offset);
+    return if (at == s.offset) base else tformat("%+%", base, at - s.offset);
+}
+
+fn kind_text(k: VmKind) -> string {
+    return switch (k) {
+    case .I8: "i8";
+    case .I16: "i16";
+    case .I32: "i32";
+    case .I64: "i64";
+    case .U8: "u8";
+    case .U16: "u16";
+    case .U32: "u32";
+    case .U64: "u64";
+    case .F32: "f32";
+    case .F64: "f64";
+    case .Bool: "bool";
+    case .Ptr: "ptr";
+    };
+}
+
+fn bin_text(op: VmBin) -> string {
+    return switch (op) {
+    case .Add: "+";
+    case .Sub: "-";
+    case .Mul: "*";
+    case .Div: "/";
+    case .Mod: "%";
+    case .And: "&";
+    case .Or: "|";
+    case .Xor: "^";
+    case .Shl: "<<";
+    case .Shr: ">>";
+    };
+}
+
+fn cmp_text(op: VmCmp) -> string {
+    return switch (op) {
+    case .Eq: "==";
+    case .Ne: "!=";
+    case .Lt: "<";
+    case .Gt: ">";
+    case .Le: "<=";
+    case .Ge: ">=";
+    };
+}
+
+// a constant's value, from its bits (the low bytes, for its kind)
+fn constant_text(k: VmKind, bits: u64) -> string {
+    let p = &bits as *u8;
+    return switch (k) {
+    case .F32: tformat("%", (p as *f32).*);
+    case .F64: tformat("%", (p as *f64).*);
+    case .I8: tformat("%", (p as *i8).*);
+    case .I16: tformat("%", (p as *i16).*);
+    case .I32: tformat("%", (p as *i32).*);
+    case .I64: tformat("%", (p as *i64).*);
+    case .Bool: if ((bits & 1) != 0) "true" else "false";
+    default: tformat("%", bits);
+    };
+}
+
+fn describe(vm: *Vm, f: *VmFunction, i: VmInstr) -> string {
+    let a, b, c = operand(f, i.a), operand(f, i.b), operand(f, i.c);
+    let k = kind_text(i.kind);
+    switch (i.op) {
+    case .Const: return tformat("% = %.%", a, k, constant_text(i.kind, i.imm));
+    case .Zero: return tformat("% = zero %", a, i.imm);
+    case .Fill: return tformat("% = undefined %", a, i.imm);
+    case .Move: return tformat("% = % (%)", a, b, i.imm);
+    case .AddrFrame: return tformat("% = &%", a, b);
+    case .Addr: return tformat("% = <address>", a);
+    case .Load: return tformat("% = load % [%]", a, i.imm, b);
+    case .Store: return tformat("store % [%] = %", i.imm, a, b);
+    case .PtrAdd: return tformat("% = % + % * %", a, b, c, i.imm);
+    case .PtrOffset: return tformat("% = % + %", a, b, i.imm);
+    case .Bin: return tformat("% = % %.% %", a, b, bin_text(i.sub as VmBin), k, c);
+    case .Cmp: return tformat("% = % %.% %", a, b, cmp_text(i.sub as VmCmp), k, c);
+    case .Un:
+        let op = switch (i.sub as VmUn) { case .Neg: "-"; case .Not: "!"; case .BitNot: "~"; };
+        return tformat("% = %.% %", a, op, k, b);
+    case .Conv: return tformat("% = %.% as %", a, b, kind_text(i.sub as VmKind), k);
+    case .Jmp: return tformat("jump %", i.imm);
+    case .Jz: return tformat("if !% jump %", b, i.imm);
+    case .Jnz: return tformat("if % jump %", b, i.imm);
+    case .Call:
+        let call = &f.calls[i.imm];
+        let args: [..]string;
+        args.allocator = context.temp_allocator;
+        for (arg in call.args)
+            array_add(&args, operand(f, arg.slot));
+        let callee = if (call.callee != null) call.callee.name else tformat("[%]", operand(f, call.fn_slot));
+        let ret = if (call.ret_size > 0) tformat("% = ", operand(f, call.ret_slot)) else "";
+        return tformat("%{}call %(%)", ret, callee, join(args, ", ", context.temp_allocator));
+    case .Ret: return "return";
+    case .CheckIndex: return tformat("check % < %", b, c);
+    case .CheckSlice: return tformat("check % <= % <= %", a, b, c);
+    case .CheckNull: return tformat("check % != null", b);
+    case .MemZero: return tformat("zero [%] %", b, c);
+    case .Fail: return tformat("fail \"%\"", f.messages[i.imm]);
+    case .StrEq: return tformat("% = % ==.string %", a, b, c);
+    }
+    return "";
+}

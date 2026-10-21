@@ -161,6 +161,7 @@ make clean      removes build/ and ./sabk
 ./sabk --run main.sabk      build and run it
 ./sabk --run main.sabk -- a b   ... with arguments
 ./sabk --interp main.sabk   run it in the interpreter, without a C compiler
+./sabk --ir main.sabk       print the IR it runs (for working on the compiler)
 ./sabk --release main.sabk  build optimized
 ./sabk --emit-c main.sabk   print the generated C
 ./sabk --check main.sabk    only check for errors

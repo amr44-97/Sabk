@@ -13,6 +13,9 @@
 #                                  ./std); a `// args: a b` line passes
 #                                  arguments
 #   errors/  sabk --emit-c file   stderr, must exit non-zero (std is ./std)
+#   ir/      sabk --ir file       stdout, the IR of main and what it calls
+#
+# Every run checks the IR the VM compiles (--verify-ir), of #run code too.
 #
 # usage: tests/run.sh [--update] [--interp] [filter]
 #   --update  rewrite the .expected files from the current output
@@ -62,15 +65,16 @@ for src in tests/*/*.sabk; do
   case "$suite" in
   lexer)  actual=$(./sabk --quiet --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
   parser) actual=$(./sabk --quiet --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  resolve) actual=$(./sabk --quiet --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  types)  actual=$(./sabk --quiet --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  warnings) actual=$(./sabk --quiet --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  errors) actual=$(./sabk --quiet --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
+  resolve) actual=$(./sabk --quiet --verify-ir --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  types)  actual=$(./sabk --quiet --verify-ir --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  warnings) actual=$(./sabk --quiet --verify-ir --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  ir)     actual=$(./sabk --quiet --verify-ir --ir --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  errors) actual=$(./sabk --quiet --verify-ir --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
   run)    # a `// args: a b c` line gives the program its arguments (quoted
           # as in a shell)
           eval "args=($(grep -m1 '^// args:' "$src" | sed 's|^// args: *||'))"
           how=$( ((interp)) && echo --interp || echo --run )
-          actual=$(./sabk --quiet "$how" --std std "$src" -- "${args[@]}" 2>&1); code=$?
+          actual=$(./sabk --quiet --verify-ir "$how" --std std "$src" -- "${args[@]}" 2>&1); code=$?
           actual+=$'\n'"[exit $code]"; ok=1 ;;
   *) echo "unknown suite: $suite"; exit 1 ;;
   esac
