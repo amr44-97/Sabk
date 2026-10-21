@@ -296,6 +296,38 @@ fn program_main(r: *Resolver, c: *Checker) -> *Node {
     return main_fn;
 }
 
+// adds what linking `lib` takes to the build (its file, or a system
+// library's name), once; false (and an error) if it can't be found
+fn link_library(r: *Resolver, c: *Checker, linked: *Map(*Node, bool), lib: *Node) -> bool {
+    if (map_has(linked, lib))
+        return true;
+    map_put(linked, lib, true);
+    let build = &c.build;
+    let path_tok: Token;
+    if (lib.kind is .Library{path})
+        path_tok = path;
+    if (lib.kind is .Library{system: true}) {
+        let name = system_link_name(lib);
+        if (name.len == 0) {
+            say(r, .Error, path_tok, tformat("a system library is named by its file, `lib` included: `#system_library \"lib%\"`",
+                                             library_text(lib)));
+            return false;
+        }
+        for (have in build.libraries)
+            if (have == name)
+                return true;
+        array_add(&build.libraries, name);
+        return true;
+    }
+    let file, shared, tried = library_file(lib, false);
+    if (file.len == 0) {
+        say(r, .Error, path_tok, tformat("can't find library `%` (looked for %)", library_text(lib), join(tried, ", ")));
+        return false;
+    }
+    array_add(if (shared) &build.shared_libraries else &build.library_files, file);
+    return true;
+}
+
 #scope_file
 
 const C_PRELUDE = #embed("runtime_start.c");
@@ -782,32 +814,8 @@ fn link_libraries(g: *CodeGen, modules: []*Module) {
 }
 
 fn link_library_of(g: *CodeGen, lib: *Node) {
-    if (map_has(&g.linked, lib))
-        return;
-    map_put(&g.linked, lib, true);
-    let build = &g.c.build;
-    let path_tok: Token;
-    if (lib.kind is .Library{path})
-        path_tok = path;
-    if (lib.kind is .Library{system: true}) {
-        let name = system_link_name(lib);
-        if (name.len == 0) {
-            gen_error(g, path_tok, tformat("a system library is named by its file, `lib` included: `#system_library \"lib%\"`",
-                                           library_text(lib)));
-            return;
-        }
-        for (have in build.libraries)
-            if (have == name)
-                return;
-        array_add(&build.libraries, name);
-        return;
-    }
-    let file, shared, tried = library_file(lib, false);
-    if (file.len == 0) {
-        gen_error(g, path_tok, tformat("can't find library `%` (looked for %)", library_text(lib), join(tried, ", ")));
-        return;
-    }
-    array_add(if (shared) &build.shared_libraries else &build.library_files, file);
+    if (!link_library(g.res, g.c, &g.linked, lib))
+        g.error_count++;
 }
 
 fn emit_fn_body(g: *CodeGen, fun: *Node) {

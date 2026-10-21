@@ -1,0 +1,771 @@
+// Writes C from the IR (the VM's bytecode, see ir.sabk): the whole program
+// as vm_program gives it, functions and data, with no syntax tree. It's the
+// second C backend, beside codegen.sabk, which it will replace once it
+// does all that one does as well; `--c-from-ir` picks it.
+//
+// The C is laid out as:
+//   the runtime's core (runtime_start.c: the C type names, panics, bounds
+//     checks), and helpers
+//   each piece of data as a packed struct of byte runs and pointers (its
+//     relocations), all declared before any is defined, since data can
+//     point at any other
+//   the program's context (made by default_context in main) and the boot
+//     one it's made from
+//   prototypes, then the functions: a C local per slot (a scalar of its
+//     type, anything else as aligned bytes), a line or two of C per
+//     instruction, jumps as gotos
+//   main
+//
+// Sabk functions call each other in a convention of their own, since only
+// this C calls them: the context pointer first, a scalar by value, an
+// aggregate as a pointer to its bytes (the callee copies them in), and an
+// aggregate result through a pointer before everything. C's functions and
+// ours that C calls (#c_call) take and return scalars only, as in the VM.
+
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/str";
+#import "ast";
+#import "module";
+#import "resolve";
+#import "token";
+#import "types";
+#import "check";
+#import "codegen";
+#import "vm";
+
+// the C for the program whose entry point is `main_fn`, or "" if errors
+// were reported
+fn generate_from_ir(r: *Resolver, c: *Checker, main_fn: *Node) -> string {
+    if (c.vm == null)
+        c.vm = make_vm(c);
+    let program = vm_program(c.vm, main_fn, true);
+    if (program.functions.len == 0)
+        return "";
+    let g = CGen.{ .vm = c.vm, .c = c, .r = r, .program = &program };
+    if (!check_natives(&g) || !link(&g))
+        return "";
+    name_all(&g);
+    let out: [..]u8;
+    append_string(&out, C_PRELUDE);
+    append_string(&out, HELPERS);
+    declare_data(&g, &out);
+    let ctx_size = vm_size_of(g.vm, c.context_type);
+    print_to(&out, "\n/* the program's context, and the one default_context() makes it in */\n");
+    print_to(&out, "static u8 rt_ctx[%] __attribute__((aligned(16)));\n", ctx_size);
+    print_to(&out, "static u8 rt_boot_ctx[%] __attribute__((aligned(16)));\n", ctx_size);
+    append_string(&out, "\n/* functions */\n");
+    for (f in program.functions)
+        print_to(&out, "%;\n", prototype(&g, f));
+    define_data(&g, &out);
+    write_errors(&g, &out, main_fn);
+    for (f in program.functions) {
+        if (!f.native)
+            write_function(&g, &out, f);
+    }
+    write_main(&g, &out, main_fn);
+    if (g.errors > 0)
+        return "";
+    return out as string;
+}
+
+#scope_file
+
+const C_PRELUDE = #embed("runtime_start.c");
+
+const HELPERS = "
+/* a float constant from its bits */
+static inline f32 rt_f32_bits(u32 b) { f32 v; __builtin_memcpy(&v, &b, 4); return v; }
+static inline f64 rt_f64_bits(u64 b) { f64 v; __builtin_memcpy(&v, &b, 8); return v; }
+";
+
+struct CGen {
+    vm: *Vm;
+    c: *Checker;
+    r: *Resolver;
+    program: *VmProgram;
+    errors: isize;
+    names: Map(*void, string);     // a function's or a piece of data's C name, by its address
+    globals: Map(string, bool);    // every name at file scope
+    // the function being written
+    f: *VmFunction;
+    slot_names: [..]string;        // by slot
+    scalar: [..]bool;              // is the slot a C scalar
+    used: Map(string, bool);       // its locals' names
+    targets: Map(isize, bool);     // the instructions jumped to
+}
+
+fn fail(g: *CGen, t: Token, message: string) {
+    say(g.r, .Error, t, message);
+    g.errors++;
+}
+
+/* ------------------------------------------------------------------ names */
+
+fn sanitized(name: string) -> string {
+    let out: [..]u8;
+    for (ch in name) {
+        let ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_';
+        array_add(&out, if (ok) ch else '_');
+    }
+    return out as string;
+}
+
+fn add_name(g: *CGen, address: *void, name: string) {
+    map_put(&g.names, address, name);
+    map_put(&g.globals, name, true);
+}
+
+// every function and piece of data its C name: f3_main, c4_strlen (a C
+// function's declaration), g5_count, s6 (a string), d7 (data), t8 (a
+// TypeInfo)
+fn name_all(g: *CGen) {
+    let n = 0;
+    for (f in g.program.functions) {
+        n++;
+        let base = if (f.decl != null) f.decl.tok.text else f.name;
+        add_name(g, f, tformat("%{}%_%", if (f.native) "c" else "f", n, sanitized(base)));
+    }
+    for (d in g.program.data) {
+        n++;
+        let name = switch (d.sym.kind) {
+        case .Global: tformat("g%_%", n, sanitized(d.sym.decl.tok.text));
+        case .String: tformat("s%", n);
+        case .Data: tformat("d%", n);
+        default: tformat("t%", n);
+        };
+        add_name(g, d.sym.address, name);
+    }
+}
+
+// the C name of what `sym` is the address of
+fn symbol_name(g: *CGen, sym: VmSymbol) -> string {
+    switch (sym.kind) {
+    case .Context: return "rt_ctx";
+    case .CFunction:
+        // a C function's declaration, or ours that C calls
+        return map_get(&g.names, vm_function_for(g.vm, sym.decl)) or_else "0 /* unknown function */";
+    default:
+        return map_get(&g.names, sym.address) or_else "0 /* unknown symbol */";
+    }
+}
+
+/* ---------------------------------------------------------------- linking */
+
+// the build API only works while compiling
+fn check_natives(g: *CGen) -> bool {
+    for (f in g.program.functions) {
+        if (f.native && is_build_function(c_symbol(f.decl))) {
+            fail(g, f.decl.tok, tformat("`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it",
+                                        f.decl.tok.text));
+            return false;
+        }
+    }
+    return true;
+}
+
+// the libraries of the C functions and variables the program uses, and
+// every `,link_always` one
+fn link(g: *CGen) -> bool {
+    let linked: Map(*Node, bool);
+    let ok = true;
+    let all: [..]*Module;
+    array_add(&all, g.r.prelude);
+    array_append(&all, g.r.modules);
+    for (m in all)
+        for (d in root_list(m))
+            if (d.kind is .Library{link_always: true})
+                ok = link_library(g.r, g.c, &linked, d) && ok;
+    for (f in g.program.functions) {
+        if (f.native) {
+            let lib = foreign_library(f.decl);
+            if (lib != null)
+                ok = link_library(g.r, g.c, &linked, lib) && ok;
+        }
+    }
+    for (d in g.program.data) {
+        if (d.external) {
+            let lib = foreign_library(d.sym.decl);
+            if (lib != null)
+                ok = link_library(g.r, g.c, &linked, lib) && ok;
+        }
+    }
+    if (!ok)
+        g.errors++;
+    return ok;
+}
+
+/* ------------------------------------------------------------------- data */
+
+fn data_align(g: *CGen, d: VmData) -> u32 {
+    if (d.ty == null)
+        return 1;
+    let a = vm_align_of(g.vm, d.ty);
+    return if (a == 0) 1 else a;
+}
+
+fn write_bytes(out: *[..]u8, bytes: []u8) {
+    let zero = true;
+    for (b in bytes)
+        if (b != 0)
+            zero = false;
+    if (zero) {
+        append_string(out, "{0}");
+        return;
+    }
+    append_string(out, "{");
+    for (k in 0..bytes.len) {
+        if (k > 0)
+            append_string(out, ",");
+        print_to(out, "%", bytes[k]);
+    }
+    append_string(out, "}");
+}
+
+// each piece of data as a packed struct: the bytes between its pointers,
+// and the pointers; declared first, since one can point at any other (and
+// at functions), and defined once everything is declared
+fn declare_data(g: *CGen, out: *[..]u8) {
+    append_string(out, "\n/* data */\n");
+    for (d in g.program.data) {
+        let name = map_get(&g.names, d.sym.address) or_else "";
+        if (d.external) {
+            print_to(out, "extern u8 %[] __asm__(\"%{}%\");\n", name, if (OS == .MacOS) "_" else "", c_symbol(d.sym.decl));
+            continue;
+        }
+        print_to(out, "struct %_t {", name);
+        let at: isize = 0;
+        let part = 0;
+        for (r in d.relocs) {
+            if (r.at as isize > at)
+                print_to(out, " u8 b%[%];", part, r.at as isize - at);
+            print_to(out, " void *r%;", part);
+            part++;
+            at = r.at as isize + 8;
+        }
+        if (at < d.bytes.len || d.bytes.len == 0)
+            print_to(out, " u8 b%[%];", part, if (d.bytes.len == 0) 1 else d.bytes.len - at);
+        print_to(out, " } __attribute__((packed));\n");
+        print_to(out, "static struct %_t % __attribute__((aligned(%)));\n", name, name, data_align(g, d));
+    }
+}
+
+fn define_data(g: *CGen, out: *[..]u8) {
+    append_string(out, "\n/* the data's values */\n");
+    for (d in g.program.data) {
+        if (d.external)
+            continue;
+        let name = map_get(&g.names, d.sym.address) or_else "";
+        print_to(out, "static struct %_t % __attribute__((aligned(%))) = {", name, name, data_align(g, d));
+        let at: isize = 0;
+        let first = true;
+        for (r in d.relocs) {
+            if (r.at as isize > at) {
+                append_string(out, if (first) " " else ", ");
+                write_bytes(out, d.bytes[at..r.at as isize]);
+                first = false;
+            }
+            append_string(out, if (first) " " else ", ");
+            print_to(out, "(u8 *)&% + %", symbol_name(g, r.target), r.addend);
+            first = false;
+            at = r.at as isize + 8;
+        }
+        if (at < d.bytes.len || d.bytes.len == 0) {
+            append_string(out, if (first) " " else ", ");
+            write_bytes(out, if (d.bytes.len == 0) d.bytes else d.bytes[at..]);
+        }
+        append_string(out, " };\n");
+    }
+}
+
+/* ------------------------------------------------------------------ types */
+
+fn ctype(k: VmKind) -> string {
+    return switch (k) {
+    case .I8: "i8";
+    case .I16: "i16";
+    case .I32: "i32";
+    case .I64: "i64";
+    case .U8: "u8";
+    case .U16: "u16";
+    case .U32: "u32";
+    case .U64: "u64";
+    case .F32: "f32";
+    case .F64: "f64";
+    case .Bool: "u8";
+    case .Ptr: "u8 *";
+    };
+}
+
+// held in a C scalar: an integer, float, bool, enum, pointer or function
+fn is_c_scalar(g: *CGen, of_type: *Type) -> bool {
+    let t = concrete(g.vm, of_type);
+    switch (t.kind) {
+    case .Int, .Float, .Bool, .Enum, .Ptr, .Rawptr, .Fn, .Null, .UntypedInt, .UntypedFloat: return true;
+    default: return false;
+    }
+}
+
+// a parameter's C type: a scalar's own, else a pointer to its bytes; for
+// C's convention (`c_abi`), a scalar's only
+fn param_type(g: *CGen, t: *Type, c_abi: bool, at: Token) -> string {
+    if (is_c_scalar(g, t))
+        return ctype(kind_of(concrete(g.vm, t)));
+    if (c_abi)
+        fail(g, at, tformat("--c-from-ir can't pass a % by value to or from C yet", type_name(t)));
+    return "const u8 *";
+}
+
+fn returns_bytes(g: *CGen, ret: *Type) -> bool {
+    let t = concrete(g.vm, ret);
+    return t.kind != .Void && vm_size_of(g.vm, t) > 0 && !is_c_scalar(g, t);
+}
+
+fn result_type(g: *CGen, ret: *Type, c_abi: bool, at: Token) -> string {
+    let t = concrete(g.vm, ret);
+    if (t.kind == .Void || vm_size_of(g.vm, t) == 0)
+        return "void";
+    if (is_c_scalar(g, t))
+        return ctype(kind_of(t));
+    if (c_abi)
+        fail(g, at, tformat("--c-from-ir can't return a % from C yet", type_name(t)));
+    return "void";
+}
+
+// a function type's C parameter list: ours with the context (and a result
+// pointer first, for an aggregate result), C's without
+fn param_list(g: *CGen, params: []*Type, ret: *Type, c_abi: bool, variadic: bool, at: Token, named: bool) -> string {
+    let parts: [..]string;
+    if (!c_abi && returns_bytes(g, ret))
+        array_add(&parts, if (named) "u8 *rt_out" else "u8 *");
+    if (!c_abi)
+        array_add(&parts, if (named) "u8 *p0" else "u8 *");
+    for (k in 0..params.len) {
+        let pt = param_type(g, params[k], c_abi, at);
+        array_add(&parts, if (named) tformat("% p%", pt, k + 1) else pt);
+    }
+    if (variadic)
+        array_add(&parts, "...");
+    if (parts.len == 0)
+        return "void";
+    return join(parts, ", ");
+}
+
+fn is_c_abi(f: *VmFunction) -> bool { return f.native || f.decl.kind is .Fn{is_extern: true}; }
+
+fn prototype(g: *CGen, f: *VmFunction) -> string {
+    let name = map_get(&g.names, f) or_else "";
+    let t = f.decl.ty;
+    let c_abi = is_c_abi(f);
+    let params = param_list(g, t.params, t.ret, c_abi, f.native && t.is_variadic, f.decl.tok, true);
+    let ret = result_type(g, t.ret, c_abi, f.decl.tok);
+    if (f.native)
+        return tformat("extern % %(%) __asm__(\"%{}%\")", ret, name, params, if (OS == .MacOS) "_" else "",
+                       c_symbol(f.decl));
+    return tformat("static % %(%)", ret, name, params);
+}
+
+/* -------------------------------------------------------------- functions */
+
+fn slot_index(f: *VmFunction, at: u32) -> isize {
+    let lo: isize = 0;
+    let hi = f.slots.len;
+    while (lo < hi) {
+        let mid = (lo + hi) / 2;
+        if (f.slots[mid].offset <= at)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo - 1;
+}
+
+// the operand at `at`, as an lvalue of kind `k`'s C type
+fn ref(g: *CGen, at: u32, k: VmKind) -> string {
+    let i = slot_index(g.f, at);
+    if (i < 0)
+        return tformat("(*(% *)0 /* no slot at % */)", ctype(k), at);
+    let s = g.f.slots[i];
+    let name = g.slot_names[i];
+    let inner = at - s.offset;
+    if (g.scalar[i] && inner == 0 && ctype(kind_of(s.ty)) == ctype(k))
+        return name;
+    if (inner == 0)
+        return tformat("(*(% *)&%)", ctype(k), name);
+    return tformat("(*(% *)((u8 *)&% + %))", ctype(k), name, inner);
+}
+
+// the address of the operand at `at`, as a u8 *
+fn addr_of(g: *CGen, at: u32) -> string {
+    let i = slot_index(g.f, at);
+    if (i < 0)
+        return "(u8 *)0";
+    let inner = at - g.f.slots[i].offset;
+    if (inner == 0)
+        return tformat("(u8 *)&%", g.slot_names[i]);
+    return tformat("((u8 *)&% + %)", g.slot_names[i], inner);
+}
+
+fn location(g: *CGen, i: VmInstr) -> string {
+    if (g.f.locs.len == 0)
+        return "\"<unknown>\"";
+    let t = g.f.locs[i.loc];
+    let m = module_of(g.r, t.text.ptr);
+    if (m == null)
+        return "\"<unknown>\"";
+    return c_string(tformat("%:%:%", m.path, t.line, t.column));
+}
+
+const RESERVED_LOCALS = .[
+    "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum", "extern",
+    "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return", "short", "signed",
+    "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void", "volatile", "while",
+    "_Bool", "_Alignof", "bool", "true", "false", "NULL", "main", "i8", "i16", "i32", "i64", "isize", "u8", "u16",
+    "u32", "u64", "usize", "f32", "f64", "rawptr", "sabk_void", "rt_out", "abort", "memset", "dprintf", "fflush",
+];
+
+// a local's C name: the variable's own where nothing else has it, else
+// with its offset; a temporary's, `_t` and its offset
+fn local_name(g: *CGen, s: VmSlot) -> string {
+    let name = if (s.name.len > 0) sanitized(s.name) else tformat("_t%", s.offset);
+    let taken = map_has(&g.used, name) || map_has(&g.globals, name) || starts_with(name, "rt_") ||
+                (name.len >= 2 && name[0] == 'p' && name[1] >= '0' && name[1] <= '9');
+    for (r in RESERVED_LOCALS)
+        if (r == name)
+            taken = true;
+    if (taken)
+        name = tformat("%_%", name, s.offset);
+    map_put(&g.used, name, true);
+    return name;
+}
+
+fn write_function(g: *CGen, out: *[..]u8, f: *VmFunction) {
+    g.f = f;
+    map_clear(&g.used);
+    map_clear(&g.targets);
+    g.slot_names.len = 0;
+    g.scalar.len = 0;
+    print_to(out, "\n/* % */\n% {\n", f.name, prototype(g, f));
+    for (s in f.slots) {
+        let name = local_name(g, s);
+        array_add(&g.slot_names, name);
+        let scalar = is_c_scalar(g, s.ty) && vm_size_of(g.vm, s.ty) == s.size;
+        array_add(&g.scalar, scalar);
+        if (scalar) {
+            print_to(out, "  % %;\n", ctype(kind_of(s.ty)), name);
+        } else {
+            let a = vm_align_of(g.vm, s.ty);
+            print_to(out, "  u8 %[%] __attribute__((aligned(%)));\n", name, if (s.size == 0) 1 else s.size,
+                     if (a == 0) 1 else a);
+        }
+    }
+    // the parameters into their slots: p0 is the context, for ours
+    let t = f.decl.ty;
+    let c_abi = is_c_abi(f);
+    for (k in 0..f.param_offsets.len) {
+        let at = f.param_offsets[k];
+        let i = slot_index(f, at);
+        let p = if (c_abi) k + 1 else k;
+        if (g.scalar[i])
+            print_to(out, "  % = p%;\n", g.slot_names[i], p);
+        else
+            print_to(out, "  __builtin_memcpy(&%, p%, %);\n", g.slot_names[i], p, f.slots[i].size);
+    }
+    for (i in f.code)
+        if (i.op == .Jmp || i.op == .Jz || i.op == .Jnz)
+            map_put(&g.targets, i.imm as isize, true);
+    for (pc in 0..f.code.len) {
+        if (map_has(&g.targets, pc))
+            print_to(out, " L%:;\n", pc);
+        write_instr(g, out, f.code[pc]);
+    }
+    if (map_has(&g.targets, f.code.len))
+        print_to(out, " L%:;\n", f.code.len);
+    append_string(out, "}\n");
+    _ = t;
+}
+
+fn bin_op(op: VmBin) -> string {
+    return switch (op) {
+    case .Add: "+";
+    case .Sub: "-";
+    case .Mul: "*";
+    case .Div: "/";
+    case .Mod: "%";
+    case .And: "&";
+    case .Or: "|";
+    case .Xor: "^";
+    case .Shl: "<<";
+    case .Shr: ">>";
+    };
+}
+
+fn cmp_op(op: VmCmp) -> string {
+    return switch (op) {
+    case .Eq: "==";
+    case .Ne: "!=";
+    case .Lt: "<";
+    case .Gt: ">";
+    case .Le: "<=";
+    case .Ge: ">=";
+    };
+}
+
+fn signed_kind(k: VmKind) -> bool { return k == .I8 || k == .I16 || k == .I32 || k == .I64; }
+
+fn write_instr(g: *CGen, out: *[..]u8, i: VmInstr) {
+    let k = i.kind;
+    let kt = ctype(k);
+    switch (i.op) {
+    case .Const:
+        let value = switch (k) {
+        case .F32: tformat("rt_f32_bits(%{}U)", i.imm & 0xFFFFFFFF);
+        case .F64: tformat("rt_f64_bits(%{}ULL)", i.imm);
+        case .Ptr: tformat("(u8 *)%{}ULL", i.imm);
+        default: tformat("(%)%{}ULL", kt, i.imm);
+        };
+        print_to(out, "  % = %;\n", ref(g, i.a, k), value);
+    case .Zero:
+        print_to(out, "  __builtin_memset(%, 0, %);\n", addr_of(g, i.a), i.imm);
+    case .Fill:
+        print_to(out, "  __builtin_memset(%, 0xAA, %);\n", addr_of(g, i.a), i.imm);
+    case .Move:
+        print_to(out, "  __builtin_memmove(%, %, %);\n", addr_of(g, i.a), addr_of(g, i.b), i.imm);
+    case .AddrFrame:
+        print_to(out, "  % = %;\n", ref(g, i.a, .Ptr), addr_of(g, i.b));
+    case .Addr:
+        print_to(out, "  % = (u8 *)&%;\n", ref(g, i.a, .Ptr), symbol_name(g, g.f.symbols[i.imm]));
+    case .Load:
+        print_to(out, "  __builtin_memcpy(%, %, %);\n", addr_of(g, i.a), ref(g, i.b, .Ptr), i.imm);
+    case .Store:
+        print_to(out, "  __builtin_memcpy(%, %, %);\n", ref(g, i.a, .Ptr), addr_of(g, i.b), i.imm);
+    case .PtrAdd:
+        print_to(out, "  % = % + % * %{}ULL;\n", ref(g, i.a, .Ptr), ref(g, i.b, .Ptr), ref(g, i.c, .U64), i.imm);
+    case .PtrOffset:
+        print_to(out, "  % = % + %{}ULL;\n", ref(g, i.a, .Ptr), ref(g, i.b, .Ptr), i.imm);
+    case .Bin:
+        write_binary(g, out, i);
+    case .Cmp:
+        print_to(out, "  % = % % %;\n", ref(g, i.a, .Bool), ref(g, i.b, k), cmp_op(i.sub as VmCmp), ref(g, i.c, k));
+    case .Un:
+        let a, b = ref(g, i.a, k), ref(g, i.b, k);
+        switch (i.sub as VmUn) {
+        case .Neg:
+            if (is_float(k))
+                print_to(out, "  % = -%;\n", a, b);
+            else
+                print_to(out, "  % = (%)(0 - (u64)%);\n", a, kt, b);
+        case .Not: print_to(out, "  % = !%;\n", a, b);
+        case .BitNot: print_to(out, "  % = (%)~%;\n", a, kt, b);
+        }
+    case .Conv:
+        write_conversion(g, out, i);
+    case .Jmp:
+        print_to(out, "  goto L%;\n", i.imm);
+    case .Jz:
+        print_to(out, "  if (!%) goto L%;\n", ref(g, i.b, .Bool), i.imm);
+    case .Jnz:
+        print_to(out, "  if (%) goto L%;\n", ref(g, i.b, .Bool), i.imm);
+    case .Call:
+        write_call(g, out, &g.f.calls[i.imm]);
+    case .Ret:
+        let ret = g.f.decl.ty.ret;
+        if (g.f.ret_size == 0)
+            append_string(out, "  return;\n");
+        else if (returns_bytes(g, ret))
+            print_to(out, "  __builtin_memcpy(rt_out, %, %);\n  return;\n", addr_of(g, g.f.ret_offset), g.f.ret_size);
+        else
+            print_to(out, "  return %;\n", ref(g, g.f.ret_offset, kind_of(concrete(g.vm, ret))));
+    case .CheckIndex:
+        print_to(out, "  (void)rt_index((isize)%, (isize)%, %);\n", ref(g, i.b, .U64), ref(g, i.c, .U64), location(g, i));
+    case .CheckSlice:
+        print_to(out, "  rt_slice_check((isize)%, (isize)%, (isize)%, %);\n", ref(g, i.a, .U64), ref(g, i.b, .U64),
+                 ref(g, i.c, .U64), location(g, i));
+    case .CheckNull:
+        print_to(out, "  if (!%) rt_panic(%, \"out of memory\");\n", ref(g, i.b, .Ptr), location(g, i));
+    case .NonNull:
+        print_to(out, "  if (!%) rt_panic(%, \"null pointer\");\n", ref(g, i.b, .Ptr), location(g, i));
+    case .MemZero:
+        print_to(out, "  __builtin_memset(%, 0, (usize)%);\n", ref(g, i.b, .Ptr), ref(g, i.c, .U64));
+    case .Fail:
+        print_to(out, "  rt_panic(%, %);\n", location(g, i), c_string(g.f.messages[i.imm]));
+    case .StrEq:
+        print_to(out, "  % = rt_bytes_equal(%, %, %, %);\n", ref(g, i.a, .Bool), ref(g, i.b, .Ptr), ref(g, i.b + 8, .I64),
+                 ref(g, i.c, .Ptr), ref(g, i.c + 8, .I64));
+    }
+}
+
+// integer arithmetic as the VM does it: wrapping, a division by zero
+// panics, the minimum / -1 wraps, shifts past the width give 0 (or the
+// sign, for >> of a signed value)
+fn write_binary(g: *CGen, out: *[..]u8, i: VmInstr) {
+    let k = i.kind;
+    let kt = ctype(k);
+    let op = i.sub as VmBin;
+    let a, b = ref(g, i.a, k), ref(g, i.b, k);
+    if (is_float(k) || k == .Bool) {
+        print_to(out, "  % = % % %;\n", a, b, bin_op(op), ref(g, i.c, k));
+        return;
+    }
+    let bits = kind_size(k) * 8;
+    switch (op) {
+    case .Shl:
+        let c = ref(g, i.c, .U64);
+        print_to(out, "  % = (%)(% >= % ? 0 : (u64)% << %);\n", a, kt, c, bits, b, c);
+    case .Shr:
+        let c = ref(g, i.c, .U64);
+        if (signed_kind(k))
+            print_to(out, "  % = (%)((i64)% >> (% >= 64 ? 63 : %));\n", a, kt, b, c, c);
+        else
+            print_to(out, "  % = (%)(% >= 64 ? 0 : (u64)% >> %);\n", a, kt, c, b, c);
+    case .Div, .Mod:
+        let c = ref(g, i.c, k);
+        print_to(out, "  if (% == 0) rt_panic(%, \"division by zero\");\n", c, location(g, i));
+        if (signed_kind(k)) {
+            let wrapped = if (op == .Div) tformat("(%)(0 - (u64)%)", kt, b) else tformat("(%)0", kt);
+            print_to(out, "  % = % == -1 ? % : (%)(% % %);\n", a, c, wrapped, kt, b, bin_op(op), c);
+        } else {
+            print_to(out, "  % = (%)(% % %);\n", a, kt, b, bin_op(op), c);
+        }
+    default: // + - * & | ^, wrapping: in u64, then cut to the kind
+        print_to(out, "  % = (%)((u64)% % (u64)%);\n", a, kt, b, bin_op(op), ref(g, i.c, k));
+    }
+}
+
+fn write_conversion(g: *CGen, out: *[..]u8, i: VmInstr) {
+    let to = i.kind;
+    let from = i.sub as VmKind;
+    let a, b = ref(g, i.a, to), ref(g, i.b, from);
+    let tt = ctype(to);
+    if (is_float(from) && !is_float(to)) { // truncating, as the VM: through i64 when it can be negative
+        if (signed_kind(to))
+            print_to(out, "  % = (%)(i64)%;\n", a, tt, b);
+        else
+            print_to(out, "  % = (%)(% < 0 ? (u64)(i64)% : (u64)%);\n", a, tt, b, b, b);
+    } else if (is_float(from) || is_float(to)) {
+        print_to(out, "  % = (%)%;\n", a, tt, b);
+    } else if (to == .Ptr) {
+        print_to(out, "  % = (u8 *)(usize)%;\n", a, b);
+    } else {
+        print_to(out, "  % = (%)(u64)%;\n", a, tt, b);
+    }
+}
+
+// a call: our convention for Sabk functions, C's for C's (see the top)
+fn write_call(g: *CGen, out: *[..]u8, call: *VmCallSite) {
+    let callee = call.callee;
+    let c_abi = if (callee != null) is_c_abi(callee) else call.c_call;
+    let ret = call.ret_type;
+    let none: Token;
+    let params: [..]*Type; // the value parameters' types
+    if (callee != null)
+        array_append(&params, callee.decl.ty.params);
+    else
+        array_append(&params, call.arg_types);
+    let args: [..]string;
+    let into_bytes = !c_abi && returns_bytes(g, ret);
+    if (into_bytes)
+        array_add(&args, addr_of(g, call.ret_slot));
+    let first: isize = 0;
+    if (!c_abi) { // the context
+        array_add(&args, ref(g, call.args[0].slot, .Ptr));
+        first = 1;
+    }
+    for (k in first..call.args.len) {
+        let at = call.args[k].slot;
+        let t = if (k - first < params.len) params[k - first] else call.arg_types[k - first];
+        if (is_c_scalar(g, t))
+            array_add(&args, ref(g, at, kind_of(concrete(g.vm, t))));
+        else if (c_abi)
+            array_add(&args, ref(g, at, .U64)); // a variadic's struct isn't passed (refused by param_type)
+        else
+            array_add(&args, addr_of(g, at));
+    }
+    let fun = "";
+    if (callee != null) {
+        fun = map_get(&g.names, callee) or_else "0";
+    } else {
+        // through a pointer: its type from the call
+        let fixed = if (call.c_fixed >= 0) call.c_fixed as isize else call.arg_types.len;
+        let pts = call.arg_types[0..fixed];
+        let ptype = param_list(g, pts, ret, c_abi, call.c_fixed >= 0, none, false);
+        fun = tformat("((% (*)(%))%)", result_type(g, ret, c_abi, none), ptype, ref(g, call.fn_slot, .Ptr));
+    }
+    let call_text = tformat("%(%)", fun, join(args, ", "));
+    if (call.ret_size == 0 || into_bytes)
+        print_to(out, "  %;\n", call_text);
+    else
+        print_to(out, "  % = %;\n", ref(g, call.ret_slot, kind_of(concrete(g.vm, ret))), call_text);
+}
+
+/* ------------------------------------------------------------ errors, main */
+
+fn field_offset(t: *Type, name: string) -> u64 {
+    for (f in t.fields)
+        if (f.name == name)
+            return f.offset;
+    return 0;
+}
+
+// sabk_error_type(id), the TypeInfo of the enum an Error came from, and
+// main's report of a failure: "error: IoError.NotFound", or IoError(7)
+// for a value no variant has (as codegen.sabk's)
+fn write_errors(g: *CGen, out: *[..]u8, main_fn: *Node) {
+    let types = g.program.error_types;
+    if (types.len == 0)
+        return;
+    append_string(out, "\n/* the failure enums that became Errors */\nstatic u8 *rt_error_types[] = {");
+    for (k in 0..types.len)
+        print_to(out, "% (u8 *)&%", if (k > 0) "," else "", symbol_name(g, types[k]));
+    print_to(out, " };\nu8 *sabk_error_type(u32 id) { return id >= 1 && id <= % ? rt_error_types[id - 1] : 0; }\n",
+             types.len);
+    if (!concrete(g.vm, main_fn.ty.ret).is_failure)
+        return;
+    let info = g.c.type_info_type;
+    layout(g.c, info);
+    let variant = concrete(g.vm, decl_type(g.c, module_decl(g.r.prelude, "TypeVariant")));
+    layout(g.c, variant);
+    let name_at = field_offset(info, "name");
+    let variants_at = field_offset(info, "variants");
+    print_to(out, "static void rt_report_error(u64 e) {
+  u8 *t = sabk_error_type((u32)(e >> 32));
+  i64 v = (i64)(u32)e;
+  fflush(NULL);
+  if (!t) {
+    dprintf(2, (u8 *)\"error: %%llu\\n\", (unsigned long long)e);
+    return;
+  }
+  u8 *name = *(u8 **)(t + %);
+  int name_len = (int)*(isize *)(t + % + 8);
+  u8 *variants = *(u8 **)(t + %);
+  isize count = *(isize *)(t + % + 8);
+  for (isize i = 0; i < count; i++) {
+    u8 *var = variants + i * %;
+    if (*(i64 *)(var + %) == v) {
+      dprintf(2, (u8 *)\"error: %%.*s.%%.*s\\n\", name_len, name, (int)*(isize *)(var + % + 8), *(u8 **)(var + %));
+      return;
+    }
+  }
+  dprintf(2, (u8 *)\"error: %%.*s(%%lld)\\n\", name_len, name, (long long)v);
+}
+", name_at, name_at, variants_at, variants_at, variant.size, field_offset(variant, "value"),
+             field_offset(variant, "name"), field_offset(variant, "name"));
+}
+
+fn write_main(g: *CGen, out: *[..]u8, main_fn: *Node) {
+    let main_f = g.program.functions[0];
+    let ret = concrete(g.vm, main_fn.ty.ret);
+    let name = map_get(&g.names, main_f) or_else "";
+    let dc = map_get(&g.names, g.program.default_context) or_else "";
+    print_to(out, "\nint main(int argc, char **argv) {\n  rt_argc = argc;\n  rt_argv = argv;\n");
+    print_to(out, "  %(rt_ctx, rt_boot_ctx);\n", dc);
+    if (ret.kind == .Void) {
+        print_to(out, "  %(rt_ctx);\n  return 0;\n}\n", name);
+    } else if (ret.is_failure) {
+        print_to(out, "  % failed = %(rt_ctx);\n  if (failed) {\n    rt_report_error((u64)failed);\n    return 1;\n  }\n  return 0;\n}\n",
+                 ctype(kind_of(ret)), name);
+    } else {
+        print_to(out, "  return %(rt_ctx);\n}\n", name);
+    }
+}

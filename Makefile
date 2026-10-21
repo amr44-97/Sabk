@@ -20,6 +20,10 @@ test: sabk
 interp: sabk
 	@tests/run.sh --interp
 
+# only the run tests, built with the C written from the IR (--c-from-ir)
+c-from-ir: sabk
+	@tests/run.sh --c-from-ir
+
 # unit tests of single modules, checked against Python
 unit: sabk
 	@./sabk --run tests/unit/i128_test.sabk | python3 tests/unit/i128_check.py
@@ -42,4 +46,4 @@ seed: sabk
 clean:
 	rm -rf build sabk
 
-.PHONY: test interp unit bootstrap seed clean
+.PHONY: test interp c-from-ir unit bootstrap seed clean

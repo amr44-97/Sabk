@@ -2162,6 +2162,10 @@ fn new_(l: *Lower, n: *Node, t: *Type) -> u32 {
     array_add(&site.args, ArgSlot.{ .slot = u64_slot(l, 0), .size = 8 });
     site.ret_slot = kind_slot(l, .Ptr);
     site.ret_size = 8;
+    // the procedure's types, as a call's (a backend calls through them)
+    let procedure = concrete(l.vm, allocator_type.fields[0].ty);
+    array_append(&site.arg_types, procedure.params);
+    site.ret_type = concrete(l.vm, procedure.ret);
     let ret_slot = site.ret_slot;
     array_add(&l.f.calls, site);
     emit(l, .{ .op = .Call, .imm = (l.f.calls.len - 1) as u64 });

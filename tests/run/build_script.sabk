@@ -22,5 +22,7 @@ fn configure() {
 }
 
 fn main() {
-    println("% % %", sqrt(16.0), cbrt(27.0), helper_twice(21));
+    // cbrt to 6 places: libm's is 3.0000000000000004, which GCC folds to 3
+    // only for a call by C's own name
+    println("% %{.6} %", sqrt(16.0), cbrt(27.0), helper_twice(21));
 }

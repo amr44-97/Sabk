@@ -169,6 +169,12 @@ struct VmData {
 struct VmProgram {
     functions: [..]*VmFunction;
     data: [..]VmData;
+    // with the runtime (vm_program's `runtime`): the prelude's
+    // default_context, which makes the program's first context, and the
+    // error enums' TypeInfos by id (1 first), for main's failure and
+    // sabk_error_type
+    default_context: *VmFunction;
+    error_types: [..]VmSymbol;
 }
 
 struct VmFunction {
@@ -896,9 +902,10 @@ let verify_ir = false;
 
 // the program as the VM compiles it: main first, then every function and
 // piece of data it reaches, through calls, function values, and the
-// symbols its code and data point at (--ir, and backends). A failure is
-// reported, and leaves it empty.
-fn vm_program(vm: *Vm, main_fn: *Node) -> VmProgram {
+// symbols its code and data point at (--ir, and backends); with
+// `runtime`, what a backend's main needs too (see VmProgram). A failure
+// is reported, and leaves it empty.
+fn vm_program(vm: *Vm, main_fn: *Node, runtime: bool) -> VmProgram {
     start_program(vm);
     let program: VmProgram;
     let seen: Map(*void, bool); // functions and data, by address
@@ -906,6 +913,14 @@ fn vm_program(vm: *Vm, main_fn: *Node) -> VmProgram {
     let main_f = vm_function_for(vm, main_fn);
     array_add(&program.functions, main_f);
     map_put(&seen, main_f, true);
+    let errors_wanted = false;
+    if (runtime) {
+        let dc = vm_function_for(vm, module_decl(vm.c.res.prelude, "default_context"));
+        program.default_context = dc;
+        array_add(&program.functions, dc);
+        map_put(&seen, dc, true);
+        errors_wanted = concrete(vm, main_fn.ty.ret).is_failure;
+    }
     let fi: isize = 0;
     let di: isize = 0;
     while (fi < program.functions.len || di < to_bake.len) {
@@ -939,9 +954,13 @@ fn vm_program(vm: *Vm, main_fn: *Node) -> VmProgram {
             array_add(&program.data, data);
         }
         for (sym in found) {
+            if (runtime && sym.kind == .Function && (sym.address as *VmFunction).native &&
+                c_symbol(sym.decl) == "sabk_error_type")
+                errors_wanted = true;
             let target = sym;
-            if (sym.kind == .CFunction && sym.decl.kind is .Fn{body} && body != null) {
-                // a #c_call of ours: C calls it by its own address
+            if (sym.kind == .CFunction && sym.decl.kind.tag == .Fn) {
+                // a #c_call of ours, or C's own function, as a value: the
+                // function is in the program (a C one, to be declared)
                 target = .{ .kind = .Function, .decl = sym.decl, .address = vm_function_for(vm, sym.decl) };
             }
             if (target.kind == .Context || target.address == null || map_has(&seen, target.address))
@@ -951,6 +970,18 @@ fn vm_program(vm: *Vm, main_fn: *Node) -> VmProgram {
                 array_add(&program.functions, target.address as *VmFunction);
             else if (target.kind != .CFunction)
                 array_add(&to_bake, target);
+        }
+        if (errors_wanted && program.error_types.len == 0) {
+            for (e in vm.c.error_enums) {
+                let sym = VmSymbol.{ .kind = .TypeInfo, .ty = e, .address = vm_type_info(vm, e) };
+                array_add(&program.error_types, sym);
+                if (!map_has(&seen, sym.address)) {
+                    map_put(&seen, sym.address, true);
+                    array_add(&to_bake, sym);
+                }
+            }
+            if (vm.c.error_enums.len == 0)
+                errors_wanted = false;
         }
     }
     return program;

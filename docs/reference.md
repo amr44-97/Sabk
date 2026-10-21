@@ -3075,6 +3075,7 @@ inspect types the same way, and produces the same text.
 ./sabk --run prog.sabk      build, run, and exit with the program's exit code
 ./sabk --interp prog.sabk   run it in the compiler's interpreter: no C compiler
 ./sabk --ir prog.sabk       print the IR of main and what it calls (see below)
+./sabk --c-from-ir prog.sabk   build it with the C written from the IR (see below)
 ./sabk --release prog.sabk  build optimized (-O2), without debug info
 ./sabk --sanitize prog.sabk build with AddressSanitizer (see Memory traps)
 ./sabk --bounds-checks off prog.sabk   no index or slice checks (on, off, always)
@@ -3281,6 +3282,17 @@ fn sum (frame 136, align 8)
 `--verify-ir` checks each function's IR as it's made: that every operand is
 inside a slot, and that a value an instruction reads or writes as a scalar
 is one of that size and kind there (the test suite always passes it).
+
+`--c-from-ir` writes the program's C from the IR instead of from the syntax
+tree: the backend that will replace today's, and that QBE and x64 ones will
+be written like. Every function and every global's starting bytes come
+from the IR, so the program it builds is the one `--interp` runs.
+`tests/run.sh --c-from-ir` (`make c-from-ir`) builds every run test with
+it. For now its C is bigger (the compiler's is 9.5 MB, against 3.4 MB),
+slower to compile, and at `-O0` slower to run; with `--release` it runs
+within about 30% of today's. It also can't yet pass or return a struct by
+value to or from C, and calls C's functions by names of its own, so the C
+compiler doesn't treat `sqrt` or `memcpy` as builtins.
 
 ### C interop: libraries and `#foreign`
 

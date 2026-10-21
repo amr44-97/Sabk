@@ -27,6 +27,7 @@
 #import "types";
 #import "vm";
 #import "ir";
+#import "backend_c";
 
 // the VM's way to C, and libffi
 #run configure();
@@ -246,6 +247,8 @@ fn print_usage(exe: string) -> i32 {
     eprint("  --ir         print the IR of main and what it calls (the VM's\n");
     eprint("               bytecode, what backends are written from)\n");
     eprint("  --verify-ir  check each function's IR as it's made (for tests)\n");
+    eprint("  --c-from-ir  write the C from the IR (the backend to come), not\n");
+    eprint("               from the syntax tree\n");
     eprint("  --quiet      don't print how long each phase took (it's on stderr\n");
     eprint("               after every compile)\n");
     eprint("  --stats      also print the functions written and the generic\n");
@@ -271,6 +274,7 @@ fn main() -> i32 {
     let path = "";
     let program_args: [..]string; // after `--`: the program's (and args() in #run)
     let lines = false;            // --emit-c with #line directives
+    let from_ir = false;          // --c-from-ir: the C from the IR (backend_c.sabk)
     let bounds_checks = vm.BoundsChecks.On;
     let bounds_given = false;     // --bounds-checks wins over a build script's
     let strict = false;           // --strict and --werror add to a build script's
@@ -300,6 +304,8 @@ fn main() -> i32 {
             mode = .Ir;
         } else if (arg == "--verify-ir") {
             verify_ir = true;
+        } else if (arg == "--c-from-ir") {
+            from_ir = true;
         } else if (arg == "--emit-c") {
             mode = .EmitC;
         } else if (arg == "--check") {
@@ -428,14 +434,25 @@ fn main() -> i32 {
     if (mode == .Ir)
         return print_ir(&r, &c);
 
-    let g = make_codegen(&r, &c);
-    g.line_directives = mode != .EmitC || lines;
-    let c_source = generate(&g);
-    if (c_source.len == 0)
-        return 1;
-    functions_total = g.functions_total;
-    functions_emitted = g.functions_emitted;
-    end_phase("generate C");
+    let c_source = "";
+    if (from_ir) {
+        let main_fn = program_main(&r, &c);
+        if (main_fn == null)
+            return 1;
+        c_source = generate_from_ir(&r, &c, main_fn);
+        if (c_source.len == 0)
+            return 1;
+        end_phase("generate C from the IR");
+    } else {
+        let g = make_codegen(&r, &c);
+        g.line_directives = mode != .EmitC || lines;
+        c_source = generate(&g);
+        if (c_source.len == 0)
+            return 1;
+        functions_total = g.functions_total;
+        functions_emitted = g.functions_emitted;
+        end_phase("generate C");
+    }
     if (mode == .EmitC) {
         print(c_source);
         print_stats(&c);
@@ -509,7 +526,7 @@ fn print_ir(r: *Resolver, c: *Checker) -> i32 {
         return 1;
     if (c.vm == null)
         c.vm = make_vm(c);
-    let program = vm_program(c.vm, main_fn);
+    let program = vm_program(c.vm, main_fn, false);
     if (program.functions.len == 0)
         return 1;
     for (f in program.functions) {
