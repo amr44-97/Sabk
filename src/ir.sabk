@@ -202,7 +202,7 @@ fn check_instr(vm: *Vm, f: *VmFunction, i: VmInstr) -> string {
     case .CheckSlice:
         return first(first(scalar(vm, f, i.a, .U64, "the start"), scalar(vm, f, i.b, .U64, "the end")),
                      scalar(vm, f, i.c, .U64, "the length"));
-    case .CheckNull: return scalar(vm, f, i.b, .Ptr, "the pointer");
+    case .CheckNull, .NonNull: return scalar(vm, f, i.b, .Ptr, "the pointer");
     case .MemZero: return first(scalar(vm, f, i.b, .Ptr, "the pointer"), scalar(vm, f, i.c, .U64, "the size"));
     case .StrEq:
         return first(first(scalar(vm, f, i.a, .Bool, "the result"), bytes(f, i.b, 16, "the left string")),
@@ -362,7 +362,8 @@ fn describe(vm: *Vm, f: *VmFunction, i: VmInstr) -> string {
     case .Ret: return "return";
     case .CheckIndex: return tformat("check % < %", b, c);
     case .CheckSlice: return tformat("check % <= % <= %", a, b, c);
-    case .CheckNull: return tformat("check % != null", b);
+    case .CheckNull: return tformat("check % != null (out of memory)", b);
+    case .NonNull: return tformat("check % != null", b);
     case .MemZero: return tformat("zero [%] %", b, c);
     case .Fail: return tformat("fail \"%\"", f.messages[i.imm]);
     case .StrEq: return tformat("% = % ==.string %", a, b, c);

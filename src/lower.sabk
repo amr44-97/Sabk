@@ -1444,7 +1444,10 @@ fn inner(l: *Lower, n: *Node) -> u32 {
         return result;
 
     case .Deref{pointer}:
-        return load(l, expr(l, pointer), t);
+        let p = expr(l, pointer);
+        if (pointer.ty.kind != .Rawptr) // a *void's void isn't read
+            nonnull(l, p, n.tok);
+        return load(l, p, t);
 
     case .Index:
         return load(l, element(l, n), t);
@@ -1744,10 +1747,14 @@ fn field_value(l: *Lower, n: *Node) -> u32 {
     let t = concrete(l.vm, n.ty);
     if (base.kind == .Array) // a.ptr: where the array is
         return address(l, object);
-    if (base.kind == .Ptr && base.elem.kind == .Array)
-        return expr(l, object); // p.ptr: the same address
+    if (base.kind == .Ptr && base.elem.kind == .Array) { // p.ptr: the same address
+        let p = expr(l, object);
+        nonnull(l, p, n.tok);
+        return p;
+    }
     if (base.kind == .Ptr) {
         let p = expr(l, object);
+        nonnull(l, p, n.tok);
         let before = at_check(l, n.tok);
         let value = load(l, offset(l, p, member_offset(l, base.elem, n)), t);
         after_check(l, before);
@@ -1822,6 +1829,7 @@ fn address(l: *Lower, n: *Node) -> u32 {
         let base = concrete(l.vm, object.ty);
         if (base.kind == .Ptr) {
             let p = expr(l, object);
+            nonnull(l, p, n.tok);
             at(l, n.tok); // following a null pointer points at the field, as in the program
             return offset(l, p, member_offset(l, base.elem, n));
         }
@@ -1830,12 +1838,16 @@ fn address(l: *Lower, n: *Node) -> u32 {
         return element(l, n);
     case .Deref{pointer}:
         let p = expr(l, pointer);
+        if (pointer.ty.kind != .Rawptr)
+            nonnull(l, p, n.tok);
         at(l, n.tok);
         return p;
     case .VariantAccess{object, checked}:
         // where the tagged value is, its tag checked, then its payload
         let through = object.ty.kind == .Ptr;
         let base = if (through) expr(l, object) else address(l, object);
+        if (through)
+            nonnull(l, base, n.tok);
         let tagged = concrete(l.vm, if (through) object.ty.elem else object.ty);
         if (checked)
             check_variant(l, n, load(l, offset(l, base, tagged.fields[0].offset), tagged.fields[0].ty), tagged);
@@ -1874,10 +1886,22 @@ fn element(l: *Lower, n: *Node) -> u32 {
             emit(l, .{ .op = .CheckIndex, .b = i, .c = u64_slot(l, t.len) });
         return ptr_add(l, base, i, elem_size);
     }
-    let base = expr(l, object); // a raw pointer
+    let base = expr(l, object); // a raw pointer: not its bounds, only null
     let i = to_u64(l, expr(l, index), type_of(l, index));
+    nonnull(l, base, n.tok);
     at(l, n.tok);
     return ptr_add(l, base, i, elem_size);
+}
+
+// a pointer about to be followed: null panics, where bounds are checked
+// (as the C's rt_nonnull); the VM also stops on one in any case, so #run
+// code can't crash the compiler
+fn nonnull(l: *Lower, p: u32, at_tok: Token) {
+    if (!checks_bounds(l))
+        return;
+    let before = at_check(l, at_tok);
+    emit(l, .{ .op = .NonNull, .b = p });
+    after_check(l, before);
 }
 
 // are indexing and slicing checked here: always in #run code, which runs

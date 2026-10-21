@@ -58,6 +58,8 @@ enum VmOp: u8 {
     CheckIndex,  // u64 slot b < u64 slot c, or a bounds error
     CheckSlice,  // u64 slots a <= b <= c, or a bounds error
     CheckNull,   // pointer slot b isn't null, or "out of memory"
+    NonNull,     // pointer slot b isn't null, or "null pointer": one about
+                 // to be followed, where checks are on
     MemZero,     // zeroes u64 slot c bytes at the pointer in slot b
     Fail,        // stops with message imm (an index into `messages`)
     StrEq,       // bool slot a = the strings in slots b and c are equal
@@ -1583,6 +1585,9 @@ fn run(vm: *Vm, fp: **VmFunction, framep: **u8, pcp: *isize, callers: *[..]Calle
         case .CheckNull:
             if (read_ptr(slot(frame, i.b)) == null)
                 return fail_at(vm, f, i, "out of memory");
+        case .NonNull:
+            if (read_ptr(slot(frame, i.b)) == null)
+                return fail_at(vm, f, i, null_message(vm));
         case .MemZero:
             zero_memory(read_ptr(slot(frame, i.b)), read_u64(slot(frame, i.c)) as isize);
         }
