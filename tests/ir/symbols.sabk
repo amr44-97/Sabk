@@ -1,0 +1,18 @@
+// what Addr instructions point at, by name: globals, functions as values
+// (ours, and #c_call ones C can call), string literals, type info; --ir
+// follows the functions taken as values, not only those called
+fn strlen(s: *u8) -> usize #foreign libc;
+const libc = #system_library "libc";
+let counter: i32 = 5;
+let table: [3]i32 = .[1, 2, 3];
+fn helper(x: i32) -> i32 { return x + 1; }
+fn on_c(x: i32) -> i32 #c_call { return x; }
+fn main() -> i32 {
+    let f = helper;
+    let g = on_c;
+    let s = "tab\there \"quoted\"\n\x01 and a long tail past thirty-two bytes";
+    let info = type_info(i32);
+    let n = strlen("abc");
+    counter += f(1) + table[2];
+    return counter + (n as i32) + (s.len as i32) + (info.size as i32);
+}

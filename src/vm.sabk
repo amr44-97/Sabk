@@ -40,7 +40,8 @@ enum VmOp: u8 {
                  // it before writing it shows
     Move,        // slot a = slot b, imm bytes
     AddrFrame,   // slot a = the address of slot b
-    Addr,        // slot a = imm, a fixed address (global, string, function)
+    Addr,        // slot a = the address of symbol imm (a global, a string,
+                 // a function: VmFunction.symbols)
     Load,        // slot a = imm bytes from the pointer in slot b
     Store,       // imm bytes from slot b to the pointer in slot a
     PtrAdd,      // slot a = pointer b + (u64 c) * imm
@@ -110,6 +111,29 @@ struct VmSlot {
     name: string;           // a variable's or parameter's; "" for a temporary
 }
 
+// what an Addr instruction takes the address of, by name, so a backend can
+// refer to it; the VM has resolved it to `address`, in the compiler's memory
+enum VmSymbolKind: u8 {
+    Global,      // decl: a global variable (C's own, for an extern one)
+    Function,    // decl: a Sabk function, as a value
+    CFunction,   // decl: a function C can call: #foreign, or #c_call of ours
+    String,      // text: a string literal's bytes (a NUL follows them)
+    TypeInfo,    // ty: type_info(ty), or an Any's
+    Context,     // the default context, for code C calls and global
+                 // initializers, which have none passed in
+    Data,        // size bytes: an array literal's elements in a global's
+                 // initializer or a #run, which outlive its frame
+}
+
+struct VmSymbol {
+    kind: VmSymbolKind;
+    decl: *Node;
+    ty: *Type;
+    text: string;
+    size: isize;
+    address: *void;
+}
+
 struct VmFunction {
     decl: *Node;
     name: string;
@@ -124,6 +148,7 @@ struct VmFunction {
     // the frame's slots, by offset. The VM runs without them; they are what
     // a backend writing C or machine code needs to know about the frame
     slots: [..]VmSlot;
+    symbols: [..]VmSymbol;  // what its Addr instructions point at
     param_offsets: [..]u32; // the context pointer first, for Sabk code
     ret_offset: u32;
     ret_size: u32;
@@ -822,11 +847,22 @@ fn vm_lower_program(vm: *Vm, main_fn: *Node) -> [..]*VmFunction {
             all.len = 0;
             return all;
         }
-        for (call in f.calls) {
-            if (call.callee != null && !map_has(&seen, call.callee)) {
-                map_put(&seen, call.callee, true);
-                if (call.callee != f && call.callee != all[0])
-                    array_add(&all, call.callee);
+        // what it calls, and the functions it takes as values
+        let reached: [..]*VmFunction;
+        reached.allocator = context.temp_allocator;
+        for (call in f.calls)
+            if (call.callee != null)
+                array_add(&reached, call.callee);
+        for (sym in f.symbols) {
+            if (sym.kind == .Function)
+                array_add(&reached, sym.address as *VmFunction);
+            else if (sym.kind == .CFunction && sym.decl.kind is .Fn{body} && body != null)
+                array_add(&reached, vm_function_for(vm, sym.decl)); // a #c_call of ours
+        }
+        for (g in reached) {
+            if (!map_has(&seen, g) && g != all[0]) {
+                map_put(&seen, g, true);
+                array_add(&all, g);
             }
         }
     }
@@ -1092,6 +1128,7 @@ fn compile(vm: *Vm, f: *VmFunction) -> bool {
         f.calls.len = 0;
         f.locs.len = 0;
         f.slots.len = 0;
+        f.symbols.len = 0;
         f.param_offsets.len = 0;
         f.frame_size, f.ret_offset, f.ret_size = 0, 0, 0;
         return false;
@@ -1419,7 +1456,7 @@ fn run(vm: *Vm, fp: **VmFunction, framep: **u8, pcp: *isize, callers: *[..]Calle
         case .AddrFrame:
             (slot(frame, i.a) as **u8).* = slot(frame, i.b);
         case .Addr:
-            (slot(frame, i.a) as *u64).* = i.imm;
+            (slot(frame, i.a) as **void).* = f.symbols[i.imm].address;
         case .Load:
             let p = read_ptr(slot(frame, i.b));
             if (is_null_page(p))

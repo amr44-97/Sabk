@@ -159,7 +159,10 @@ fn check_instr(vm: *Vm, f: *VmFunction, i: VmInstr) -> string {
     case .Move: return first(bytes(f, i.a, i.imm, "the destination"), bytes(f, i.b, i.imm, "the source"));
     case .AddrFrame:
         return first(scalar(vm, f, i.a, .Ptr, "the address"), bytes(f, i.b, 1, "what's addressed"));
-    case .Addr: return scalar(vm, f, i.a, .Ptr, "the address");
+    case .Addr:
+        if (i.imm >= f.symbols.len as u64)
+            return tformat("symbol % doesn't exist (% of them)", i.imm, f.symbols.len);
+        return scalar(vm, f, i.a, .Ptr, "the address");
     case .Load: return first(bytes(f, i.a, i.imm, "the destination"), scalar(vm, f, i.b, .Ptr, "the pointer"));
     case .Store: return first(scalar(vm, f, i.a, .Ptr, "the pointer"), bytes(f, i.b, i.imm, "the value"));
     case .PtrAdd:
@@ -224,6 +227,46 @@ fn operand(f: *VmFunction, at: u32) -> string {
         return tformat("?%", at);
     let base = if (s.name.len > 0) s.name else tformat("t%", s.offset);
     return if (at == s.offset) base else tformat("%+%", base, at - s.offset);
+}
+
+// what a symbol names: `global count`, `fn main`, `"text"`, ...
+fn symbol_text(sym: VmSymbol) -> string {
+    switch (sym.kind) {
+    case .Global: return tformat("global %", sym.decl.tok.text);
+    case .Function: return tformat("fn %", sym.decl.tok.text);
+    case .CFunction: return tformat("c fn %", sym.decl.tok.text);
+    case .String: return quoted(sym.text);
+    case .TypeInfo: return tformat("type_info(%)", type_name(sym.ty));
+    case .Context: return "default context";
+    case .Data: return tformat("data %", sym.size);
+    }
+    return "";
+}
+
+// a string literal as Sabk writes it, cut short past 32 bytes
+fn quoted(text: string) -> string {
+    let out: [..]u8;
+    out.allocator = context.temp_allocator;
+    array_add(&out, '"');
+    for (k in 0..text.len) {
+        if (k == 32) {
+            append_string(&out, "...");
+            break;
+        }
+        let c = text[k];
+        if (c == '"' || c == '\\') {
+            array_add(&out, '\\');
+            array_add(&out, c);
+        } else if (c == '\n') {
+            append_string(&out, "\\n");
+        } else if (c < 32 || c >= 127) {
+            print_to(&out, "\\x%{02x}", c);
+        } else {
+            array_add(&out, c);
+        }
+    }
+    array_add(&out, '"');
+    return out as string;
 }
 
 fn kind_text(k: VmKind) -> string {
@@ -293,7 +336,7 @@ fn describe(vm: *Vm, f: *VmFunction, i: VmInstr) -> string {
     case .Fill: return tformat("% = undefined %", a, i.imm);
     case .Move: return tformat("% = % (%)", a, b, i.imm);
     case .AddrFrame: return tformat("% = &%", a, b);
-    case .Addr: return tformat("% = <address>", a);
+    case .Addr: return tformat("% = &%", a, symbol_text(f.symbols[i.imm]));
     case .Load: return tformat("% = load % [%]", a, i.imm, b);
     case .Store: return tformat("store % [%] = %", i.imm, a, b);
     case .PtrAdd: return tformat("% = % + % * %", a, b, c, i.imm);

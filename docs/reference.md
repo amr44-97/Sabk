@@ -3259,8 +3259,10 @@ which `tests/run.sh --interp` skips.
 C will be written from: each function is a frame of typed slots (its
 parameters and variables by name, `ctx` for the context, `return` for the
 result, temporaries as `t` and their offset) and instructions on them.
-`--ir` prints it for `main` and every function it calls, which is for
-working on the compiler, not a format to rely on:
+An address of something outside the frame is of a named symbol (`&global
+counter`, `&fn helper`, `&"text"`, `&type_info(i32)`), not a number.
+`--ir` prints it for `main` and every function it calls or takes as a
+value, which is for working on the compiler, not a format to rely on:
 
 ```
 fn sum (frame 136, align 8)

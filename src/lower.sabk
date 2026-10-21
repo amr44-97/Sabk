@@ -80,7 +80,7 @@ fn lower_function(l: *Lower) {
         let ctx = vm_context(l.vm);
         if (failed(l))
             return;
-        last_scope(l).ctx_slot = addr(l, ctx) as i64;
+        last_scope(l).ctx_slot = addr(l, context_symbol(l, ctx)) as i64;
     }
     at(l, fun.tok);
     emit_scope(l, block_list(fn_body(fun)), .{ .kind = .Block });
@@ -93,7 +93,7 @@ fn lower_thunk(l: *Lower, n: *Node) {
     if (failed(l))
         return;
     let top = Scope.{ .kind = .Fn };
-    top.ctx_slot = addr(l, ctx) as i64;
+    top.ctx_slot = addr(l, context_symbol(l, ctx)) as i64;
     array_add(&l.scopes, top);
     at(l, n.tok);
     let t = type_of(l, n);
@@ -116,7 +116,7 @@ fn lower_default_thunk(l: *Lower, t: *Type) {
     if (failed(l))
         return;
     let top = Scope.{ .kind = .Fn };
-    top.ctx_slot = addr(l, ctx) as i64;
+    top.ctx_slot = addr(l, context_symbol(l, ctx)) as i64;
     array_add(&l.scopes, top);
     l.f.ret_offset = alloc(l, t);
     l.f.ret_size = vm_size_of(l.vm, t);
@@ -326,10 +326,25 @@ fn addr_frame(l: *Lower, slot: u32) -> u32 {
     return p;
 }
 
-fn addr(l: *Lower, address: *void) -> u32 {
+// a pointer slot holding the address of `sym`
+fn addr(l: *Lower, sym: VmSymbol) -> u32 {
     let p = kind_slot(l, .Ptr);
-    emit(l, .{ .op = .Addr, .a = p, .imm = address as usize });
+    addr_into(l, p, sym);
     return p;
+}
+
+// the address of `sym` into the pointer at `slot` (which can be a field)
+fn addr_into(l: *Lower, slot: u32, sym: VmSymbol) {
+    array_add(&l.f.symbols, sym);
+    emit(l, .{ .op = .Addr, .a = slot, .imm = (l.f.symbols.len - 1) as u64 });
+}
+
+fn context_symbol(l: *Lower, ctx: *u8) -> VmSymbol { return .{ .kind = .Context, .address = ctx }; }
+
+fn global_symbol(d: *Node, storage: *u8) -> VmSymbol { return .{ .kind = .Global, .decl = d, .address = storage }; }
+
+fn type_info_symbol(l: *Lower, t: *Type) -> VmSymbol {
+    return .{ .kind = .TypeInfo, .ty = t, .address = vm_type_info(l.vm, t) };
 }
 
 fn load(l: *Lower, ptr: u32, t: *Type) -> u32 {
@@ -1292,8 +1307,7 @@ fn convert(l: *Lower, value: u32, from: *Type, to: *Type) -> u32 {
         move(l, copy, value, vm_size_of(l.vm, from));
         let any = alloc(l, to);
         emit(l, .{ .op = .AddrFrame, .a = any + field(to, "value").offset as u32, .b = copy });
-        let info = vm_type_info(l.vm, from);
-        emit(l, .{ .op = .Addr, .a = any + field(to, "info").offset as u32, .imm = info as usize });
+        addr_into(l, any + field(to, "info").offset as u32, type_info_symbol(l, from));
         return any;
     }
     if (from.kind == .DynArray) { // [..]T -> []T: its first two fields
@@ -1325,12 +1339,12 @@ fn convert(l: *Lower, value: u32, from: *Type, to: *Type) -> u32 {
 
 fn string_literal(l: *Lower, n: *Node) -> u32 {
     let bytes = string_literal_text(n);
-    let data = vm_intern(l.vm, bytes);
+    let sym = VmSymbol.{ .kind = .String, .text = bytes, .address = vm_intern(l.vm, bytes) };
     let t = concrete(l.vm, n.ty);
     if (t.kind == .Ptr)
-        return addr(l, data);
+        return addr(l, sym);
     let s = alloc(l, t);
-    emit(l, .{ .op = .Addr, .a = s, .imm = data as usize });
+    addr_into(l, s, sym);
     emit(l, .{ .op = .Const, .kind = .U64, .a = s + 8, .imm = bytes.len as u64 });
     return s;
 }
@@ -1450,7 +1464,7 @@ fn inner(l: *Lower, n: *Node) -> u32 {
         return array_literal(l, n, t);
 
     case .TypeInfo{of}:
-        return addr(l, vm_type_info(l.vm, of.ty));
+        return addr(l, type_info_symbol(l, of.ty));
 
     case .Switch{gives_value: true}:
         let result = alloc(l, t);
@@ -1683,7 +1697,7 @@ fn name(l: *Lower, n: *Node, d: *Node) -> u32 {
         let storage = vm_global_storage(l.vm, d);
         if (storage == null)
             return 0;
-        return load(l, addr(l, storage), concrete(l.vm, d.ty));
+        return load(l, addr(l, global_symbol(d, storage)), concrete(l.vm, d.ty));
     case .Fn{is_extern}:
         if (is_extern) { // a rawptr: a C function pointer
             let address = vm_c_address(l.vm, vm_function_for(l.vm, d));
@@ -1691,9 +1705,9 @@ fn name(l: *Lower, n: *Node, d: *Node) -> u32 {
                 fail(l, n.tok, tformat("`%` isn't available as a C function while compiling", d.tok.text));
                 return 0;
             }
-            return addr(l, address);
+            return addr(l, .{ .kind = .CFunction, .decl = d, .address = address });
         }
-        return addr(l, vm_function_for(l.vm, d));
+        return addr(l, .{ .kind = .Function, .decl = d, .address = vm_function_for(l.vm, d) });
     case .Param, .ForIn, .LoopIndex:
         fail(l, n.tok, tformat("`#run` can't use `%`: it only exists when the program runs", n.tok.text));
         return 0;
@@ -1799,7 +1813,7 @@ fn address(l: *Lower, n: *Node) -> u32 {
                 let storage = vm_global_storage(l.vm, d);
                 if (storage == null)
                     return 0;
-                return addr(l, storage);
+                return addr(l, global_symbol(d, storage));
             }
             name(l, n, d); // reports why it can't be used
             return 0;
@@ -1963,7 +1977,8 @@ fn array_literal(l: *Lower, n: *Node, t: *Type) -> u32 {
     if (items.len == 0)
         return s;
     if (l.lasting) {
-        let base = addr(l, vm_keep(l.vm, (elem_size as isize) * items.len));
+        let size = (elem_size as isize) * items.len;
+        let base = addr(l, .{ .kind = .Data, .size = size, .address = vm_keep(l.vm, size) });
         for (i in 0..items.len)
             store(l, offset(l, base, (i as u64) * (elem_size as u64)), expr(l, items[i]), elem_size);
         move(l, s, base, 8);
