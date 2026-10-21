@@ -28,20 +28,20 @@ fn main (frame 248, align 8)
    224 *void                -
    232 isize                -
    240 i32                  -
-     0: f = &fn helper                               ; 11:13
-     1: g = &c fn on_c                               ; 12:13
-     2: t64 = &"tab\x09here \"quoted\"\n\x01 and a long t..." ; 13:13
-     3: t64+8 = u64.57                               ; 13:13
-     4: s = t64 (16)                                 ; 13:13
-     5: info = &type_info(i32)                       ; 14:16
-     6: t104 = &"abc"                                ; 15:20
-     7: n = call strlen(t104)                        ; 15:20
-     8: t120 = &global counter                       ; 16:5
-     9: t128 = load 4 [t120]                         ; 16:5
-    10: t132 = i32.1                                 ; 16:18
-    11: t140 = call [f](ctx, t132)                   ; 16:18
-    12: t144 = &global table                         ; 16:23
-    13: t152 = i64.2                                 ; 16:29
+     0: t132 = i32.1                                 ; 16:18
+     1: t152 = i64.2                                 ; 16:29
+     2: f = &fn helper                               ; 11:13
+     3: g = &c fn on_c                               ; 12:13
+     4: t64 = &"tab\x09here \"quoted\"\n\x01 and a long t..." ; 13:13
+     5: t64+8 = u64.57                               ; 13:13
+     6: s = t64 (16)                                 ; 13:13
+     7: info = &type_info(i32)                       ; 14:16
+     8: t104 = &"abc"                                ; 15:20
+     9: n = call strlen(t104)                        ; 15:20
+    10: t120 = &global counter                       ; 16:5
+    11: t128 = load 4 [t120]                         ; 16:5
+    12: t140 = call [f](ctx, t132)                   ; 16:18
+    13: t144 = &global table                         ; 16:23
     14: t160 = t152.i64 as u64                       ; 16:29
     15: t168 = t144 + t160 * 4                       ; 16:28
     16: t180 = load 4 [t168]                         ; 16:28

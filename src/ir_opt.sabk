@@ -5,6 +5,8 @@
 //   into its place: the instruction writes the place itself
 // - code nothing reaches: after a return, a jump or a failure, up to the
 //   next instruction something jumps to
+// - a constant made again and again: one slot for each, made once at the
+//   function's start
 // - slots nothing uses any more, dropped from the table (the frame keeps
 //   its layout)
 // Instructions are taken out, not changed in place, and the jumps are
@@ -20,7 +22,8 @@ fn ir_optimize(vm: *Vm, f: *VmFunction) {
         keep[k] = true;
     forward_writes(vm, f, keep);
     unreachable(f, keep);
-    compact(f, keep);
+    let entry = shared_constants(f, keep);
+    compact(f, keep, entry);
     drop_unused_slots(vm, f);
 }
 
@@ -242,30 +245,127 @@ fn unreachable(f: *VmFunction, keep: []bool) {
     }
 }
 
-// the kept instructions, with the jumps renumbered (a jump to one taken out
-// goes to the next one kept)
-fn compact(f: *VmFunction, keep: []bool) {
+// constants: a temporary written once, by a Const, read whole and only
+// read (its address never taken), is the constant; each distinct one
+// (kind and bits) keeps one slot, made once at the start, and every read of
+// the others reads it. Returns the Consts for the start.
+fn shared_constants(f: *VmFunction, keep: []bool) -> [..]VmInstr {
+    let entry: [..]VmInstr;
+    let writes = new([]i32, f.slots.len, context.temp_allocator);
+    let pure = new([]bool, f.slots.len, context.temp_allocator);
+    let made_by = new([]isize, f.slots.len, context.temp_allocator);
+    for (s in 0..f.slots.len)
+        pure[s] = f.slots[s].name.len == 0;
+    for (p in f.param_offsets) {
+        let s = slot_of(f, p);
+        if (s >= 0)
+            pure[s] = false;
+    }
+    if (f.ret_size > 0) {
+        let s = slot_of(f, f.ret_offset);
+        if (s >= 0)
+            pure[s] = false;
+    }
+    let ops: [..]Use;
+    ops.allocator = context.temp_allocator;
+    for (pc in 0..f.code.len) {
+        if (!keep[pc])
+            continue;
+        let i = f.code[pc];
+        uses(f, i, &ops);
+        for (u in ops) {
+            let s = slot_of(f, u.at);
+            if (s < 0)
+                continue;
+            let whole = u.at == f.slots[s].offset && u.size == f.slots[s].size;
+            if (!whole) // a part of it, or its address
+                pure[s] = false;
+            if (u.write) {
+                writes[s]++;
+                made_by[s] = pc;
+                if (i.op != .Const)
+                    pure[s] = false;
+            }
+        }
+    }
+    // the slot standing for each constant, and each pure slot's stand-in
+    let shared: Map(ConstKey, u32);
+    let to = new([]i64, f.slots.len, context.temp_allocator);
+    let any = false;
+    for (s in 0..f.slots.len) {
+        to[s] = -1;
+        if (!pure[s] || writes[s] != 1)
+            continue;
+        let i = f.code[made_by[s]];
+        let key = ConstKey.{ .kind = i.kind, .bits = i.imm };
+        let known, found = map_get(&shared, key);
+        if (!found) {
+            known = f.slots[s].offset;
+            map_put(&shared, key, known);
+            array_add(&entry, i);
+        }
+        to[s] = known as i64;
+        keep[made_by[s]] = false;
+        any = true;
+    }
+    if (!any)
+        return entry;
+    for (pc in 0..f.code.len) {
+        if (!keep[pc])
+            continue;
+        let i = &f.code[pc];
+        i.a = stand_in(f, to, i.a);
+        i.b = stand_in(f, to, i.b);
+        i.c = stand_in(f, to, i.c);
+        if (i.op == .Call) {
+            let call = &f.calls[i.imm];
+            call.fn_slot = stand_in(f, to, call.fn_slot);
+            for (k in 0..call.args.len)
+                call.args[k].slot = stand_in(f, to, call.args[k].slot);
+        }
+    }
+    return entry;
+}
+
+struct ConstKey {
+    kind: VmKind;
+    bits: u64;
+}
+
+// what reads `at` reads instead: its constant's slot (an operand an
+// instruction doesn't use can change too: nothing reads it)
+fn stand_in(f: *VmFunction, to: []i64, at: u32) -> u32 {
+    let s = slot_of(f, at);
+    if (s < 0 || to[s] < 0 || f.slots[s].offset != at)
+        return at;
+    return to[s] as u32;
+}
+
+// the kept instructions after `entry`, with the jumps renumbered (a jump to
+// one taken out goes to the next one kept; one to the start, past `entry`,
+// which runs once)
+fn compact(f: *VmFunction, keep: []bool, entry: []VmInstr) {
     let new_pc = new([]isize, f.code.len + 1, context.temp_allocator);
-    let n: isize = 0;
+    let n = entry.len;
     for (pc in 0..f.code.len) {
         new_pc[pc] = n;
         if (keep[pc])
             n++;
     }
     new_pc[f.code.len] = n;
-    if (n == f.code.len)
+    if (n == f.code.len && entry.len == 0)
         return;
-    let out: isize = 0;
+    let code: [..]VmInstr;
+    array_append(&code, entry);
     for (pc in 0..f.code.len) {
         if (!keep[pc])
             continue;
         let i = f.code[pc];
         if (i.op == .Jmp || i.op == .Jz || i.op == .Jnz)
             i.imm = new_pc[i.imm as isize] as u64;
-        f.code[out] = i;
-        out++;
+        array_add(&code, i);
     }
-    f.code.len = n;
+    f.code = code;
 }
 
 // the slots no operand uses any more (the frame's offsets don't change)
