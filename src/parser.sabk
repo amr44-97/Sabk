@@ -209,8 +209,17 @@ fn top_block(p: *Parser) -> *Node {
 }
 
 fn top_decl(p: *Parser) -> *Node {
-    if (at_directive(p, "import"))
+    if at_directive(p, "import") {
         return import_decl(p);
+    }
+
+    if  at_directive(p, "system_library") {
+        let t = directive(p);
+        let lib = library_decl(p, t, t);
+        expect(p, .Semicolon, "`;` after #system_library");
+        return lib;
+    }
+
     if (at_directive(p, "load")) {
         // `#load "file.sabk";`: the file's declarations join this module
         directive(p);
