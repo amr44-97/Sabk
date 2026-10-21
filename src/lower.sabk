@@ -1340,6 +1340,7 @@ fn convert(l: *Lower, value: u32, from: *Type, to: *Type) -> u32 {
 fn string_literal(l: *Lower, n: *Node) -> u32 {
     let bytes = string_literal_text(n);
     let sym = VmSymbol.{ .kind = .String, .text = bytes, .address = vm_intern(l.vm, bytes) };
+    _ = vm_register(l.vm, sym, bytes.len + 1);
     let t = concrete(l.vm, n.ty);
     if (t.kind == .Ptr)
         return addr(l, sym);
@@ -2002,7 +2003,9 @@ fn array_literal(l: *Lower, n: *Node, t: *Type) -> u32 {
         return s;
     if (l.lasting) {
         let size = (elem_size as isize) * items.len;
-        let base = addr(l, .{ .kind = .Data, .size = size, .address = vm_keep(l.vm, size) });
+        let sym = vm_register(l.vm, .{ .kind = .Data, .ty = array_type_of(&l.c.types, t.elem, items.len as u64),
+                                       .size = size, .address = vm_keep(l.vm, size) }, size);
+        let base = addr(l, sym);
         for (i in 0..items.len)
             store(l, offset(l, base, (i as u64) * (elem_size as u64)), expr(l, items[i]), elem_size);
         move(l, s, base, 8);

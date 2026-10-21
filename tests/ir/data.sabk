@@ -1,0 +1,13 @@
+// the program's data: each global's bytes as it starts, computed by the VM, and
+// its pointers as relocations (&symbol + addend): to strings, other globals,
+// an array literal's elements (data#n), functions; what they reach comes too
+struct Entry { name: string; value: i32; next: *Entry; }
+fn twice(x: i32) -> i32 { return x * 2; }
+let first = Entry.{ .name = "first", .value = 1 };
+let second = Entry.{ .name = "second", .value = 2, .next = &first };
+let names: []string = .["a", "bc"];
+let op: fn(i32) -> i32 = twice;
+let count: i32 = 7;
+fn main() -> i32 {
+    return second.next.value + names[1].len as i32 + op(count);
+}

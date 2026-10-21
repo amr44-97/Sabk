@@ -1,0 +1,96 @@
+fn main (frame 192, align 8)
+     0 *Context             ctx
+     8 i32                  return
+    16 *void                -
+    24 Entry                -
+    56 *void                -
+    64 i32                  -
+    72 *void                -
+    80 []string             -
+    96 i64                  -
+   104 u64                  -
+   112 *void                -
+   120 string               -
+   136 i32                  -
+   140 i32                  -
+   144 i32                  -
+   152 *void                -
+   160 fn(i32) -> i32       -
+   168 *void                -
+   176 i32                  -
+   180 i32                  -
+   184 i32                  -
+   188 i32                  -
+     0: t16 = &global second                         ; 12:12
+     1: t24 = load 32 [t16]                          ; 12:12
+     2: check t24+24 != null                         ; 12:24
+     3: t56 = t24+24 + 16                            ; 12:24
+     4: t64 = load 4 [t56]                           ; 12:24
+     5: t72 = &global names                          ; 12:32
+     6: t80 = load 16 [t72]                          ; 12:32
+     7: t96 = i64.1                                  ; 12:38
+     8: t104 = t96.i64 as u64                        ; 12:38
+     9: check t104 < t80+8                           ; 12:37
+    10: t112 = t80 + t104 * 16                       ; 12:37
+    11: t120 = load 16 [t112]                        ; 12:37
+    12: t136 = t120+8.i64 as i32                     ; 12:37
+    13: t140 = t64 +.i32 t136                        ; 12:30
+    14: t144 = t140 (4)                              ; 12:37
+    15: t152 = &global op                            ; 12:54
+    16: t160 = load 8 [t152]                         ; 12:54
+    17: t168 = &global count                         ; 12:57
+    18: t176 = load 4 [t168]                         ; 12:57
+    19: t180 = call [t160](ctx, t176)                ; 12:57
+    20: t184 = t180 (4)                              ; 12:57
+    21: t188 = t144 +.i32 t184                       ; 12:52
+    22: return = t188 (4)                            ; 12:57
+    23: return                                       ; 12:57
+    24: return                                       ; 12:57
+
+fn twice (frame 24, align 8)
+     0 *Context             ctx
+     8 i32                  x
+    12 i32                  return
+    16 i32                  -
+    20 i32                  -
+     0: t16 = i32.2                                  ; 5:38
+     1: t20 = x *.i32 t16                            ; 5:36
+     2: return = t20 (4)                             ; 5:38
+     3: return                                       ; 5:38
+     4: return                                       ; 5:38
+
+data global second (Entry, 32 bytes)
+     0: 00 00 00 00 00 00 00 00 06 00 00 00 00 00 00 00
+    16: 02 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+     0 = &"second"
+    24 = &global first
+
+data global names ([]string, 16 bytes)
+     0: 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00
+     0 = &data#1
+
+data global op (fn(i32) -> i32, 8 bytes)
+     0: 00 00 00 00 00 00 00 00
+     0 = &fn twice
+
+data global count (i32, 4 bytes)
+     0: 07 00 00 00
+
+data "second" (7 bytes)
+
+data global first (Entry, 32 bytes)
+     0: 00 00 00 00 00 00 00 00 05 00 00 00 00 00 00 00
+    16: 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+     0 = &"first"
+
+data data#1 ([2]string, 32 bytes)
+     0: 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00
+    16: 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00
+     0 = &"a"
+    16 = &"bc"
+
+data "first" (6 bytes)
+
+data "a" (2 bytes)
+
+data "bc" (3 bytes)

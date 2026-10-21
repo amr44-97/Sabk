@@ -42,6 +42,38 @@ fn ir_dump(vm: *Vm, f: *VmFunction) -> string {
     return out as string;
 }
 
+// a piece of the program's data: its bytes, 16 to a line, then where its
+// pointers point (their bytes are zero)
+fn ir_dump_data(d: VmData) -> string {
+    let out: [..]u8;
+    if (d.external) {
+        print_to(&out, "data % #foreign (%)\n", symbol_text(d.sym), type_name(d.ty));
+        return out as string;
+    }
+    if (d.ty == null)
+        print_to(&out, "data % (% bytes)\n", symbol_text(d.sym), d.bytes.len);
+    else
+        print_to(&out, "data % (%, % bytes)\n", symbol_text(d.sym), type_name(d.ty), d.bytes.len);
+    if (d.sym.kind == .String)
+        return out as string;
+    let k: isize = 0;
+    while (k < d.bytes.len) {
+        print_to(&out, "  %{4}:", k);
+        let end = if (k + 16 < d.bytes.len) k + 16 else d.bytes.len;
+        for (b in d.bytes[k..end])
+            print_to(&out, " %{02x}", b);
+        append_string(&out, "\n");
+        k = end;
+    }
+    for (r in d.relocs) {
+        if (r.addend == 0)
+            print_to(&out, "  %{4} = &%\n", r.at, symbol_text(r.target));
+        else
+            print_to(&out, "  %{4} = &% + %\n", r.at, symbol_text(r.target), r.addend);
+    }
+    return out as string;
+}
+
 #scope_file
 
 /* ---------------------------------------------------------------- checking */
@@ -238,7 +270,7 @@ fn symbol_text(sym: VmSymbol) -> string {
     case .String: return quoted(sym.text);
     case .TypeInfo: return tformat("type_info(%)", type_name(sym.ty));
     case .Context: return "default context";
-    case .Data: return tformat("data %", sym.size);
+    case .Data: return tformat("data#%", sym.id);
     }
     return "";
 }

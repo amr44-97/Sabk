@@ -17,6 +17,7 @@
 #import "std/map";
 #import "std/mem";
 #import "std/path";
+#import "std/sorting";
 #import "std/str";
 #import "ast";
 #import "const";
@@ -123,8 +124,9 @@ enum VmSymbolKind: u8 {
     TypeInfo,    // ty: type_info(ty), or an Any's
     Context,     // the default context, for code C calls and global
                  // initializers, which have none passed in
-    Data,        // size bytes: an array literal's elements in a global's
-                 // initializer or a #run, which outlive its frame
+    Data,        // size bytes of a ty: an array literal's elements in a
+                 // global's initializer or a #run, which outlive its frame;
+                 // a TypeInfo's fields or variants
 }
 
 struct VmSymbol {
@@ -133,7 +135,40 @@ struct VmSymbol {
     ty: *Type;
     text: string;
     size: isize;
+    id: i32;          // Data: a number of its own, in the program
     address: *void;
+}
+
+// memory the program can point at, in the compiler's: what a pointer in a
+// global's value is (see vm_program)
+struct VmBlock {
+    start: usize;
+    size: isize;
+    sym: VmSymbol;
+}
+
+// a global's (or a string's, or some data's) bytes as the program starts
+// with them: a pointer in them is a relocation, the address of a symbol
+// plus an addend, and its bytes are zero
+struct VmReloc {
+    at: u32;
+    target: VmSymbol;
+    addend: i64;
+}
+
+struct VmData {
+    sym: VmSymbol;
+    ty: *Type;           // what the bytes hold (null for a string's)
+    bytes: []u8;
+    relocs: [..]VmReloc;
+    external: bool;      // a C variable: C has its bytes
+}
+
+// what the program is, for a backend: main first, then every function and
+// piece of data it reaches
+struct VmProgram {
+    functions: [..]*VmFunction;
+    data: [..]VmData;
 }
 
 struct VmFunction {
@@ -191,6 +226,10 @@ struct Vm {
     ctx: *u8;
     failed: bool;
     error: VmError;
+
+    blocks: [..]VmBlock; // by start, once sorted
+    blocks_sorted: bool;
+    data_count: i32;     // the Data symbols made
 
     // running a whole program (--interp), not #run code: no step limit,
     // exit() ends it, and a failure is the program's panic
@@ -478,6 +517,21 @@ fn is_build_function(name: string) -> bool {
 /* -------------------------------------------------------------- the VM */
 
 // NUL-terminated, kept forever
+// `sym`'s memory, `size` bytes at its address: a pointer into it is a
+// relocation to it (an interior one, or one past its end, has an addend)
+fn vm_register(vm: *Vm, sym: VmSymbol, size: isize) -> VmSymbol {
+    if (sym.address == null)
+        return sym;
+    let registered = sym;
+    if (sym.kind == .Data) {
+        vm.data_count++;
+        registered.id = vm.data_count;
+    }
+    array_add(&vm.blocks, VmBlock.{ .start = sym.address as usize, .size = size, .sym = registered });
+    vm.blocks_sorted = false;
+    return registered;
+}
+
 fn vm_intern(vm: *Vm, bytes: string) -> *u8 {
     let p = alloc(bytes.len + 1) as *u8;
     copy_memory(p, bytes.ptr, bytes.len);
@@ -537,12 +591,14 @@ fn vm_global_storage(vm: *Vm, decl: *Node) -> *u8 {
             return null;
         }
         map_put(&vm.globals, decl, address);
+        _ = vm_register(vm, .{ .kind = .Global, .decl = decl, .address = address }, vm_size_of(vm, decl.ty) as isize);
         return address;
     }
     let t = concrete(vm, decl.ty);
     let size = vm_size_of(vm, t);
     let storage = vm_keep(vm, size as isize, vm_align_of(vm, t) as isize);
     map_put(&vm.globals, decl, storage);
+    _ = vm_register(vm, .{ .kind = .Global, .decl = decl, .address = storage }, size as isize);
     let value = value_of(decl);
     if (value != null || has_defaults(vm.c, t)) {
         // the initializer (or the type's defaults) is a constant: run it
@@ -600,6 +656,7 @@ fn vm_type_info(vm: *Vm, of_type: *Type) -> *u8 {
     let info_type = vm.c.type_info_type;
     let info = vm_keep(vm, vm_size_of(vm, info_type) as isize);
     map_put(&vm.type_infos, t, info); // first: a type can refer to itself
+    _ = vm_register(vm, .{ .kind = .TypeInfo, .ty = t, .address = info }, vm_size_of(vm, info_type) as isize);
     let shape = shape_of(vm.c, t);
     set_int(info, info_type, "kind", type_kind_value(vm.c, shape.kind) as u64);
     set_text(vm, info, info_type, "name", type_name(t));
@@ -613,6 +670,9 @@ fn vm_type_info(vm: *Vm, of_type: *Type) -> *u8 {
         let field_type = prelude_type(vm, "TypeField");
         let size = vm_size_of(vm, field_type) as isize;
         let fields = vm_keep(vm, size * shape.fields.len);
+        let fields_type = array_type_of(&vm.c.types, field_type, shape.fields.len as u64);
+        _ = vm_register(vm, .{ .kind = .Data, .ty = fields_type, .size = size * shape.fields.len, .address = fields },
+                    size * shape.fields.len);
         for (i in 0..shape.fields.len) {
             let f = fields + i * size;
             set_text(vm, f, field_type, "name", shape.fields[i].name);
@@ -625,6 +685,9 @@ fn vm_type_info(vm: *Vm, of_type: *Type) -> *u8 {
         let variant_type = prelude_type(vm, "TypeVariant");
         let size = vm_size_of(vm, variant_type) as isize;
         let variants = vm_keep(vm, size * shape.variants.len);
+        let variants_type = array_type_of(&vm.c.types, variant_type, shape.variants.len as u64);
+        _ = vm_register(vm, .{ .kind = .Data, .ty = variants_type, .size = size * shape.variants.len, .address = variants },
+                    size * shape.variants.len);
         for (i in 0..shape.variants.len) {
             let v = variants + i * size;
             let shaped = shape.variants[i];
@@ -831,44 +894,66 @@ fn vm_bake(vm: *Vm, of_type: *Type, p: *u8, at: Token) -> *Node {
 // --verify-ir: check each function's IR once it's compiled (see ir.sabk)
 let verify_ir = false;
 
-// the program's functions as the VM compiles them: main first, then what
-// it calls, as found (--ir); null and an error if one can't be compiled
-fn vm_lower_program(vm: *Vm, main_fn: *Node) -> [..]*VmFunction {
+// the program as the VM compiles it: main first, then every function and
+// piece of data it reaches, through calls, function values, and the
+// symbols its code and data point at (--ir, and backends). A failure is
+// reported, and leaves it empty.
+fn vm_program(vm: *Vm, main_fn: *Node) -> VmProgram {
     start_program(vm);
-    let all: [..]*VmFunction;
-    let seen: Map(*VmFunction, bool);
-    array_add(&all, vm_function_for(vm, main_fn));
-    let i: isize = 0;
-    while (i < all.len) {
-        let f = all[i];
-        i++;
-        if (f.native)
-            continue;
-        if (!compile(vm, f)) {
-            program_failure(vm);
-            all.len = 0;
-            return all;
-        }
-        // what it calls, and the functions it takes as values
-        let reached: [..]*VmFunction;
-        reached.allocator = context.temp_allocator;
-        for (call in f.calls)
-            if (call.callee != null)
-                array_add(&reached, call.callee);
-        for (sym in f.symbols) {
-            if (sym.kind == .Function)
-                array_add(&reached, sym.address as *VmFunction);
-            else if (sym.kind == .CFunction && sym.decl.kind is .Fn{body} && body != null)
-                array_add(&reached, vm_function_for(vm, sym.decl)); // a #c_call of ours
-        }
-        for (g in reached) {
-            if (!map_has(&seen, g) && g != all[0]) {
-                map_put(&seen, g, true);
-                array_add(&all, g);
+    let program: VmProgram;
+    let seen: Map(*void, bool); // functions and data, by address
+    let to_bake: [..]VmSymbol;
+    let main_f = vm_function_for(vm, main_fn);
+    array_add(&program.functions, main_f);
+    map_put(&seen, main_f, true);
+    let fi: isize = 0;
+    let di: isize = 0;
+    while (fi < program.functions.len || di < to_bake.len) {
+        let found: [..]VmSymbol; // what was reached, to add
+        found.allocator = context.temp_allocator;
+        if (fi < program.functions.len) {
+            let f = program.functions[fi];
+            fi++;
+            if (f.native)
+                continue;
+            if (!compile(vm, f)) {
+                program_failure(vm);
+                return .{};
             }
+            for (call in f.calls)
+                if (call.callee != null)
+                    array_add(&found, VmSymbol.{ .kind = .Function, .decl = call.callee.decl, .address = call.callee });
+            array_append(&found, f.symbols);
+        } else {
+            let sym = to_bake[di];
+            di++;
+            let data, why = bake(vm, sym);
+            if (why.len > 0) {
+                let none: Token;
+                vm_fail(vm, if (sym.decl != null) sym.decl.tok else none, why, true);
+                program_failure(vm);
+                return .{};
+            }
+            for (r in data.relocs)
+                array_add(&found, r.target);
+            array_add(&program.data, data);
+        }
+        for (sym in found) {
+            let target = sym;
+            if (sym.kind == .CFunction && sym.decl.kind is .Fn{body} && body != null) {
+                // a #c_call of ours: C calls it by its own address
+                target = .{ .kind = .Function, .decl = sym.decl, .address = vm_function_for(vm, sym.decl) };
+            }
+            if (target.kind == .Context || target.address == null || map_has(&seen, target.address))
+                continue;
+            map_put(&seen, target.address, true);
+            if (target.kind == .Function)
+                array_add(&program.functions, target.address as *VmFunction);
+            else if (target.kind != .CFunction)
+                array_add(&to_bake, target);
         }
     }
-    return all;
+    return program;
 }
 
 // --interp: runs the program's `main` in the VM, as its executable would
@@ -914,8 +999,152 @@ fn start_program(vm: *Vm) {
     // is compiled again (and the context made again, from fresh globals)
     map_clear(&vm.functions);
     map_clear(&vm.globals);
+    map_clear(&vm.type_infos);
+    vm.blocks.len = 0;
+    vm.data_count = 0;
     vm.ctx = null;
 }
+
+// `sym`'s bytes and what the pointers in them point at, or why it can't
+// be static data
+fn bake(vm: *Vm, sym: VmSymbol) -> (VmData, string) {
+    let data = VmData.{ .sym = sym };
+    let size: isize = 0;
+    switch (sym.kind) {
+    case .Global:
+        data.ty = concrete(vm, sym.decl.ty);
+        if (sym.decl.kind is .Let{is_extern: true}) { // C's own
+            data.external = true;
+            return data, "";
+        }
+        size = vm_size_of(vm, data.ty) as isize;
+    case .String:
+        return VmData.{ .sym = sym, .bytes = clone_slice((sym.address as *u8)[0..sym.text.len + 1]) }, "";
+    case .TypeInfo:
+        data.ty = vm.c.type_info_type;
+        size = vm_size_of(vm, data.ty) as isize;
+    case .Data:
+        data.ty = sym.ty;
+        size = sym.size;
+    default:
+        return data, tformat("[internal error] % isn't data", sym.kind);
+    }
+    data.bytes = clone_slice((sym.address as *u8)[0..size]);
+    let why = find_pointers(vm, &data, data.ty, 0);
+    return data, why;
+}
+
+// the pointers in the value of type `t` at `at` in `data`: each is null or
+// becomes a relocation (its bytes zeroed)
+fn find_pointers(vm: *Vm, data: *VmData, of_type: *Type, at: u32) -> string {
+    let t = concrete(vm, of_type);
+    switch (t.kind) {
+    case .Ptr, .Rawptr, .Fn, .Null:
+        return relocate(vm, data, at);
+    case .Slice:
+        return relocate(vm, data, at);
+    case .DynArray: // pointer, length, capacity, allocator
+        let why = relocate(vm, data, at);
+        if (why.len > 0)
+            return why;
+        return find_pointers(vm, data, vm.c.allocator_type, at + 24);
+    case .Array:
+        if (!holds_pointers(vm, t.elem))
+            return "";
+        let size = vm_size_of(vm, t.elem);
+        for (i in 0..t.len) {
+            let why = find_pointers(vm, data, t.elem, at + (i as u32) * size);
+            if (why.len > 0)
+                return why;
+        }
+    case .Struct:
+        for (fl in t.fields) {
+            let why = find_pointers(vm, data, fl.ty, at + fl.offset as u32);
+            if (why.len > 0)
+                return why;
+        }
+    case .Union:
+        // which field holds the value isn't known: a word that's the
+        // address of something the program has is taken as one
+        if (!holds_pointers(vm, t))
+            return "";
+        let word: u32 = 0;
+        while (word + 8 <= vm_size_of(vm, t)) {
+            let v = ((data.bytes.ptr + (at + word) as isize) as *usize).*;
+            if (v != 0 && target_of(vm, v).kind != .Context)
+                relocate(vm, data, at + word);
+            word += 8;
+        }
+    default:
+    }
+    return "";
+}
+
+fn holds_pointers(vm: *Vm, of_type: *Type) -> bool {
+    let t = concrete(vm, of_type);
+    switch (t.kind) {
+    case .Ptr, .Rawptr, .Fn, .Null, .Slice, .DynArray: return true;
+    case .Array: return holds_pointers(vm, t.elem);
+    case .Struct, .Union:
+        for (fl in t.fields)
+            if (holds_pointers(vm, fl.ty))
+                return true;
+    default:
+    }
+    return false;
+}
+
+// the pointer at `at` in `data`, as a relocation
+fn relocate(vm: *Vm, data: *VmData, at: u32) -> string {
+    let p = (data.bytes.ptr + at as isize) as *usize;
+    let v = p.*;
+    if (v == 0)
+        return "";
+    let target = target_of(vm, v);
+    if (target.kind == .Context) { // what nothing names
+        let what = if (data.sym.decl != null) tformat("the global `%`", data.sym.decl.tok.text) else "data";
+        return tformat("% holds a pointer to memory made while compiling, which the program can't have", what);
+    }
+    array_add(&data.relocs, VmReloc.{ .at = at, .target = target, .addend = (v - (target.address as usize)) as i64 });
+    p.* = 0;
+    return "";
+}
+
+// what the program's address `v` is: a symbol, at or before it (the
+// difference is the addend); .Context if none
+fn target_of(vm: *Vm, v: usize) -> VmSymbol {
+    if (!vm.blocks_sorted) {
+        sort_by(vm.blocks, block_before);
+        vm.blocks_sorted = true;
+    }
+    // the last block starting at or before v, if v is in it or just past it
+    let lo: isize = 0;
+    let hi = vm.blocks.len;
+    while (lo < hi) {
+        let mid = (lo + hi) / 2;
+        if (vm.blocks[mid].start <= v)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo > 0) {
+        let b = vm.blocks[lo - 1];
+        if (v <= b.start + b.size as usize)
+            return b.sym;
+    }
+    if (map_has(&vm.function_values, v as *void)) {
+        let f = v as *VmFunction;
+        return .{ .kind = .Function, .decl = f.decl, .address = f };
+    }
+    for (entry in vm.functions.entries) { // a C function's address, or a closure C calls ours by
+        let f = entry.value;
+        if ((f.native && f.address as usize == v) || (f.closure_code != null && f.closure_code as usize == v))
+            return .{ .kind = .CFunction, .decl = f.decl, .address = v as *void };
+    }
+    return .{ .kind = .Context };
+}
+
+fn block_before(a: VmBlock, b: VmBlock) -> bool { return a.start < b.start; }
 
 fn program_failure(vm: *Vm) -> i32 {
     let e = &vm.error;
@@ -1169,7 +1398,9 @@ fn set_slice(base: *u8, of: *Type, name: string, data: *u8, len: u64) {
 }
 
 fn set_text(vm: *Vm, base: *u8, of: *Type, name: string, text: string) {
-    set_slice(base, of, name, vm_intern(vm, text), text.len as u64);
+    let p = vm_intern(vm, text);
+    _ = vm_register(vm, .{ .kind = .String, .text = text, .address = p }, text.len + 1);
+    set_slice(base, of, name, p, text.len as u64);
 }
 
 fn prelude_type(vm: *Vm, name: string) -> *Type {

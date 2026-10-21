@@ -501,22 +501,25 @@ fn interpret(r: *Resolver, c: *Checker) -> i32 {
     return vm_run_program(c.vm, main_fn);
 }
 
-// --ir: the IR of main and of what it calls, as the VM compiles them
+// --ir: the IR of main and of what it reaches (functions, then data), as
+// the VM compiles them
 fn print_ir(r: *Resolver, c: *Checker) -> i32 {
     let main_fn = program_main(r, c);
     if (main_fn == null)
         return 1;
     if (c.vm == null)
         c.vm = make_vm(c);
-    let functions = vm_lower_program(c.vm, main_fn);
-    if (functions.len == 0)
+    let program = vm_program(c.vm, main_fn);
+    if (program.functions.len == 0)
         return 1;
-    for (f in functions) {
+    for (f in program.functions) {
         if (f.native)
             println("fn % #foreign\n", f.name);
         else
             println(ir_dump(c.vm, f));
     }
+    for (d in program.data)
+        println(ir_dump_data(d));
     return 0;
 }
 
