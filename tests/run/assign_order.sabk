@@ -1,0 +1,31 @@
+// evaluation order in assignments: the target is read before the value
+// runs, for x op= value too, which C itself leaves open; every backend
+// and #run agree
+#import "std/io";
+struct Pair { a: i32; b: i32; }
+fn bump(p: *i32) -> i32 { p.* += 10; return 1; }
+fn grow(p: *Pair) -> i32 { p.a = 100; return 5; }
+fn main() {
+    let x: i32 = 1;
+    x += bump(&x);            // x is read before bump changes it: 1 + 1
+    println("x %", x);
+    let y: i32 = 2;
+    y = bump(&y) + y;         // y read after the call: 1 + 12
+    println("y %", y);
+    let s = Pair.{ .a = 1, .b = 2 };
+    s.a += grow(&s);          // 1 + 5
+    println("s % %", s.a, s.b);
+    let a: i32 = 3;
+    let b: i32 = 4;
+    a, b = b, a;
+    println("swap % %", a, b);
+    let n: i64 = 5;
+    n <<= 2; n -= 1; n *= 3; n /= 2; n %= 7; n++; n--; n++;
+    println("n %", n);
+    let f: f64 = 1.5;
+    f += 2.0; f++;
+    println("f %", f);
+    let q = Pair.{};
+    q.b = q.a + 7; q.a = q.b * 2;
+    println("q % %", q.a, q.b);
+}

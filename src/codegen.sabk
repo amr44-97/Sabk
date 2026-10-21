@@ -1049,6 +1049,14 @@ fn simple_stmt(g: *CodeGen, n: *Node) -> string {
         }
         let op = n.tok.text;
         let t = target.ty;
+        if (op != "=" && op != "/=" && op != "%=" && has_call(value)) {
+            // x += f(): x is read before f runs, which C leaves open (its
+            // `x += f()` doesn't order them)
+            let p = tmp(g, "target");
+            let current = tmp(g, "current");
+            return cat("({ ", c_type(g, t), " *", p, " = &", expr(g, target), "; ", c_type(g, t), " ", current, " = *", p,
+                       "; *", p, " = ", current, " ", op[0..op.len - 1], " (", expr(g, value), "); })");
+        }
         if (!(op == "/=" || op == "%=") && targets_in_order(g, target, value)) {
             // where it goes first, then the value: xs[i] = f() reads i first
             let p = tmp(g, "target");
