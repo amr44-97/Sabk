@@ -1,0 +1,856 @@
+// Writes QBE's IL (vendor/qbe, https://c9x.me/compile/) from the IR: the
+// whole program as vm_program gives it, as backend_c.sabk does for C.
+// `--qbe` picks it; QBE turns the IL into assembly, and the C compiler
+// assembles it and links it with a small runtime in C (the runtime's core,
+// runtime_start.c, and what the IL calls in it: panics, bounds failures,
+// main's error report).
+//
+// Each slot is a stack allocation of its own, which QBE promotes to a
+// register when the code only loads and stores it whole; an operand is a
+// load or a store at the slot plus its offset. Calls follow backend_c's
+// convention: the context first, a scalar by value, an aggregate as a
+// pointer to its bytes, an aggregate result through a pointer before
+// everything; C's functions take and return scalars, as in the VM.
+
+#import "std/array";
+#import "std/fmt";
+#import "std/map";
+#import "std/str";
+#import "ast";
+#import "module";
+#import "resolve";
+#import "token";
+#import "types";
+#import "check";
+#import "vm";
+#import "ir";
+
+// the IL for the program whose entry point is `main_fn`, and the C of the
+// runtime it's linked with; ("", "") if errors were reported
+fn generate_qbe(r: *Resolver, c: *Checker, main_fn: *Node) -> (string, string) {
+    if (c.vm == null)
+        c.vm = make_vm(c);
+    let program = vm_program(c.vm, main_fn, true);
+    if (program.functions.len == 0)
+        return "", "";
+    if (!ir_check_build_api(r, &program) || !ir_link(r, c, &program))
+        return "", "";
+    let g = QGen.{ .vm = c.vm, .c = c, .r = r, .program = &program };
+    name_all(&g);
+    let ctx_size = vm_size_of(g.vm, c.context_type);
+    print_to(&g.data_out, "data $sabk_ctx = align 16 { z % }\n", ctx_size);
+    print_to(&g.data_out, "data $sabk_boot_ctx = align 16 { z % }\n", ctx_size);
+    write_data(&g);
+    for (f in program.functions)
+        if (!f.native)
+            write_function(&g, f);
+    write_main(&g, main_fn);
+    let il: [..]u8;
+    append_string(&il, g.data_out as string);
+    append_string(&il, g.out as string);
+    if (g.errors > 0)
+        return "", "";
+    return il as string, runtime(&g, main_fn);
+}
+
+#scope_file
+
+const C_PRELUDE = #embed("runtime_start.c");
+
+struct QGen {
+    vm: *Vm;
+    c: *Checker;
+    r: *Resolver;
+    program: *VmProgram;
+    errors: isize;
+    names: Map(*void, string);    // a function's or a piece of data's symbol, by its address
+    texts: Map(string, string);   // a location's or message's data, by its text
+    out: [..]u8;                  // the functions
+    data_out: [..]u8;             // the data
+    temps: i32;                   // %v1, %v2, ... and @b1, @b2, ...
+    // the function being written
+    f: *VmFunction;
+    targets: Map(isize, bool);    // the instructions jumped to
+    open: bool;                   // is a block open (no jump has ended it)
+}
+
+fn fail(g: *QGen, t: Token, message: string) {
+    say(g.r, .Error, t, message);
+    g.errors++;
+}
+
+fn sanitized(name: string) -> string {
+    let out: [..]u8;
+    for (ch in name) {
+        let ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_';
+        array_add(&out, if (ok) ch else '_');
+    }
+    return out as string;
+}
+
+// our functions f3_main, data g5_count (a global), s6 (a string), d7 (data),
+// t8 (a TypeInfo); a C function or variable by its C symbol
+fn name_all(g: *QGen) {
+    let n = 0;
+    for (f in g.program.functions) {
+        n++;
+        if (f.native)
+            map_put(&g.names, f, c_symbol(f.decl));
+        else
+            map_put(&g.names, f, tformat("f%_%", n, sanitized(if (f.decl != null) f.decl.tok.text else f.name)));
+    }
+    for (d in g.program.data) {
+        n++;
+        let name = "";
+        if (d.external)
+            name = c_symbol(d.sym.decl);
+        else
+            name = switch (d.sym.kind) {
+            case .Global: tformat("g%_%", n, sanitized(d.sym.decl.tok.text));
+            case .String: tformat("s%", n);
+            case .Data: tformat("d%", n);
+            default: tformat("t%", n);
+            };
+        map_put(&g.names, d.sym.address, name);
+    }
+}
+
+fn symbol_name(g: *QGen, sym: VmSymbol) -> string {
+    switch (sym.kind) {
+    case .Context: return "$sabk_ctx";
+    case .CFunction:
+        return tformat("$%", map_get(&g.names, vm_function_for(g.vm, sym.decl)) or_else "sabk_unknown");
+    default:
+        return tformat("$%", map_get(&g.names, sym.address) or_else "sabk_unknown");
+    }
+}
+
+// the data holding `text` and a NUL, made once
+fn text_data(g: *QGen, text: string) -> string {
+    let known = map_get(&g.texts, text) or_else "";
+    if (known.len > 0)
+        return known;
+    let name = tformat("$sabk_text%", g.texts.entries.len + 1);
+    print_to(&g.data_out, "data % = { b", name);
+    for (ch in text)
+        print_to(&g.data_out, " %", ch);
+    append_string(&g.data_out, " 0 }\n");
+    map_put(&g.texts, copy_string(text), name);
+    return name;
+}
+
+/* ------------------------------------------------------------------- data */
+
+fn write_bytes(out: *[..]u8, bytes: []u8, first: *bool) {
+    if (bytes.len == 0)
+        return;
+    let zero = true;
+    for (b in bytes)
+        if (b != 0)
+            zero = false;
+    append_string(out, if (first.*) " " else ", ");
+    first.* = false;
+    if (zero) {
+        print_to(out, "z %", bytes.len);
+        return;
+    }
+    append_string(out, "b");
+    for (b in bytes)
+        print_to(out, " %", b);
+}
+
+fn write_data(g: *QGen) {
+    let out = &g.data_out;
+    for (d in g.program.data) {
+        if (d.external)
+            continue; // C defines it
+        let name = map_get(&g.names, d.sym.address) or_else "";
+        let align: u32 = if (d.ty == null) 1 else vm_align_of(g.vm, d.ty);
+        print_to(out, "data $% = align % {", name, if (align == 0) 1 else align);
+        let at: isize = 0;
+        let first = true;
+        for (r in d.relocs) {
+            write_bytes(out, d.bytes[at..r.at as isize], &first);
+            append_string(out, if (first) " " else ", ");
+            first = false;
+            print_to(out, "l % + %", symbol_name(g, r.target), r.addend);
+            at = r.at as isize + 8;
+        }
+        write_bytes(out, d.bytes[at..], &first);
+        if (d.bytes.len == 0)
+            append_string(out, " z 1");
+        append_string(out, " }\n");
+    }
+    // the TypeInfos of the failure enums, by id, for sabk_error_type (C's)
+    let types = g.program.error_types;
+    if (types.len > 0) {
+        append_string(out, "export data $sabk_rt_error_types = {");
+        for (k in 0..types.len)
+            print_to(out, "% l %", if (k > 0) "," else "", symbol_name(g, types[k]));
+        append_string(out, " }\n");
+    }
+}
+
+/* ------------------------------------------------------------------ kinds */
+
+// the base type a value of kind `k` is held in
+fn cls(k: VmKind) -> string {
+    return switch (k) {
+    case .I64, .U64, .Ptr: "l";
+    case .F32: "s";
+    case .F64: "d";
+    default: "w";
+    };
+}
+
+// the type a parameter, argument or result of kind `k` has in a call
+fn abi(k: VmKind) -> string {
+    return switch (k) {
+    case .I8: "sb";
+    case .U8, .Bool: "ub";
+    case .I16: "sh";
+    case .U16: "uh";
+    default: cls(k);
+    };
+}
+
+fn load_op(k: VmKind) -> string {
+    return switch (k) {
+    case .I8: "loadsb";
+    case .U8, .Bool: "loadub";
+    case .I16: "loadsh";
+    case .U16: "loaduh";
+    case .I32, .U32: "loadw";
+    case .F32: "loads";
+    case .F64: "loadd";
+    default: "loadl";
+    };
+}
+
+fn store_op(k: VmKind) -> string {
+    return switch (k) {
+    case .I8, .U8, .Bool: "storeb";
+    case .I16, .U16: "storeh";
+    case .I32, .U32: "storew";
+    case .F32: "stores";
+    case .F64: "stored";
+    default: "storel";
+    };
+}
+
+fn signed_kind(k: VmKind) -> bool { return k == .I8 || k == .I16 || k == .I32 || k == .I64; }
+
+fn is_scalar_type(g: *QGen, of_type: *Type) -> bool {
+    let t = concrete(g.vm, of_type);
+    switch (t.kind) {
+    case .Int, .Float, .Bool, .Enum, .Ptr, .Rawptr, .Fn, .Null, .UntypedInt, .UntypedFloat: return true;
+    default: return false;
+    }
+}
+
+fn returns_bytes(g: *QGen, ret: *Type) -> bool {
+    let t = concrete(g.vm, ret);
+    return t.kind != .Void && vm_size_of(g.vm, t) > 0 && !is_scalar_type(g, t);
+}
+
+fn returns_nothing(g: *QGen, ret: *Type) -> bool {
+    let t = concrete(g.vm, ret);
+    return t.kind == .Void || vm_size_of(g.vm, t) == 0;
+}
+
+fn is_c_abi(f: *VmFunction) -> bool { return f.native || f.decl.kind is .Fn{is_extern: true}; }
+
+/* ------------------------------------------------------------- functions */
+
+fn temp(g: *QGen) -> string {
+    g.temps++;
+    return tformat("%%v%", g.temps);
+}
+
+fn block(g: *QGen) -> string {
+    g.temps++;
+    return tformat("@b%", g.temps);
+}
+
+fn line(g: *QGen, text: string) {
+    if (!g.open) { // code after a jump, which nothing reaches: a block of its own
+        print_to(&g.out, "%\n", block(g));
+        g.open = true;
+    }
+    print_to(&g.out, "\t%\n", text);
+}
+
+fn label(g: *QGen, name: string) {
+    print_to(&g.out, "%\n", name);
+    g.open = true;
+}
+
+fn jump(g: *QGen, text: string) {
+    line(g, text);
+    g.open = false;
+}
+
+fn slot_index(f: *VmFunction, at: u32) -> isize {
+    let lo: isize = 0;
+    let hi = f.slots.len;
+    while (lo < hi) {
+        let mid = (lo + hi) / 2;
+        if (f.slots[mid].offset <= at)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    return lo - 1;
+}
+
+// the address of the operand at `at`
+fn addr(g: *QGen, at: u32) -> string {
+    let i = slot_index(g.f, at);
+    if (i < 0)
+        return "0";
+    let inner = at - g.f.slots[i].offset;
+    if (inner == 0)
+        return tformat("%%s%", i);
+    let t = temp(g);
+    line(g, tformat("% =l add %%s%, %", t, i, inner));
+    return t;
+}
+
+// the operand at `at`, as a value of kind `k`
+fn load(g: *QGen, at: u32, k: VmKind) -> string {
+    let a = addr(g, at);
+    let t = temp(g);
+    line(g, tformat("% =% % %", t, cls(k), load_op(k), a));
+    return t;
+}
+
+fn store(g: *QGen, at: u32, k: VmKind, value: string) {
+    let a = addr(g, at);
+    line(g, tformat("% %, %", store_op(k), value, a));
+}
+
+// `size` bytes from address `from` to address `to`: inline when small
+fn copy(g: *QGen, to: string, from: string, size: u64) {
+    if (size == 0)
+        return;
+    if (size <= 64)
+        line(g, tformat("blit %, %, %", from, to, size));
+    else
+        line(g, tformat("call $memmove(l %, l %, l %)", to, from, size));
+}
+
+// `size` bytes at address `to` set to `byte`
+fn fill(g: *QGen, to: string, size: u64, byte: u8) {
+    if (size > 64) {
+        line(g, tformat("call $memset(l %, w %, l %)", to, byte, size));
+        return;
+    }
+    let pattern: u64 = 0;
+    for (k in 0..8)
+        pattern = (pattern << 8) | byte as u64;
+    let at: u64 = 0;
+    while (at < size) {
+        let width: u64 = if (size - at >= 8) 8 else if (size - at >= 4) 4 else 1;
+        let p = to;
+        if (at > 0) {
+            p = temp(g);
+            line(g, tformat("% =l add %, %", p, to, at));
+        }
+        let op = if (width == 8) "storel" else if (width == 4) "storew" else "storeb";
+        let value = if (width == 8) tformat("%", pattern as i64) else if (width == 4) tformat("%", pattern & 0xFFFFFFFF) else tformat("%", byte);
+        line(g, tformat("% %, %", op, value, p));
+        at += width;
+    }
+}
+
+fn location(g: *QGen, i: VmInstr) -> string {
+    let text = "<unknown>";
+    if (g.f.locs.len > 0) {
+        let t = g.f.locs[i.loc];
+        let m = module_of(g.r, t.text.ptr);
+        if (m != null)
+            text = tformat("%:%:%", m.path, t.line, t.column);
+    }
+    return text_data(g, text);
+}
+
+// a word: is the pointer `p` not null (compared, not given to jnz as it
+// is: QBE can't jump on what it knows is a symbol's address)
+fn nonzero_pointer(g: *QGen, p: string) -> string {
+    let c = temp(g);
+    line(g, tformat("% =w cnel %, 0", c, p));
+    return c;
+}
+
+// a panic unless `ok` (a word) is nonzero
+fn panic_unless(g: *QGen, ok: string, i: VmInstr, message: string) {
+    let good, bad = block(g), block(g);
+    jump(g, tformat("jnz %, %, %", ok, good, bad));
+    label(g, bad);
+    line(g, tformat("call $sabk_rt_panic(l %, l %)", location(g, i), text_data(g, message)));
+    jump(g, "hlt");
+    label(g, good);
+}
+
+fn signature(g: *QGen, f: *VmFunction) -> string {
+    let name = map_get(&g.names, f) or_else "";
+    let t = f.decl.ty;
+    let c_abi = is_c_abi(f);
+    let params: [..]string;
+    if (!c_abi && returns_bytes(g, t.ret))
+        array_add(&params, "l %rt_out");
+    if (!c_abi)
+        array_add(&params, "l %p0");
+    for (k in 0..t.params.len) {
+        let pt = concrete(g.vm, t.params[k]);
+        if (is_scalar_type(g, pt))
+            array_add(&params, tformat("% %%p%", abi(kind_of(pt)), k + 1));
+        else if (c_abi)
+            fail(g, f.decl.tok, tformat("--qbe can't pass a % by value to or from C yet", type_name(pt)));
+        else
+            array_add(&params, tformat("l %%p%", k + 1));
+    }
+    let ret = "";
+    if (!returns_nothing(g, t.ret)) {
+        if (is_scalar_type(g, t.ret))
+            ret = tformat("% ", abi(kind_of(concrete(g.vm, t.ret))));
+        else if (c_abi)
+            fail(g, f.decl.tok, tformat("--qbe can't return a % from C yet", type_name(t.ret)));
+    }
+    return tformat("function %$%(%)", ret, name, join(params, ", "));
+}
+
+fn write_function(g: *QGen, f: *VmFunction) {
+    g.f = f;
+    g.temps = 0;
+    map_clear(&g.targets);
+    print_to(&g.out, "\n# %\n% {\n@start\n", f.name, signature(g, f));
+    g.open = true;
+    for (k in 0..f.slots.len) {
+        let s = f.slots[k];
+        let a = if (s.ty == null) 1 else vm_align_of(g.vm, s.ty);
+        let size = if (s.size == 0) 1 else s.size;
+        if (a <= 16) {
+            let op = if (a <= 4) "alloc4" else if (a <= 8) "alloc8" else "alloc16";
+            line(g, tformat("%%s% =l % %", k, op, size));
+        } else { // aligned past 16 (#align): room to move the start up
+            let raw = temp(g);
+            line(g, tformat("% =l alloc16 %", raw, size + a));
+            let up = temp(g);
+            line(g, tformat("% =l add %, %", up, raw, a - 1));
+            line(g, tformat("%%s% =l and %, %", k, up, -(a as i64)));
+        }
+    }
+    // the parameters into their slots: p0 is the context, for ours
+    let c_abi = is_c_abi(f);
+    let params = f.decl.ty.params;
+    for (k in 0..f.param_offsets.len) {
+        let at = f.param_offsets[k];
+        let p = if (c_abi) k + 1 else k;
+        let pt = if (!c_abi && k == 0) null else concrete(g.vm, params[if (c_abi) k else k - 1]);
+        if (pt == null)
+            store(g, at, .Ptr, "%p0");
+        else if (is_scalar_type(g, pt))
+            store(g, at, kind_of(pt), tformat("%%p%", p));
+        else
+            copy(g, addr(g, at), tformat("%%p%", p), vm_size_of(g.vm, pt) as u64);
+    }
+    for (i in f.code)
+        if (i.op == .Jmp || i.op == .Jz || i.op == .Jnz)
+            map_put(&g.targets, i.imm as isize, true);
+    for (pc in 0..f.code.len) {
+        if (map_has(&g.targets, pc))
+            label(g, tformat("@L%", pc));
+        write_instr(g, f.code[pc]);
+    }
+    if (map_has(&g.targets, f.code.len))
+        label(g, tformat("@L%", f.code.len));
+    if (g.open)
+        jump(g, "hlt"); // the IR ends every way out with a return
+    append_string(&g.out, "}\n");
+}
+
+fn cmp_name(op: VmCmp, k: VmKind) -> string {
+    if (is_float(k)) {
+        return switch (op) {
+        case .Eq: "eq";
+        case .Ne: "ne";
+        case .Lt: "lt";
+        case .Gt: "gt";
+        case .Le: "le";
+        case .Ge: "ge";
+        };
+    }
+    let s = signed_kind(k);
+    return switch (op) {
+    case .Eq: "eq";
+    case .Ne: "ne";
+    case .Lt: if (s) "slt" else "ult";
+    case .Gt: if (s) "sgt" else "ugt";
+    case .Le: if (s) "sle" else "ule";
+    case .Ge: if (s) "sge" else "uge";
+    };
+}
+
+fn write_instr(g: *QGen, i: VmInstr) {
+    let k = i.kind;
+    switch (i.op) {
+    case .Const:
+        let value = if (k == .F32 || k == .I32 || k == .U32) tformat("%", i.imm & 0xFFFFFFFF) else tformat("%", i.imm as i64);
+        if (k == .F32 || k == .F64) { // by its bits: a constant is untyped
+            let bits = temp(g);
+            line(g, tformat("% =% copy %", bits, if (k == .F32) "w" else "l", value));
+            let v = temp(g);
+            line(g, tformat("% =% cast %", v, cls(k), bits));
+            value = v;
+        }
+        store(g, i.a, k, value);
+    case .Zero:
+        fill(g, addr(g, i.a), i.imm, 0);
+    case .Fill:
+        fill(g, addr(g, i.a), i.imm, 0xAA);
+    case .Move:
+        copy(g, addr(g, i.a), addr(g, i.b), i.imm);
+    case .AddrFrame:
+        store(g, i.a, .Ptr, addr(g, i.b));
+    case .Addr:
+        store(g, i.a, .Ptr, symbol_name(g, g.f.symbols[i.imm]));
+    case .Load:
+        copy(g, addr(g, i.a), load(g, i.b, .Ptr), i.imm);
+    case .Store:
+        copy(g, load(g, i.a, .Ptr), addr(g, i.b), i.imm);
+    case .PtrAdd:
+        let p, n = load(g, i.b, .Ptr), load(g, i.c, .U64);
+        let scaled, r = temp(g), temp(g);
+        line(g, tformat("% =l mul %, %", scaled, n, i.imm));
+        line(g, tformat("% =l add %, %", r, p, scaled));
+        store(g, i.a, .Ptr, r);
+    case .PtrOffset:
+        let r = temp(g);
+        line(g, tformat("% =l add %, %", r, load(g, i.b, .Ptr), i.imm));
+        store(g, i.a, .Ptr, r);
+    case .Bin:
+        write_binary(g, i);
+    case .Cmp:
+        let x, y = load(g, i.b, k), load(g, i.c, k);
+        let r = temp(g);
+        line(g, tformat("% =w c%{}% %, %", r, cmp_name(i.sub as VmCmp, k), cls(k), x, y));
+        store(g, i.a, .Bool, r);
+    case .Un:
+        let x = load(g, i.b, k);
+        let r = temp(g);
+        switch (i.sub as VmUn) {
+        case .Neg: line(g, tformat("% =% neg %", r, cls(k), x));
+        case .Not: line(g, tformat("% =w ceqw %, 0", r, x));
+        case .BitNot: line(g, tformat("% =% xor %, -1", r, cls(k), x));
+        }
+        store(g, i.a, k, r);
+    case .Conv:
+        write_conversion(g, i);
+    case .Jmp:
+        jump(g, tformat("jmp @L%", i.imm));
+    case .Jz:
+        let next = block(g);
+        jump(g, tformat("jnz %, %, @L%", load(g, i.b, .Bool), next, i.imm));
+        label(g, next);
+    case .Jnz:
+        let next = block(g);
+        jump(g, tformat("jnz %, @L%, %", load(g, i.b, .Bool), i.imm, next));
+        label(g, next);
+    case .Call:
+        write_call(g, &g.f.calls[i.imm]);
+    case .Ret:
+        let ret = g.f.decl.ty.ret;
+        if (g.f.ret_size == 0 || returns_nothing(g, ret)) {
+            jump(g, "ret");
+        } else if (returns_bytes(g, ret)) {
+            copy(g, "%rt_out", addr(g, g.f.ret_offset), g.f.ret_size as u64);
+            jump(g, "ret");
+        } else {
+            jump(g, tformat("ret %", load(g, g.f.ret_offset, kind_of(concrete(g.vm, ret)))));
+        }
+    case .CheckIndex:
+        let index, len = load(g, i.b, .U64), load(g, i.c, .U64);
+        let ok = temp(g);
+        line(g, tformat("% =w cultl %, %", ok, index, len));
+        let good, bad = block(g), block(g);
+        jump(g, tformat("jnz %, %, %", ok, good, bad));
+        label(g, bad);
+        line(g, tformat("call $sabk_rt_index_fail(l %, l %, l %)", index, len, location(g, i)));
+        jump(g, "hlt");
+        label(g, good);
+    case .CheckSlice:
+        line(g, tformat("call $sabk_rt_slice_check(l %, l %, l %, l %)", load(g, i.a, .U64), load(g, i.b, .U64),
+                        load(g, i.c, .U64), location(g, i)));
+    case .CheckNull:
+        panic_unless(g, nonzero_pointer(g, load(g, i.b, .Ptr)), i, "out of memory");
+    case .NonNull:
+        panic_unless(g, nonzero_pointer(g, load(g, i.b, .Ptr)), i, "null pointer");
+    case .MemZero:
+        line(g, tformat("call $memset(l %, w 0, l %)", load(g, i.b, .Ptr), load(g, i.c, .U64)));
+    case .Fail:
+        line(g, tformat("call $sabk_rt_panic(l %, l %)", location(g, i), text_data(g, g.f.messages[i.imm])));
+        jump(g, "hlt");
+    case .StrEq:
+        let r = temp(g);
+        line(g, tformat("% =w call $sabk_rt_bytes_equal(l %, l %, l %, l %)", r, load(g, i.b, .Ptr), load(g, i.b + 8, .I64),
+                        load(g, i.c, .Ptr), load(g, i.c + 8, .I64)));
+        store(g, i.a, .Bool, r);
+    }
+}
+
+// the VM's arithmetic: wrapping (a narrow kind is cut when it's stored),
+// a division by zero panics, the minimum / -1 wraps, shifts past the width
+// give 0 (or the sign, for >> of a signed value); QBE takes a shift count
+// modulo the width, so the big ones are masked
+fn write_binary(g: *QGen, i: VmInstr) {
+    let k = i.kind;
+    let c = cls(k);
+    let op = i.sub as VmBin;
+    let x = load(g, i.b, k);
+    if (op == .Shl || op == .Shr) {
+        let y = load(g, i.c, .U64);
+        let width: u32 = if (c == "l") 64 else 32;
+        let r = temp(g);
+        if (op == .Shr && signed_kind(k)) {
+            // by the count, or by width - 1 (all sign) past it
+            let big, mask, top, count = temp(g), temp(g), temp(g), temp(g);
+            line(g, tformat("% =l cugel %, %", big, y, width));
+            line(g, tformat("% =l sub 0, %", mask, big));
+            line(g, tformat("% =l and %, %", top, mask, width - 1));
+            line(g, tformat("% =l or %, %", count, y, top));
+            line(g, tformat("% =% sar %, %", r, c, x, count));
+        } else {
+            // 0 when the count reaches the kind's width (<<) or the value's (>>)
+            let limit = if (op == .Shl) kind_size(k) * 8 else width;
+            let shifted, ok, keep = temp(g), temp(g), temp(g);
+            line(g, tformat("% =% % %, %", shifted, c, if (op == .Shl) "shl" else "shr", x, y));
+            line(g, tformat("% =% cultl %, %", ok, c, y, limit));
+            line(g, tformat("% =% sub 0, %", keep, c, ok));
+            line(g, tformat("% =% and %, %", r, c, shifted, keep));
+        }
+        store(g, i.a, k, r);
+        return;
+    }
+    let y = load(g, i.c, k);
+    if ((op == .Div || op == .Mod) && !is_float(k)) {
+        let zero = temp(g);
+        line(g, tformat("% =w cne% %, 0", zero, c, y));
+        panic_unless(g, zero, i, "division by zero");
+        if (signed_kind(k)) { // x / -1 is -x, wrapping; x % -1 is 0
+            let minus, divide, wrap, end = temp(g), block(g), block(g), block(g);
+            line(g, tformat("% =w ceq% %, -1", minus, c, y));
+            jump(g, tformat("jnz %, %, %", minus, wrap, divide));
+            label(g, wrap);
+            let w = temp(g);
+            line(g, if (op == .Div) tformat("% =% neg %", w, c, x) else tformat("% =% copy 0", w, c));
+            store(g, i.a, k, w);
+            jump(g, tformat("jmp %", end));
+            label(g, divide);
+            let r = temp(g);
+            line(g, tformat("% =% % %, %", r, c, if (op == .Div) "div" else "rem", x, y));
+            store(g, i.a, k, r);
+            label(g, end);
+        } else {
+            let r = temp(g);
+            line(g, tformat("% =% % %, %", r, c, if (op == .Div) "udiv" else "urem", x, y));
+            store(g, i.a, k, r);
+        }
+        return;
+    }
+    let name = switch (op) {
+    case .Add: "add";
+    case .Sub: "sub";
+    case .Mul: "mul";
+    case .Div: "div";
+    case .Mod: "rem";
+    case .And: "and";
+    case .Or: "or";
+    case .Xor: "xor";
+    default: "add";
+    };
+    let r = temp(g);
+    line(g, tformat("% =% % %, %", r, c, name, x, y));
+    store(g, i.a, k, r);
+}
+
+fn write_conversion(g: *QGen, i: VmInstr) {
+    let to = i.kind;
+    let from = i.sub as VmKind;
+    let x = load(g, i.b, from);
+    let r = temp(g);
+    if (is_float(from) && is_float(to)) {
+        if (from == to)
+            line(g, tformat("% =% copy %", r, cls(to), x));
+        else
+            line(g, tformat("% =% %", r, cls(to), if (to == .F64) tformat("exts %", x) else tformat("truncd %", x)));
+    } else if (is_float(from)) {
+        // truncating, as the VM: to a signed integer through i64; to an
+        // unsigned one, through i64 when the value is negative
+        let f = if (from == .F32) "s" else "d";
+        if (signed_kind(to)) {
+            line(g, tformat("% =l %{}tosi %", r, f, x));
+        } else {
+            let negative, below, above, end = temp(g), block(g), block(g), block(g);
+            line(g, tformat("% =w clt% %, %_0", negative, f, x, f));
+            jump(g, tformat("jnz %, %, %", negative, below, above));
+            label(g, below);
+            let a = temp(g);
+            line(g, tformat("% =l %{}tosi %", a, f, x));
+            store(g, i.a, to, a);
+            jump(g, tformat("jmp %", end));
+            label(g, above);
+            let b = temp(g);
+            line(g, tformat("% =l %{}toui %", b, f, x));
+            store(g, i.a, to, b);
+            label(g, end);
+            return;
+        }
+    } else if (is_float(to)) {
+        let from_long = cls(from) == "l";
+        let s = if (signed_kind(from)) "s" else "u";
+        line(g, tformat("% =% %{}%{}tof %", r, cls(to), s, if (from_long) "l" else "w", x));
+    } else if (cls(to) == "l" && cls(from) == "w") {
+        line(g, tformat("% =l %{} %", r, if (signed_kind(from)) "extsw" else "extuw", x));
+    } else {
+        line(g, tformat("% =% copy %", r, cls(to), x)); // a long as a word keeps its low bits
+    }
+    store(g, i.a, to, r);
+}
+
+// a call, in our convention or C's (see the top)
+fn write_call(g: *QGen, call: *VmCallSite) {
+    let callee = call.callee;
+    let c_abi = if (callee != null) is_c_abi(callee) else call.c_call;
+    let ret = call.ret_type;
+    let params: [..]*Type;
+    if (callee != null)
+        array_append(&params, callee.decl.ty.params);
+    else
+        array_append(&params, call.arg_types);
+    let fixed: isize = -1; // a variadic C function's fixed parameters
+    if (callee != null && callee.native && callee.decl.ty.is_variadic)
+        fixed = callee.decl.ty.params.len;
+    else if (callee == null && call.c_fixed >= 0)
+        fixed = call.c_fixed as isize;
+    let args: [..]string;
+    let into_bytes = !c_abi && returns_bytes(g, ret);
+    if (into_bytes)
+        array_add(&args, tformat("l %", addr(g, call.ret_slot)));
+    let first: isize = 0;
+    if (!c_abi) { // the context
+        array_add(&args, tformat("l %", load(g, call.args[0].slot, .Ptr)));
+        first = 1;
+    }
+    for (k in first..call.args.len) {
+        let n = k - first;
+        if (n == fixed)
+            array_add(&args, "...");
+        let at = call.args[k].slot;
+        let t = concrete(g.vm, if (n < params.len) params[n] else call.arg_types[n]);
+        if (is_scalar_type(g, t)) {
+            let kk = kind_of(t);
+            array_add(&args, tformat("% %", if (n >= fixed && fixed >= 0) cls(kk) else abi(kk), load(g, at, kk)));
+        } else if (c_abi) {
+            fail(g, Token.{}, tformat("--qbe can't pass a % by value to C yet", type_name(t)));
+        } else {
+            array_add(&args, tformat("l %", addr(g, at)));
+        }
+    }
+    if (fixed >= 0 && call.args.len - first == fixed)
+        array_add(&args, "...");
+    let fun = "";
+    if (callee != null)
+        fun = tformat("$%", map_get(&g.names, callee) or_else "sabk_unknown");
+    else
+        fun = load(g, call.fn_slot, .Ptr);
+    let text = tformat("call %(%)", fun, join(args, ", "));
+    if (call.ret_size == 0 || into_bytes || returns_nothing(g, ret)) {
+        line(g, text);
+    } else {
+        let kk = kind_of(concrete(g.vm, ret));
+        let r = temp(g);
+        line(g, tformat("% =% %", r, abi(kk), text));
+        store(g, call.ret_slot, kk, r);
+    }
+}
+
+/* ------------------------------------------------------------- main, C */
+
+fn write_main(g: *QGen, main_fn: *Node) {
+    let main_f = g.program.functions[0];
+    let ret = concrete(g.vm, main_fn.ty.ret);
+    let name = map_get(&g.names, main_f) or_else "";
+    let dc = map_get(&g.names, g.program.default_context) or_else "";
+    let out = &g.out;
+    append_string(out, "\nexport function w $main(w %argc, l %argv) {\n@start\n");
+    append_string(out, "\tcall $sabk_rt_start(w %argc, l %argv)\n");
+    print_to(out, "\tcall $%(l $sabk_ctx, l $sabk_boot_ctx)\n", dc);
+    if (ret.kind == .Void) {
+        print_to(out, "\tcall $%(l $sabk_ctx)\n\tret 0\n}\n", name);
+    } else if (ret.is_failure) {
+        print_to(out, "\t%%e =l call $%(l $sabk_ctx)\n\tjnz %%e, @failed, @fine\n@failed\n", name);
+        append_string(out, "\tcall $sabk_rt_report_error(l %e)\n\tret 1\n@fine\n\tret 0\n}\n");
+    } else {
+        print_to(out, "\t%%r =w call $%(l $sabk_ctx)\n\tret %%r\n}\n", name);
+    }
+}
+
+fn field_offset(t: *Type, name: string) -> u64 {
+    for (f in t.fields)
+        if (f.name == name)
+            return f.offset;
+    return 0;
+}
+
+// the C linked with the IL: the runtime's core, what the IL calls in it,
+// and main's report of a failure (as codegen.sabk's)
+fn runtime(g: *QGen, main_fn: *Node) -> string {
+    let out: [..]u8;
+    append_string(&out, C_PRELUDE);
+    append_string(&out, "
+/* what the IL calls */
+void sabk_rt_start(int argc, char **argv) { rt_argc = argc; rt_argv = argv; }
+_Noreturn void sabk_rt_panic(const char *where, const char *message) { rt_panic(where, message); }
+_Noreturn void sabk_rt_index_fail(isize i, isize len, const char *where) { rt_index(i, len, where); abort(); }
+void sabk_rt_slice_check(isize lo, isize hi, isize len, const char *where) { rt_slice_check(lo, hi, len, where); }
+u8 sabk_rt_bytes_equal(const u8 *a, isize a_len, const u8 *b, isize b_len) { return rt_bytes_equal(a, a_len, b, b_len); }
+");
+    let types = g.program.error_types;
+    if (types.len == 0)
+        return out as string;
+    print_to(&out, "extern u8 *sabk_rt_error_types[];\nu8 *sabk_error_type(u32 id) { return id >= 1 && id <= % ? sabk_rt_error_types[id - 1] : 0; }\n",
+             types.len);
+    if (!concrete(g.vm, main_fn.ty.ret).is_failure)
+        return out as string;
+    let info = g.c.type_info_type;
+    layout(g.c, info);
+    let variant = concrete(g.vm, decl_type(g.c, module_decl(g.r.prelude, "TypeVariant")));
+    layout(g.c, variant);
+    let name_at = field_offset(info, "name");
+    let variants_at = field_offset(info, "variants");
+    print_to(&out, "void sabk_rt_report_error(u64 e) {
+  u8 *t = sabk_error_type((u32)(e >> 32));
+  i64 v = (i64)(u32)e;
+  fflush(NULL);
+  if (!t) {
+    dprintf(2, (u8 *)\"error: %%llu\\n\", (unsigned long long)e);
+    return;
+  }
+  u8 *name = *(u8 **)(t + %);
+  int name_len = (int)*(isize *)(t + % + 8);
+  u8 *variants = *(u8 **)(t + %);
+  isize count = *(isize *)(t + % + 8);
+  for (isize i = 0; i < count; i++) {
+    u8 *var = variants + i * %;
+    if (*(i64 *)(var + %) == v) {
+      dprintf(2, (u8 *)\"error: %%.*s.%%.*s\\n\", name_len, name, (int)*(isize *)(var + % + 8), *(u8 **)(var + %));
+      return;
+    }
+  }
+  dprintf(2, (u8 *)\"error: %%.*s(%%lld)\\n\", name_len, name, (long long)v);
+}
+", name_at, name_at, variants_at, variants_at, variant.size, field_offset(variant, "value"),
+             field_offset(variant, "name"), field_offset(variant, "name"));
+    return out as string;
+}

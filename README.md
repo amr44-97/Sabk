@@ -148,6 +148,8 @@ or set `$CC`) and libffi. It's developed on Linux.
 make            builds ./sabk: build/stage0 from the seed, which builds it
 make test       runs the test suite (the run tests twice: compiled, and through --interp)
 make interp     only the run tests, through --interp
+make c-from-ir  only the run tests, with the C written from the IR
+make qbe        only the run tests, built with QBE (vendor/qbe, built into build/qbe)
 make bootstrap  ./sabk builds itself twice; both must write the same C
 make seed       refreshes bootstrap/sabk.c (after changing the compiler)
 make clean      removes build/ and ./sabk
@@ -162,6 +164,7 @@ make clean      removes build/ and ./sabk
 ./sabk --run main.sabk -- a b   ... with arguments
 ./sabk --interp main.sabk   run it in the interpreter, without a C compiler
 ./sabk --ir main.sabk       print the IR it runs (for working on the compiler)
+./sabk --qbe main.sabk      build it with QBE instead of a C compiler
 ./sabk --release main.sabk  build optimized
 ./sabk --emit-c main.sabk   print the generated C
 ./sabk --check main.sabk    only check for errors

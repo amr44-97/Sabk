@@ -34,6 +34,7 @@
 #import "check";
 #import "codegen";
 #import "vm";
+#import "ir";
 
 // the C for the program whose entry point is `main_fn`, or "" if errors
 // were reported
@@ -44,7 +45,7 @@ fn generate_from_ir(r: *Resolver, c: *Checker, main_fn: *Node) -> string {
     if (program.functions.len == 0)
         return "";
     let g = CGen.{ .vm = c.vm, .c = c, .r = r, .program = &program };
-    if (!check_natives(&g) || !link(&g))
+    if (!ir_check_build_api(r, &program) || !ir_link(r, c, &program))
         return "";
     name_all(&g);
     let out: [..]u8;
@@ -149,51 +150,6 @@ fn symbol_name(g: *CGen, sym: VmSymbol) -> string {
     default:
         return map_get(&g.names, sym.address) or_else "0 /* unknown symbol */";
     }
-}
-
-/* ---------------------------------------------------------------- linking */
-
-// the build API only works while compiling
-fn check_natives(g: *CGen) -> bool {
-    for (f in g.program.functions) {
-        if (f.native && is_build_function(c_symbol(f.decl))) {
-            fail(g, f.decl.tok, tformat("`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it",
-                                        f.decl.tok.text));
-            return false;
-        }
-    }
-    return true;
-}
-
-// the libraries of the C functions and variables the program uses, and
-// every `,link_always` one
-fn link(g: *CGen) -> bool {
-    let linked: Map(*Node, bool);
-    let ok = true;
-    let all: [..]*Module;
-    array_add(&all, g.r.prelude);
-    array_append(&all, g.r.modules);
-    for (m in all)
-        for (d in root_list(m))
-            if (d.kind is .Library{link_always: true})
-                ok = link_library(g.r, g.c, &linked, d) && ok;
-    for (f in g.program.functions) {
-        if (f.native) {
-            let lib = foreign_library(f.decl);
-            if (lib != null)
-                ok = link_library(g.r, g.c, &linked, lib) && ok;
-        }
-    }
-    for (d in g.program.data) {
-        if (d.external) {
-            let lib = foreign_library(d.sym.decl);
-            if (lib != null)
-                ok = link_library(g.r, g.c, &linked, lib) && ok;
-        }
-    }
-    if (!ok)
-        g.errors++;
-    return ok;
 }
 
 /* ------------------------------------------------------------------- data */

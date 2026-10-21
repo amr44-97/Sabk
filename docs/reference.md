@@ -3076,6 +3076,7 @@ inspect types the same way, and produces the same text.
 ./sabk --interp prog.sabk   run it in the compiler's interpreter: no C compiler
 ./sabk --ir prog.sabk       print the IR of main and what it calls (see below)
 ./sabk --c-from-ir prog.sabk   build it with the C written from the IR (see below)
+./sabk --qbe prog.sabk      build it with QBE instead of a C compiler (see below)
 ./sabk --release prog.sabk  build optimized (-O2), without debug info
 ./sabk --sanitize prog.sabk build with AddressSanitizer (see Memory traps)
 ./sabk --bounds-checks off prog.sabk   no index or slice checks (on, off, always)
@@ -3293,6 +3294,16 @@ slower to compile, and at `-O0` slower to run; with `--release` it runs
 within about 30% of today's. It also can't yet pass or return a struct by
 value to or from C, and calls C's functions by names of its own, so the C
 compiler doesn't treat `sqrt` or `memcpy` as builtins.
+
+`--qbe` builds with [QBE](https://c9x.me/compile/) instead: the IR becomes
+QBE's IL, QBE makes assembly of it, and `$CC` assembles and links that with
+a small runtime in C. QBE 1.3 is in `vendor/qbe` and `make` builds it in
+`build/qbe`; `$QBE` names another. It compiles faster than a C compiler at
+`-g` (the compiler itself in 3.3 s, against 6.3) and its code runs faster
+than a `-g` build's, about 2 to 3 times slower than `--release`'s. It has
+`--c-from-ir`'s limits, `--sanitize` needs a C backend, and there's no debug
+information yet. `--emit-c --qbe` prints the IL; `tests/run.sh --qbe`
+(`make qbe`) builds every run test with it.
 
 ### C interop: libraries and `#foreign`
 

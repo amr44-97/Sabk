@@ -4,8 +4,19 @@
 CC ?= cc
 C_FLAGS = -std=c11 -fwrapv -fno-strict-aliasing -w
 
-sabk: build/stage0 $(wildcard src/*.sabk src/*.c std/*.sabk)
+sabk: build/stage0 build/qbe $(wildcard src/*.sabk src/*.c std/*.sabk)
 	build/stage0 --std std src/main.sabk -o sabk
+
+# QBE (vendor/qbe), for --qbe: built here, out of its own directory
+QBE_SRC = $(wildcard vendor/qbe/*.c vendor/qbe/amd64/*.c vendor/qbe/arm64/*.c vendor/qbe/rv64/*.c)
+
+build/qbe: $(QBE_SRC) $(wildcard vendor/qbe/*.h vendor/qbe/*/*.h)
+	@mkdir -p build/qbe_config
+	@case `uname` in \
+	*Darwin*) case `uname -m` in *arm64*) t=T_arm64_apple ;; *) t=T_amd64_apple ;; esac ;; \
+	*) case `uname -m` in *aarch64*|*arm64*) t=T_arm64 ;; *riscv64*) t=T_rv64 ;; *) t=T_amd64_sysv ;; esac ;; \
+	esac; echo "#define Deftgt $$t" > build/qbe_config/config.h
+	$(CC) -std=c99 -O2 -w -Ibuild/qbe_config -o build/qbe $(QBE_SRC)
 
 # the compiler from the seed: what builds the first ./sabk
 build/stage0: bootstrap/sabk.c src/vm_ffi.c
@@ -23,6 +34,10 @@ interp: sabk
 # only the run tests, built with the C written from the IR (--c-from-ir)
 c-from-ir: sabk
 	@tests/run.sh --c-from-ir
+
+# only the run tests, built with QBE (--qbe)
+qbe: sabk
+	@tests/run.sh --qbe
 
 # unit tests of single modules, checked against Python
 unit: sabk
@@ -46,4 +61,4 @@ seed: sabk
 clean:
 	rm -rf build sabk
 
-.PHONY: test interp c-from-ir unit bootstrap seed clean
+.PHONY: test interp c-from-ir qbe unit bootstrap seed clean

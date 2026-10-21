@@ -9,7 +9,10 @@
 
 #import "std/array";
 #import "std/fmt";
+#import "std/map";
 #import "std/str";
+#import "ast";
+#import "codegen";
 #import "token";
 #import "types";
 #import "check";
@@ -72,6 +75,48 @@ fn ir_dump_data(d: VmData) -> string {
             print_to(&out, "  %{4} = &% + %\n", r.at, symbol_text(r.target), r.addend);
     }
     return out as string;
+}
+
+// false (and an error) if the program calls the build API, which only
+// works while compiling
+fn ir_check_build_api(r: *Resolver, program: *VmProgram) -> bool {
+    for (f in program.functions) {
+        if (f.native && is_build_function(c_symbol(f.decl))) {
+            say(r, .Error, f.decl.tok, tformat("`%` is part of the build API: it only works in `#run` code, while compiling, but the program calls it",
+                                             f.decl.tok.text));
+            return false;
+        }
+    }
+    return true;
+}
+
+// links the libraries of the C functions and variables the program uses,
+// and every `,link_always` one; false (and an error) if one isn't found
+fn ir_link(r: *Resolver, c: *Checker, program: *VmProgram) -> bool {
+    let linked: Map(*Node, bool);
+    let ok = true;
+    let all: [..]*Module;
+    array_add(&all, r.prelude);
+    array_append(&all, r.modules);
+    for (m in all)
+        for (d in root_list(m))
+            if (d.kind is .Library{link_always: true})
+                ok = link_library(r, c, &linked, d) && ok;
+    for (f in program.functions) {
+        if (f.native) {
+            let lib = foreign_library(f.decl);
+            if (lib != null)
+                ok = link_library(r, c, &linked, lib) && ok;
+        }
+    }
+    for (d in program.data) {
+        if (d.external) {
+            let lib = foreign_library(d.sym.decl);
+            if (lib != null)
+                ok = link_library(r, c, &linked, lib) && ok;
+        }
+    }
+    return ok;
 }
 
 #scope_file

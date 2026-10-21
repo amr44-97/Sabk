@@ -28,6 +28,7 @@
 #import "vm";
 #import "ir";
 #import "backend_c";
+#import "backend_qbe";
 
 // the VM's way to C, and libffi
 #run configure();
@@ -145,18 +146,73 @@ let sanitize = false;
 // in a directory of its own, so no file of the user's is ever overwritten;
 // it's kept there if the C compiler fails.
 fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
+    let dir, ok = build_dir();
+    if (!ok)
+        return false;
+    let c_path = tformat("%/program.c", dir);
+    if (!write_to(c_path, c_source))
+        return false;
+    phase_start = now_ns();
+    if (!run_cc(.[c_path], exe_path, build, false))
+        return false;
+    end_phase("C compiler");
+    clean_up(dir, .[c_path]);
+    return true;
+}
+
+// --qbe: QBE's IL into assembly with QBE (vendor/qbe, built in build/qbe
+// next to the compiler; $QBE names another), then that and the runtime's
+// C into an executable with $CC
+fn compile_qbe(il: string, runtime_c: string, exe_path: string, build: *BuildOptions, qbe: string) -> bool {
+    let dir, ok = build_dir();
+    if (!ok)
+        return false;
+    let il_path = tformat("%/program.ssa", dir);
+    let asm_path = tformat("%/program.s", dir);
+    let rt_path = tformat("%/runtime.c", dir);
+    if (!write_to(il_path, il) || !write_to(rt_path, runtime_c))
+        return false;
+    phase_start = now_ns();
+    let exit, failed = run_shell(tformat("% -o % %", shell_quote(qbe), shell_quote(asm_path), shell_quote(il_path)));
+    if (failed != .None || exit.code != 0) {
+        eprintln("[error]: QBE failed on % (QBE is %)", il_path, qbe);
+        return false;
+    }
+    end_phase("QBE");
+    if (!run_cc(.[asm_path, rt_path], exe_path, build, true))
+        return false;
+    end_phase("assemble and link");
+    clean_up(dir, .[il_path, asm_path, rt_path]);
+    return true;
+}
+
+fn build_dir() -> (string, bool) {
     let dir, err = make_temp_dir("sabk-build");
     if (err != .None) {
         eprintln("mkdtemp: %", system_error_text(err));
-        return false;
+        return "", false;
     }
-    let c_path = tformat("%/program.c", dir);
-    let written = write_file(c_path, c_source);
-    if (written != .None) {
-        eprintln("%: %", c_path, system_error_text(written));
-        return false;
-    }
+    return dir, true;
+}
 
+fn write_to(path: string, text: string) -> bool {
+    let written = write_file(path, text);
+    if (written != .None) {
+        eprintln("%: %", path, system_error_text(written));
+        return false;
+    }
+    return true;
+}
+
+fn clean_up(dir: string, files: []string) {
+    for (f in files)
+        _ = delete_file(f); // cleaning up: a failure here changes nothing
+    _ = remove_dir(dir);
+}
+
+// $CC on `inputs` (C, or assembly with `no_pie`: QBE's addresses are
+// absolute), with the build's flags, C files and libraries
+fn run_cc(inputs: []string, exe_path: string, build: *BuildOptions, no_pie: bool) -> bool {
     let cc = get_env("CC") or_else "";
     if (cc.len == 0)
         cc = "cc";
@@ -170,11 +226,15 @@ fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
     // C files to compile along, libraries after everything that uses them
     if (sanitize)
         append_string(&flags, " -fsanitize=address -fno-omit-frame-pointer");
+    if (no_pie)
+        append_string(&flags, " -no-pie");
     for (extra in build.c_flags)
         print_to(&flags, " %", extra);
     let command: [..]u8;
-    print_to(&command, "% -std=c11 -fwrapv -fno-strict-aliasing -w -Wno-psabi % -o % %", cc, flags as string,
-             shell_quote(exe_path), shell_quote(c_path));
+    print_to(&command, "% -std=c11 -fwrapv -fno-strict-aliasing -w -Wno-psabi % -o %", cc, flags as string,
+             shell_quote(exe_path));
+    for (file in inputs)
+        print_to(&command, " %", shell_quote(file));
     for (file in build.c_files)
         print_to(&command, " %", shell_quote(file));
     // libraries after what uses them, and system ones last, since a static
@@ -193,15 +253,11 @@ fn compile_c(c_source: string, exe_path: string, build: *BuildOptions) -> bool {
     }
     for (library in build.libraries)
         print_to(&command, " %", shell_quote(tformat("-l%", library)));
-    phase_start = now_ns();
     let exit, failed = run_shell(command as string);
     if (failed != .None || exit.code != 0) {
-        eprintln("[error]: the C compiler failed on %", c_path);
+        eprintln("[error]: the C compiler failed on %", inputs[0]);
         return false;
     }
-    end_phase("C compiler");
-    _ = delete_file(c_path); // cleaning up: a failure here changes nothing
-    _ = remove_dir(dir);
     return true;
 }
 
@@ -249,6 +305,8 @@ fn print_usage(exe: string) -> i32 {
     eprint("  --verify-ir  check each function's IR as it's made (for tests)\n");
     eprint("  --c-from-ir  write the C from the IR (the backend to come), not\n");
     eprint("               from the syntax tree\n");
+    eprint("  --qbe        compile with QBE (vendor/qbe) instead of a C\n");
+    eprint("               compiler, from the IR (--emit-c prints the IL)\n");
     eprint("  --quiet      don't print how long each phase took (it's on stderr\n");
     eprint("               after every compile)\n");
     eprint("  --stats      also print the functions written and the generic\n");
@@ -275,6 +333,7 @@ fn main() -> i32 {
     let program_args: [..]string; // after `--`: the program's (and args() in #run)
     let lines = false;            // --emit-c with #line directives
     let from_ir = false;          // --c-from-ir: the C from the IR (backend_c.sabk)
+    let qbe = false;              // --qbe: QBE's IL from the IR (backend_qbe.sabk)
     let bounds_checks = vm.BoundsChecks.On;
     let bounds_given = false;     // --bounds-checks wins over a build script's
     let strict = false;           // --strict and --werror add to a build script's
@@ -306,6 +365,8 @@ fn main() -> i32 {
             verify_ir = true;
         } else if (arg == "--c-from-ir") {
             from_ir = true;
+        } else if (arg == "--qbe") {
+            qbe = true;
         } else if (arg == "--emit-c") {
             mode = .EmitC;
         } else if (arg == "--check") {
@@ -435,7 +496,20 @@ fn main() -> i32 {
         return print_ir(&r, &c);
 
     let c_source = "";
-    if (from_ir) {
+    let runtime_c = ""; // --qbe's
+    if (qbe) {
+        if (sanitize) {
+            eprintln("[error]: --sanitize needs the C (AddressSanitizer instruments it), not --qbe");
+            return 1;
+        }
+        let main_fn = program_main(&r, &c);
+        if (main_fn == null)
+            return 1;
+        c_source, runtime_c = generate_qbe(&r, &c, main_fn);
+        if (c_source.len == 0)
+            return 1;
+        end_phase("generate QBE's IL");
+    } else if (from_ir) {
         let main_fn = program_main(&r, &c);
         if (main_fn == null)
             return 1;
@@ -466,7 +540,7 @@ fn main() -> i32 {
             return 1;
         }
         let program = tformat("%/program", dir);
-        let ok = compile_c(c_source, program, build);
+        let ok = if (qbe) compile_qbe(c_source, runtime_c, program, build, qbe_path(exe)) else compile_c(c_source, program, build);
         let command: [..]u8;
         // the shared libraries it links aren't where the loader looks, so
         // `--run` (the compiler running it) says where
@@ -496,9 +570,24 @@ fn main() -> i32 {
     let exe_path = build.output;
     if (exe_path.len == 0)
         exe_path = path_stem(path);
-    let built = compile_c(c_source, exe_path, build);
+    let built = if (qbe) compile_qbe(c_source, runtime_c, exe_path, build, qbe_path(exe)) else compile_c(c_source, exe_path, build);
     print_stats(&c);
     return if (built) 0 else 1;
+}
+
+// QBE: $QBE, else the one `make` builds (build/qbe beside ./sabk), or one
+// beside the compiler (for a compiler in build/ itself), else `qbe` from
+// the PATH
+fn qbe_path(exe: string) -> string {
+    let named = get_env("QBE") or_else "";
+    if (named.len > 0)
+        return named;
+    for (beside in .["build/qbe", "qbe"]) {
+        let path = path_normalize(path_join(path_dir(exe), beside));
+        if (file_exists(path))
+            return path;
+    }
+    return "qbe";
 }
 
 // --interp: main run in the VM that runs #run code, as its executable
