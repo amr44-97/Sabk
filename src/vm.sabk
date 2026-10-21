@@ -151,6 +151,12 @@ struct Vm {
     ctx: *u8;
     failed: bool;
     error: VmError;
+
+    // running a whole program (--interp), not #run code: no step limit,
+    // exit() ends it, and a failure is the program's panic
+    program: bool;
+    exited: bool;
+    exit_code: i32;
 }
 
 fn make_vm(c: *Checker) -> *Vm {
@@ -780,7 +786,82 @@ fn vm_bake(vm: *Vm, of_type: *Type, p: *u8, at: Token) -> *Node {
     return n;
 }
 
+/* --------------------------------------------------------------- programs */
+
+// --interp: runs the program's `main` in the VM, as its executable would
+// run: what it prints, its exit code, and a panic as the C runtime writes
+// it ("file:line:col: panic: message", exit code 134, as abort's). What the
+// VM can't run (a C file a build script adds, a static library) is an
+// error, as in #run.
+fn vm_run_program(vm: *Vm, main_fn: *Node) -> i32 {
+    vm.program = true;
+    // the program starts from its globals' initial values, whatever #run
+    // did to them; compiled code has the old ones' addresses in it, so it
+    // is compiled again (and the context made again, from fresh globals)
+    map_clear(&vm.functions);
+    map_clear(&vm.globals);
+    vm.ctx = null;
+    let f = vm_function_for(vm, main_fn);
+    let ctx = vm_context(vm);
+    let ok = !vm.failed && compile(vm, f);
+    let frame: *u8 = null;
+    if (ok) {
+        frame = push_frame(vm, f);
+        ok = frame != null;
+    }
+    if (ok) {
+        ((frame + f.param_offsets[0] as isize) as **u8).* = ctx;
+        ok = execute(vm, f, frame);
+    }
+    fflush(null); // what the program printed, before anything said here
+    if (!ok)
+        return program_failure(vm);
+    let ret = concrete(vm, main_fn.ty.ret);
+    if (ret.kind == .Void)
+        return 0;
+    let result = read_int(frame + f.ret_offset as isize, kind_of(ret));
+    if (!ret.is_failure)
+        return result as i32;
+    if (result == 0)
+        return 0;
+    report_error(result);
+    return 1;
+}
+
 #scope_file
+
+fn program_failure(vm: *Vm) -> i32 {
+    let e = &vm.error;
+    if (vm.exited)
+        return vm.exit_code;
+    if (e.silent) // reported already
+        return 1;
+    if (e.in_lowering || !has_place(e.where)) { // the VM can't run it
+        error(vm.c, e.where, e.message);
+        return 1;
+    }
+    let m = module_of(vm.c.res, e.where.text.ptr);
+    eprintln("%:%:%: panic: %", if (m != null) m.path else "<unknown>", e.where.line, e.where.column, e.message);
+    return 134;
+}
+
+// main's failure, as the C runtime's rt_report_error says it:
+// "error: IoError.NotFound", or IoError(7) for a value no variant has
+fn report_error(e: u64) {
+    let info = host_error_type((e >> 32) as u32) as *TypeInfo;
+    let v = (e & 0xFFFFFFFF) as i64;
+    if (info == null) {
+        eprintln("error: %", e);
+        return;
+    }
+    for (variant in info.variants) {
+        if (variant.value == v) {
+            eprintln("error: %.%", info.name, variant.name);
+            return;
+        }
+    }
+    eprintln("error: %(%)", info.name, v);
+}
 
 // a runaway #run (an endless loop) stops with an error instead of hanging
 const MAX_STEPS: u64 = 1000000000;
@@ -848,6 +929,16 @@ fn close(fd: i32) -> i32 #foreign libc;
 fn sabk_errno() -> i32 #foreign;
 
 fn ffi_type_for(vm: *Vm, t: *Type) -> *void { return vmffi_type(kind_of(concrete(vm, t)) as i32); }
+
+// a variadic argument's kind, as C passes it: the integers narrower than
+// int as int, and f32 as f64 (libffi refuses the narrow ones there)
+fn promoted(k: VmKind) -> VmKind {
+    switch (k) {
+    case .I8, .I16, .U8, .U16, .Bool: return .I32;
+    case .F32: return .F64;
+    default: return k;
+    }
+}
 
 fn is_scalar(t: *Type) -> bool {
     switch (t.kind) {
@@ -1009,6 +1100,15 @@ fn push_frame(vm: *Vm, f: *VmFunction) -> *u8 {
 
 fn same_place(a: Token, b: Token) -> bool { return a.text.ptr == b.text.ptr; }
 
+// a pointer into the first page, which nothing is ever at: null, or a
+// field of what a null pointer points at (`p.f`, at an offset)
+fn is_null_page(p: *u8) -> bool { return (p as usize) < 4096; }
+
+// a program's panic says it as the C does; #run's failure, in a sentence
+fn null_message(vm: *Vm) -> string {
+    return if (vm.program) "null pointer" else "a null pointer was dereferenced";
+}
+
 fn has_place(t: Token) -> bool { return t.text.ptr != null; }
 
 fn report_failure(vm: *Vm, at: *Node) {
@@ -1087,11 +1187,21 @@ fn call_native(vm: *Vm, call: *VmCallSite, f: *VmFunction, frame: *u8) -> bool {
     let none: Token; // execute() puts the call's location in
     if (f.is_abort) {
         vm_fail(vm, none, "it called abort() (a panic?)", false);
+        if (vm.program) { // the panic said what happened; abort's exit code
+            vm.exited = true;
+            vm.exit_code = 134;
+            vm.error.silent = true;
+        }
         return false;
     }
     if (f.is_exit) {
         let code = ((frame + call.args[0].slot as isize) as *i32).*;
         vm_fail(vm, none, tformat("it called exit(%)", code), false);
+        if (vm.program) { // the program's end, not a failure
+            vm.exited = true;
+            vm.exit_code = code;
+            vm.error.silent = true;
+        }
         return false;
     }
     if (f.address == null) {
@@ -1120,7 +1230,10 @@ fn call_c(vm: *Vm, call: *VmCallSite, address: *void, what: string, fixed: i32, 
                 vm_fail(vm, none, tformat("can't call % at compile time: it takes a % by value", what, type_name(t)), false);
                 return false;
             }
-            array_add(&call.ffi_args, ffi_type_for(vm, t));
+            let k = kind_of(concrete(vm, t));
+            if (fixed >= 0 && call.ffi_args.len >= fixed)
+                k = promoted(k);
+            array_add(&call.ffi_args, vmffi_type(k as i32));
         }
         let ret = call.ret_type;
         if (ret.kind != .Void && !is_scalar(ret)) {
@@ -1136,8 +1249,22 @@ fn call_c(vm: *Vm, call: *VmCallSite, address: *void, what: string, fixed: i32, 
         call.prepared = true;
     }
     let values = new([]*void, call.args.len, context.temp_allocator);
-    for (i in 0..call.args.len)
-        values[i] = frame + call.args[i].slot as isize;
+    let widened = new([]u64, call.args.len, context.temp_allocator);
+    for (i in 0..call.args.len) {
+        let p = frame + call.args[i].slot as isize;
+        values[i] = p;
+        if (fixed < 0 || i < fixed || !is_scalar(call.arg_types[i]))
+            continue;
+        let k = kind_of(concrete(vm, call.arg_types[i]));
+        let to = promoted(k);
+        if (to == k)
+            continue;
+        if (to == .F64)
+            write_float(&widened[i] as *u8, .F64, read_float(p, k));
+        else
+            widened[i] = read_int(p, k);
+        values[i] = &widened[i];
+    }
     let result: [2]u64 = .[0, 0]; // at least an ffi_arg
     vmffi_call(call.cif, address, &result, values.ptr);
     if (vm.failed)
@@ -1220,7 +1347,7 @@ fn run(vm: *Vm, fp: **VmFunction, framep: **u8, pcp: *isize, callers: *[..]Calle
         let i = f.code[pc];
         pc++;
         vm.steps++;
-        if (vm.steps > MAX_STEPS)
+        if (vm.steps > MAX_STEPS && !vm.program)
             return fail_at(vm, f, i, "it ran for over a billion steps; is it stuck in a loop?");
         switch (i.op) {
         case .Const:
@@ -1237,13 +1364,13 @@ fn run(vm: *Vm, fp: **VmFunction, framep: **u8, pcp: *isize, callers: *[..]Calle
             (slot(frame, i.a) as *u64).* = i.imm;
         case .Load:
             let p = read_ptr(slot(frame, i.b));
-            if (p == null)
-                return fail_at(vm, f, i, "a null pointer was dereferenced");
+            if (is_null_page(p))
+                return fail_at(vm, f, i, null_message(vm));
             copy_memory(slot(frame, i.a), p, i.imm as isize);
         case .Store:
             let p = read_ptr(slot(frame, i.a));
-            if (p == null)
-                return fail_at(vm, f, i, "a null pointer was dereferenced");
+            if (is_null_page(p))
+                return fail_at(vm, f, i, null_message(vm));
             copy_memory(p, slot(frame, i.b), i.imm as isize);
         case .PtrAdd:
             let p = read_u64(slot(frame, i.b));

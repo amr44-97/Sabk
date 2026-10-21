@@ -1,5 +1,6 @@
 // #library: a library file of the program's own, relative to this file
 // (tests/run.sh builds them in build/test_libs first)
+// no-interp: the program links the static archive, which the VM can't load
 #import "std/io";
 #import "std/str";
 #import "std/build";

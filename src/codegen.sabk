@@ -160,17 +160,12 @@ fn generate(g: *CodeGen) -> string {
     }
 
     // the entry point
-    let root = g.res.modules[0];
-    let main_fn = module_decl(root, "main");
-    if (main_fn == null || !is_function(main_fn) || is_extern_decl(main_fn)) {
-        gen_error(g, root.tokens[0], tformat("the program needs a `fn main()` in %", root.path));
+    let main_fn = program_main(g.res, g.c);
+    if (main_fn == null) {
+        g.error_count++;
         return "";
     }
     let ret = main_fn.ty.ret;
-    if (fn_params(main_fn).len > 0 || (ret.kind != .Void && ret != ts(g).i32 && !ret.is_failure)) {
-        gen_error(g, main_fn.tok, "`main` must take no parameters and return `void`, `i32` or `Error`");
-        return "";
-    }
 
     // the prelude's types are needed by the runtime
     c_type(g, g.c.context_type);
@@ -282,6 +277,23 @@ fn generate(g: *CodeGen) -> string {
     append_string(&source, "\n");
     append_string(&source, g.bodies as string);
     return source as string;
+}
+
+// the program's `fn main`, or null (and an error) if it has none or it
+// takes or returns what it can't
+fn program_main(r: *Resolver, c: *Checker) -> *Node {
+    let root = r.modules[0];
+    let main_fn = module_decl(root, "main");
+    if (main_fn == null || !is_function(main_fn) || is_extern_decl(main_fn)) {
+        say(r, .Error, root.tokens[0], tformat("the program needs a `fn main()` in %", root.path));
+        return null;
+    }
+    let ret = main_fn.ty.ret;
+    if (fn_params(main_fn).len > 0 || (ret.kind != .Void && ret != c.types.i32 && !ret.is_failure)) {
+        say(r, .Error, main_fn.tok, "`main` must take no parameters and return `void`, `i32` or `Error`");
+        return null;
+    }
+    return main_fn;
 }
 
 #scope_file

@@ -3073,6 +3073,7 @@ inspect types the same way, and produces the same text.
 ./sabk prog.sabk            build an executable named `prog`
 ./sabk prog.sabk -o out     ... named `out`
 ./sabk --run prog.sabk      build, run, and exit with the program's exit code
+./sabk --interp prog.sabk   run it in the compiler's interpreter: no C compiler
 ./sabk --release prog.sabk  build optimized (-O2), without debug info
 ./sabk --sanitize prog.sabk build with AddressSanitizer (see Memory traps)
 ./sabk --bounds-checks off prog.sabk   no index or slice checks (on, off, always)
@@ -3082,11 +3083,28 @@ inspect types the same way, and produces the same text.
 ./sabk --strict prog.sabk   also warn about failures dropped and values used
                             before their failure is looked at (see Handling errors)
 ./sabk --werror prog.sabk   warnings fail the build
-./sabk --stats ...         also print phase times and generic instances
+./sabk --quiet ...         don't print the phase times
+./sabk --stats ...         also print the functions written and the generic instances
 ```
 
 The compiler writes one C11 file for the whole program and builds it with
 `$CC` (default `cc`), in a temporary directory of its own.
+
+**Every compile prints how long each phase took**, on stderr, so the
+program's own output (with `--run`, after it) and `--emit-c`'s C on
+stdout stay as they are:
+
+```
+phases:
+  parse and resolve              12.5 ms
+  type check                      6.8 ms
+  generate C                      7.7 ms
+  C compiler                    159.2 ms
+  total                         186.2 ms
+```
+
+`--quiet` leaves it out (the test runner uses it); `--stats` adds how many
+functions were written out and every generic instance.
 
 **Only what's used is compiled.** The whole program is type-checked,
 including the parts nothing calls, so mistakes show up where they're
@@ -3173,6 +3191,68 @@ no context: `#foreign` ones (C's, from a library) and `#c_call` ones
 (ours, for C to call). A function type says which: `fn(i32) -> i32` is a
 Sabk function's, `fn(i32) -> i32 #c_call` a C function pointer's. See
 [`#c_call`](#c_call-functions-c-calls-and-c-function-types).
+
+### Running without a C compiler: `--interp`
+
+`--interp` checks the program as a build does, then runs `main` in the
+interpreter that runs `#run` code (see
+[Compile-time execution](#compile-time-execution)). It writes no C and
+starts no C compiler, so a small program starts at once (hello world: 26 ms,
+against 171 ms for `--run`), but code runs slower than a compiled debug
+build (`fib(30)`: 0.9 s, against 0.18 s for `--run` *including* compiling
+the C).
+
+```
+./sabk --interp prog.sabk           run it
+./sabk --interp prog.sabk -- a b    with the arguments a and b
+```
+
+**It does what the compiled program does**, and the test suite checks
+that (`tests/run.sh --interp` runs every run test both ways against the same
+expected output):
+- what it prints, and its exit code: `main`'s `i32`, `exit(n)`'s `n`, or for
+  `fn main() -> Error` a failure printed as `error: IoError.NotFound` with
+  status 1
+- a panic is written as the compiled program writes it, `file:line:col:
+  panic: message`, pointing at the same place (the `/` of a division by
+  zero, the field of `p.x` when `p` is null, the `[` of a bad slice), with
+  status 134, as `abort()` gives
+- bounds and null checks follow the same settings: `--bounds-checks`, std/build's
+  `set_bounds_checks`, and `#no_bounds_check`. That's unlike `#run` code,
+  which keeps its checks, because it runs inside the compiler. With the
+  checks off, a bad index reads or writes whatever memory is there, as in C.
+- **the program starts from its globals' initial values.** What `#run` code
+  did to a global while compiling doesn't carry over, as it doesn't into a
+  compiled program:
+
+  ```
+  let counter: i32 = 0;
+  fn next() -> i32 { counter += 1; return counter; }
+  const FIRST = #run next();     // 1, and counter is 1 while compiling
+  fn main() { println("% %", FIRST, counter); }   // "1 0", both ways
+  ```
+
+**Where it differs:**
+- `args()[0]` is the program's name, as `#run` code sees it (`prog`, or
+  `-o`'s name), not the path of an executable, since there is none.
+- Calls nest at most 100,000 deep. Deeper recursion stops with `panic: the
+  calls went over 100000 deep; is the recursion endless?`, where a compiled
+  program has the C stack's limit. There's no limit on steps, unlike `#run`'s
+  billion.
+- Standard output is the program's own, not redirected to standard error as
+  it is while `#run` code runs.
+
+**What it can't run** (`#run` can't either):
+- C files a build script adds (std/build's `add_c_file`): an error before
+  anything runs, saying to build the program instead.
+- static libraries. `#foreign` functions come from shared objects, which the
+  interpreter opens. Where a `#library` has both, the program links the `.a`
+  and `--interp` uses the `.so`.
+- C functions that take or return a struct by value (`can't call ... it
+  takes a ... by value`), and passing a Sabk function (not `#c_call`) to C.
+
+A test the interpreter can't run says so with a `// no-interp: why` line,
+which `tests/run.sh --interp` skips.
 
 ### C interop: libraries and `#foreign`
 
@@ -3600,8 +3680,8 @@ let bag = Bag.{ .items = .[1, 2] };       // T from the field's type, []T: isize
   that calls itself with `*T`) stops at 64 levels with an error.
 
 **Compile time.** Each instance costs our compiler about 0.1 ms, plus the
-C compiler's time for its code. `--stats` shows the phase times and every
-instance. A program with 600 instances spent 72 ms in our compiler and
+C compiler's time for its code. Every compile prints the phase times, and
+`--stats` every instance. A program with 600 instances spent 72 ms in our compiler and
 800 ms in gcc.
 
 **Restrictions in this version:**
@@ -3778,7 +3858,10 @@ let lookup: [#run table_size()]u8;          // an array length
 generics, structs, slices, `new` and the allocators, the standard library,
 and C functions such as `printf` or `qsort` (through libffi, including C
 calling back into a `#c_call` function), from the libraries `#foreign`
-declarations name, which `#run` opens. Values are laid out in memory
+declarations name, which `#run` opens. A variadic C function's extra
+arguments are passed as C passes them: `bool` and the integers narrower
+than `int` (`u8`, `i8`, `u16`, `i16`) as `int`, and `f32` as `f64`, so
+`printf("%d %f", byte, half)` works with a `u8` and an `f32`. Values are laid out in memory
 exactly as in the compiled program, so integer arithmetic, wrapping and
 struct layout give the same results at compile time as at run time.
 
@@ -3819,7 +3902,8 @@ nothing. A `#run` of something that returns nothing must be a statement,
   `#run` code runs, so `--emit-c` output stays clean.
 
 **Failures are compile errors.** An out-of-bounds index, a null
-dereference, division by zero, `panic` (which calls `abort()`) or `exit()`
+dereference (a field of what a null pointer points at, `p.x`, too),
+division by zero, `panic` (which calls `abort()`) or `exit()`
 stops the `#run`, and the error shows where it happened and the calls that
 led there. So do recursion over 100,000 calls deep and running over a
 billion steps (an endless loop). A function can't `#run` itself while it's

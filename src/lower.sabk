@@ -233,6 +233,21 @@ fn alloc(l: *Lower, t: *Type) -> u32 { return alloc_slot(l, vm_size_of(l.vm, t),
 
 fn at(l: *Lower, t: Token) { array_add(&l.f.locs, t); }
 
+// a check's own location (a division at its operator, a null pointer at
+// the field, a slice at its `[`, as the program's panics say), and back to
+// the one before for what follows: a call's "called from here" stays at
+// its arguments, which in a macro's expansion are the caller's
+fn at_check(l: *Lower, t: Token) -> isize {
+    let before = l.f.locs.len;
+    at(l, t);
+    return before;
+}
+
+fn after_check(l: *Lower, before: isize) {
+    if (before > 0)
+        at(l, l.f.locs[before - 1]);
+}
+
 fn emit(l: *Lower, instr: VmInstr) -> isize {
     let i = instr;
     i.loc = if (l.f.locs.len == 0) 0 else (l.f.locs.len - 1) as u32;
@@ -1359,7 +1374,9 @@ fn inner(l: *Lower, n: *Node) -> u32 {
             if (b == .Shl || b == .Shr)
                 y = to_u64(l, y, type_of(l, rhs));
             let result = alloc(l, t);
+            let before = at_check(l, n.tok);
             bin(l, kind_of(t), b, result, x, y);
+            after_check(l, before);
             return result;
         }
 
@@ -1677,7 +1694,10 @@ fn field_value(l: *Lower, n: *Node) -> u32 {
         return expr(l, object); // p.ptr: the same address
     if (base.kind == .Ptr) {
         let p = expr(l, object);
-        return load(l, offset(l, p, member_offset(l, base.elem, n)), t);
+        let before = at_check(l, n.tok);
+        let value = load(l, offset(l, p, member_offset(l, base.elem, n)), t);
+        after_check(l, before);
+        return value;
     }
     let value = expr(l, object);
     return value + member_offset(l, base, n) as u32;
@@ -1746,13 +1766,18 @@ fn address(l: *Lower, n: *Node) -> u32 {
         }
         let object = member_object(n);
         let base = concrete(l.vm, object.ty);
-        if (base.kind == .Ptr)
-            return offset(l, expr(l, object), member_offset(l, base.elem, n));
+        if (base.kind == .Ptr) {
+            let p = expr(l, object);
+            at(l, n.tok); // following a null pointer points at the field, as in the program
+            return offset(l, p, member_offset(l, base.elem, n));
+        }
         return offset(l, address(l, object), member_offset(l, base, n));
     case .Index:
         return element(l, n);
     case .Deref{pointer}:
-        return expr(l, pointer);
+        let p = expr(l, pointer);
+        at(l, n.tok);
+        return p;
     case .VariantAccess{object, checked}:
         // where the tagged value is, its tag checked, then its payload
         let through = object.ty.kind == .Ptr;
@@ -1783,19 +1808,35 @@ fn element(l: *Lower, n: *Node) -> u32 {
         let s = expr(l, object);
         let i = to_u64(l, expr(l, index), type_of(l, index));
         at(l, n.tok); // an error points at the indexing, as in the program
-        emit(l, .{ .op = .CheckIndex, .b = i, .c = s + 8 });
+        if (checks_bounds(l))
+            emit(l, .{ .op = .CheckIndex, .b = i, .c = s + 8 });
         return ptr_add(l, s, i, elem_size);
     }
     if (t.kind == .Array) {
         let base = address(l, object);
         let i = to_u64(l, expr(l, index), type_of(l, index));
         at(l, n.tok);
-        if (!known)
+        if (!known && checks_bounds(l))
             emit(l, .{ .op = .CheckIndex, .b = i, .c = u64_slot(l, t.len) });
         return ptr_add(l, base, i, elem_size);
     }
     let base = expr(l, object); // a raw pointer
-    return ptr_add(l, base, to_u64(l, expr(l, index), type_of(l, index)), elem_size);
+    let i = to_u64(l, expr(l, index), type_of(l, index));
+    at(l, n.tok);
+    return ptr_add(l, base, i, elem_size);
+}
+
+// are indexing and slicing checked here: always in #run code, which runs
+// inside the compiler; in a program (--interp), as in its C: the build's
+// BoundsChecks, then the function's #no_bounds_check
+fn checks_bounds(l: *Lower) -> bool {
+    if (!l.vm.program)
+        return true;
+    switch (l.c.build.bounds_checks) {
+    case .Off: return false;
+    case .Always: return true;
+    default: return l.f.decl == null || !(l.f.decl.kind is .Fn{no_bounds_check: true});
+    }
 }
 
 fn slice(l: *Lower, n: *Node) -> u32 {
@@ -1822,7 +1863,10 @@ fn slice(l: *Lower, n: *Node) -> u32 {
         len = u64_slot(l, 0x7fffffffffffffff); // a raw pointer: only lo <= hi is checked
     }
     let hi = if (hi_node != null) to_u64(l, expr(l, hi_node), type_of(l, hi_node)) else len;
-    emit(l, .{ .op = .CheckSlice, .a = lo, .b = hi, .c = len });
+    let before = at_check(l, n.tok);
+    if (checks_bounds(l))
+        emit(l, .{ .op = .CheckSlice, .a = lo, .b = hi, .c = len });
+    after_check(l, before);
     let out = alloc(l, result);
     let start = ptr_add(l, base, lo, elem_size);
     move(l, out, start, 8);

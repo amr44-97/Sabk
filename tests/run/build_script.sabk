@@ -1,5 +1,6 @@
 // build scripts: top-level #run code, run once the program checks, that
 // sets how it's built (std/build)
+// no-interp: it compiles a C file in, which the VM can't run
 #import "std/io";
 #import "std/build";
 #import "lib/needs_libm";

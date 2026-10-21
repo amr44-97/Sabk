@@ -14,6 +14,11 @@ build/stage0: bootstrap/sabk.c src/vm_ffi.c
 
 test: sabk
 	@tests/run.sh
+	@tests/run.sh --interp
+
+# only the run tests, through the VM (--interp) instead of the C
+interp: sabk
+	@tests/run.sh --interp
 
 # unit tests of single modules, checked against Python
 unit: sabk
@@ -37,4 +42,4 @@ seed: sabk
 clean:
 	rm -rf build sabk
 
-.PHONY: test unit bootstrap seed clean
+.PHONY: test interp unit bootstrap seed clean

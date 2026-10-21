@@ -14,18 +14,24 @@
 #                                  arguments
 #   errors/  sabk --emit-c file   stderr, must exit non-zero (std is ./std)
 #
-# usage: tests/run.sh [--update] [filter]
+# usage: tests/run.sh [--update] [--interp] [filter]
 #   --update  rewrite the .expected files from the current output
 #             (review the diff before committing them!)
+#   --interp  only run/, through `sabk --interp` (the VM) instead of
+#             --run, against the same .expected files: the VM's lowering
+#             must do what the C's does. A `// no-interp: why` line skips
+#             a test the VM can't run.
 #   filter    only run tests whose path contains this text
 
 cd "$(dirname "$0")/.." || exit 1
 
 update=0
+interp=0
 filter=""
 for arg in "$@"; do
   case "$arg" in
   --update) update=1 ;;
+  --interp) interp=1 ;;
   *) filter="$arg" ;;
   esac
 done
@@ -39,23 +45,32 @@ tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 pass=0
 fail=0
+skip=0
 
 for src in tests/*/*.sabk; do
   [[ -n "$filter" && "$src" != *"$filter"* ]] && continue
   suite=$(basename "$(dirname "$src")")
   [[ "$suite" == unit ]] && continue   # `make unit`: checked by their own scripts
+  if ((interp)); then
+    [[ "$suite" != run ]] && continue
+    if grep -q '^// no-interp:' "$src"; then
+      skip=$((skip + 1))
+      continue
+    fi
+  fi
   expected="${src%.sabk}.expected"
   case "$suite" in
-  lexer)  actual=$(./sabk --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  parser) actual=$(./sabk --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  resolve) actual=$(./sabk --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  types)  actual=$(./sabk --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  warnings) actual=$(./sabk --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
-  errors) actual=$(./sabk --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
+  lexer)  actual=$(./sabk --quiet --tokens "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  parser) actual=$(./sabk --quiet --ast "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  resolve) actual=$(./sabk --quiet --resolve --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  types)  actual=$(./sabk --quiet --types --std tests/resolve/std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  warnings) actual=$(./sabk --quiet --check --std std "$src" 2>&1); code=$?; ok=$((code == 0)) ;;
+  errors) actual=$(./sabk --quiet --emit-c --std std "$src" 2>&1 >/dev/null); code=$?; ok=$((code != 0)) ;;
   run)    # a `// args: a b c` line gives the program its arguments (quoted
           # as in a shell)
           eval "args=($(grep -m1 '^// args:' "$src" | sed 's|^// args: *||'))"
-          actual=$(./sabk --run --std std "$src" -- "${args[@]}" 2>&1); code=$?
+          how=$( ((interp)) && echo --interp || echo --run )
+          actual=$(./sabk --quiet "$how" --std std "$src" -- "${args[@]}" 2>&1); code=$?
           actual+=$'\n'"[exit $code]"; ok=1 ;;
   *) echo "unknown suite: $suite"; exit 1 ;;
   esac
@@ -79,5 +94,9 @@ for src in tests/*/*.sabk; do
 done
 
 echo
-echo "$pass passed, $fail failed"
+if ((interp)); then
+  echo "$pass passed, $fail failed through --interp ($skip skipped: no-interp)"
+else
+  echo "$pass passed, $fail failed"
+fi
 ((fail == 0))

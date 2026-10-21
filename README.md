@@ -146,7 +146,8 @@ or set `$CC`) and libffi. It's developed on Linux.
 
 ```
 make            builds ./sabk: build/stage0 from the seed, which builds it
-make test       runs the test suite
+make test       runs the test suite (the run tests twice: compiled, and through --interp)
+make interp     only the run tests, through --interp
 make bootstrap  ./sabk builds itself twice; both must write the same C
 make seed       refreshes bootstrap/sabk.c (after changing the compiler)
 make clean      removes build/ and ./sabk
@@ -159,10 +160,12 @@ make clean      removes build/ and ./sabk
 ./sabk main.sabk -o app     ... named `app`
 ./sabk --run main.sabk      build and run it
 ./sabk --run main.sabk -- a b   ... with arguments
+./sabk --interp main.sabk   run it in the interpreter, without a C compiler
 ./sabk --release main.sabk  build optimized
 ./sabk --emit-c main.sabk   print the generated C
 ./sabk --check main.sabk    only check for errors
-./sabk --stats ...           also print phase times and generic instances
+./sabk --quiet ...           don't print the phase times (printed after every compile)
+./sabk --stats ...           also print the functions written and the generic instances
 ```
 
 The standard library lives in [`std/`](std): `io`, `fmt` (formatting any

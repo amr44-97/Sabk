@@ -37,17 +37,19 @@ fn configure() {
 
 fn snprintf(buffer: *u8, size: usize, format: *u8, ...) -> i32 #foreign libc;
 
-enum Mode { Build, Run, EmitC, Check, Tokens, Ast, Resolve, Types }
+enum Mode { Build, Run, Interp, EmitC, Check, Tokens, Ast, Resolve, Types }
 
 /* ------------------------------------------------------------------ stats */
 
-// --stats: how long each phase took, in milliseconds
+// how long each phase took, in milliseconds: printed after every compile
+// (unless --quiet), with the generic instances under --stats
 struct Phase {
     name: string;
     ms: f64;
 }
 
 let show_stats = false;
+let quiet = false;
 let phase_times: [..]Phase;
 let phase_start: i64 = 0;
 let functions_total: isize = 0;
@@ -65,15 +67,17 @@ struct InstanceGroup {
 }
 
 fn print_stats(c: *Checker) {
+    if (!quiet || show_stats) {
+        let total = 0.0;
+        eprint("phases:\n");
+        for (p in phase_times) {
+            eprint(tformat("  %{<26} %{8.1f} ms\n", p.name, p.ms));
+            total += p.ms;
+        }
+        eprint(tformat("  %{<26} %{8.1f} ms\n", "total", total));
+    }
     if (!show_stats)
         return;
-    let total = 0.0;
-    eprint("phases:\n");
-    for (p in phase_times) {
-        eprint(tformat("  %{<26} %{8.1f} ms\n", p.name, p.ms));
-        total += p.ms;
-    }
-    eprint(tformat("  %{<26} %{8.1f} ms\n", "total", total));
     if (functions_total > 0)
         eprint(tformat("functions: % of % written out, the rest unused\n", functions_emitted, functions_total));
     if (c == null)
@@ -222,6 +226,8 @@ fn print_usage(exe: string) -> i32 {
     eprint("  (default)    build an executable named after <file>\n");
     eprint("  -o <path>    name the executable\n");
     eprint("  --run        build and run it, exiting with its exit code\n");
+    eprint("  --interp     run it in the compiler's interpreter (#run's), with\n");
+    eprint("               no C compiler: slower to run, nothing to build\n");
     eprint("  --release    build optimized, without debug info\n");
     eprint("  --sanitize   build with AddressSanitizer: a use of freed or\n");
     eprint("               reused memory stops the program with a report\n");
@@ -236,7 +242,10 @@ fn print_usage(exe: string) -> i32 {
     eprint("  --emit-c     print the generated C (--lines: with #line\n");
     eprint("               directives mapping it to the Sabk lines)\n");
     eprint("  --check      only check the program for errors\n");
-    eprint("  --stats      print phase times and generic instances to stderr\n");
+    eprint("  --quiet      don't print how long each phase took (it's on stderr\n");
+    eprint("               after every compile)\n");
+    eprint("  --stats      also print the functions written and the generic\n");
+    eprint("               instances\n");
     eprint("  --tokens     print the tokens of <file>\n");
     eprint("  --ast        print the syntax tree of <file> (no imports)\n");
     eprint("  --resolve    print the syntax tree of every module with names\n");
@@ -281,6 +290,8 @@ fn main() -> i32 {
             mode = .Types;
         } else if (arg == "--run") {
             mode = .Run;
+        } else if (arg == "--interp") {
+            mode = .Interp;
         } else if (arg == "--emit-c") {
             mode = .EmitC;
         } else if (arg == "--check") {
@@ -309,6 +320,8 @@ fn main() -> i32 {
             werror = true;
         } else if (arg == "--stats") {
             show_stats = true;
+        } else if (arg == "--quiet") {
+            quiet = true;
         } else if (arg == "-o" && i < argv.len) {
             out_path = argv[i];
             i++;
@@ -402,6 +415,9 @@ fn main() -> i32 {
         return 0;
     }
 
+    if (mode == .Interp)
+        return interpret(&r, &c);
+
     let g = make_codegen(&r, &c);
     g.line_directives = mode != .EmitC || lines;
     let c_source = generate(&g);
@@ -436,6 +452,7 @@ fn main() -> i32 {
             print_to(&command, " %", shell_quote(arg));
         let exit: Exit;
         if (ok) {
+            print_stats(&c); // the compile's times, then the program's output
             let ran, failed = run_shell(command as string);
             if (failed != .None)
                 exit.code = -1;
@@ -446,7 +463,6 @@ fn main() -> i32 {
         _ = remove_dir(dir);
         if (!ok)
             return 1;
-        print_stats(&c);
         return exit.code;
     }
 
@@ -456,6 +472,23 @@ fn main() -> i32 {
     let built = compile_c(c_source, exe_path, build);
     print_stats(&c);
     return if (built) 0 else 1;
+}
+
+// --interp: main run in the VM that runs #run code, as its executable
+// would run (see vm_run_program)
+fn interpret(r: *Resolver, c: *Checker) -> i32 {
+    let main_fn = program_main(r, c);
+    if (main_fn == null)
+        return 1;
+    if (c.build.c_files.len > 0) {
+        eprintln("[error]: --interp can't run C files a build script adds (%); build the program instead",
+                 join(c.build.c_files, ", "));
+        return 1;
+    }
+    if (c.vm == null)
+        c.vm = make_vm(c);
+    print_stats(c); // the compile's times, then the program's output
+    return vm_run_program(c.vm, main_fn);
 }
 
 fn dump_tokens(tokens: []Token) {
