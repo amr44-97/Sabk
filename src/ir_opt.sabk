@@ -3,7 +3,8 @@
 // own and copies it where it goes; these passes undo what that costs:
 // - a temporary written and then only copied, by the next instruction,
 //   into its place: the instruction writes the place itself
-// - a return right after a return
+// - code nothing reaches: after a return, a jump or a failure, up to the
+//   next instruction something jumps to
 // - slots nothing uses any more, dropped from the table (the frame keeps
 //   its layout)
 // Instructions are taken out, not changed in place, and the jumps are
@@ -18,7 +19,7 @@ fn ir_optimize(vm: *Vm, f: *VmFunction) {
     for (k in 0..keep.len)
         keep[k] = true;
     forward_writes(vm, f, keep);
-    single_returns(f, keep);
+    unreachable(f, keep);
     compact(f, keep);
     drop_unused_slots(vm, f);
 }
@@ -224,13 +225,21 @@ fn forward_writes(vm: *Vm, f: *VmFunction, keep: []bool) {
     _ = vm;
 }
 
-// a return right after a return (the one ending every function) that
-// nothing jumps to
-fn single_returns(f: *VmFunction, keep: []bool) {
+// what follows a return, a jump or a failure, until something jumps in
+// (the return ending every function after one already there, the defers
+// before it)
+fn unreachable(f: *VmFunction, keep: []bool) {
     let targets = jump_targets(f);
-    for (pc in 1..f.code.len)
-        if (f.code[pc].op == .Ret && f.code[pc - 1].op == .Ret && keep[pc - 1] && !targets[pc])
+    let reached = true;
+    for (pc in 0..f.code.len) {
+        if (targets[pc])
+            reached = true;
+        if (!reached)
             keep[pc] = false;
+        let op = f.code[pc].op;
+        if (op == .Ret || op == .Jmp || op == .Fail)
+            reached = false;
+    }
 }
 
 // the kept instructions, with the jumps renumbered (a jump to one taken out

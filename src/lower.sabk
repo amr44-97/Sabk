@@ -844,13 +844,34 @@ fn simple(l: *Lower, n: *Node) {
                 let v = values + (if (t.is_tuple) t.fields[slots[i]].offset as u32 else 0);
                 if (i < n.convs.len && n.convs[i] != null)
                     v = convert(l, v, from, n.convs[i]);
-                store(l, address(l, x), v, vm_size_of(l.vm, concrete(l.vm, x.ty)));
+                let direct = frame_place(l, x);
+                if (direct >= 0)
+                    move(l, direct as u32, v, vm_size_of(l.vm, concrete(l.vm, x.ty)));
+                else
+                    store(l, address(l, x), v, vm_size_of(l.vm, concrete(l.vm, x.ty)));
             }
             return;
         }
         let t = concrete(l.vm, target.ty);
-        let place = address(l, target);
         let op = n.tok.text;
+        let direct = frame_place(l, target);
+        if (direct >= 0) { // on the slot itself, not through its address
+            let at = direct as u32;
+            if (op == "=") {
+                move(l, at, expr(l, value), vm_size_of(l.vm, t));
+                return;
+            }
+            if (t.kind != .Ptr) {
+                let current = current_value(l, at, t, value);
+                let v = expr(l, value);
+                let b = assign_op(op);
+                if (b == .Shl || b == .Shr)
+                    v = to_u64(l, v, type_of(l, value));
+                bin(l, kind_of(t), b, at, current, v);
+                return;
+            }
+        }
+        let place = address(l, target);
         if (op == "=") {
             store(l, place, expr(l, value), vm_size_of(l.vm, t));
             return;
@@ -879,9 +900,54 @@ fn simple(l: *Lower, n: *Node) {
 }
 
 // x++ and x--
+// where `n` is when it's in the frame itself (a local variable, a field
+// of one held by value, and so on), so it's read and written there, not
+// through its address; -1 if it isn't (a global, through a pointer, an
+// element)
+fn frame_place(l: *Lower, n: *Node) -> i64 {
+    switch (n.kind) {
+    case .Grouped{inner}: return frame_place(l, inner);
+    case .Identifier:
+        if (n.decl == null)
+            return -1;
+        let slot, found = map_get(&l.locals, n.decl);
+        return if (found) slot as i64 else -1;
+    case .Member{object}:
+        if (n.decl != null) // a module's
+            return -1;
+        let base = concrete(l.vm, object.ty);
+        if (base.kind != .Struct && base.kind != .Union && base.kind != .Slice && base.kind != .DynArray)
+            return -1; // through a pointer, or an array's ptr or len
+        let at = frame_place(l, object);
+        if (at < 0)
+            return -1;
+        return at + member_offset(l, base, n) as i64;
+    default: return -1;
+    }
+}
+
+// the value at frame place `at`, read now: a copy when `later`, what's
+// evaluated after it, could change it (it calls something)
+fn current_value(l: *Lower, at: u32, t: *Type, later: *Node) -> u32 {
+    if (!has_call(later))
+        return at;
+    let copy = alloc(l, t);
+    move(l, copy, at, vm_size_of(l.vm, t));
+    return copy;
+}
+
 fn step(l: *Lower, target: *Node, down: bool) {
     let t = concrete(l.vm, target.ty);
     let k = kind_of(t);
+    let direct = frame_place(l, target);
+    if (direct >= 0 && t.kind != .Ptr) { // x++ on the slot itself
+        let at = direct as u32;
+        let one = if (is_float(k)) kind_slot(l, k) else konst(l, k, 1);
+        if (is_float(k))
+            emit(l, .{ .op = .Const, .kind = k, .a = one, .imm = float_bits(k, 1.0) });
+        bin(l, k, if (down) .Sub else .Add, at, at, one);
+        return;
+    }
     let place = address(l, target);
     let current = load(l, place, t);
     if (t.kind == .Ptr) { // p++, p--: by one value
